@@ -1,0 +1,39 @@
+# Test stack: the sandbox services from docker-compose.dev.yml on fixed localhost ports, for `bun test`.
+# Only ever used together with docker-compose.dev.yml:
+#   docker compose -p promoterstats-tests -f docker-compose.dev.yml -f docker-compose.test.yml up -d --wait hievents-db mailpit cdn
+# The app itself is not started here: the integration tests run `bun src/index.tsx` against these services.
+services:
+  hievents-db:
+    ports: !override
+      - "127.0.0.1:55432:5432"
+    # Over TCP and as the read-only role: healthy only once the seed and the role scripts have run
+    # (during initdb the server listens on the unix socket only, so a plain pg_isready passes too early).
+    healthcheck:
+      test: ["CMD-SHELL", "PGPASSWORD=change-me psql -h 127.0.0.1 -U promoter_stats -d hi-events -tAc 'SELECT 1 FROM promo_codes LIMIT 1'"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  mailpit:
+    # Replaces the dev port (8027) so the test stack can run next to a dev stack.
+    ports: !override
+      - "127.0.0.1:11025:1025"
+      - "127.0.0.1:18025:8025"
+    healthcheck:
+      test: ["CMD", "/mailpit", "readyz"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  cdn:
+    ports: !override
+      - "127.0.0.1:18080:80"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/event_cover/warehouse.png"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  # Not needed by the tests; keep it off the dev port if someone starts the whole file.
+  promoter-stats:
+    ports: !reset []

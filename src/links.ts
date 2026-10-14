@@ -29,12 +29,18 @@ export function saveLinkSettings(baseUrl: string, template: string) {
 
 /** Hi.Events' event slug: Laravel's Str::slug of the title. */
 export function slugify(text: string): string {
+  // Letters that do not decompose into a base letter plus an accent.
+  const ascii: Record<string, string> = { ß: 'ss', æ: 'ae', œ: 'oe', ø: 'o', ł: 'l', đ: 'd', þ: 'th' };
   return text
     .normalize('NFKD')
     .replace(/[̀-ͯ]/g, '')
     .replace(/@/g, ' at ')
     .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/[ßæœøłđþ]/g, (ch) => ascii[ch]!)
+    // Like Str::slug: dashes, underscores and spaces separate words; other punctuation is removed ("d'été" → "dete").
+    .replace(/[\s_\u2010-\u2015-]+/g, '-')
+    .replace(/[^a-z0-9-]+/g, '')
+    .replace(/-+/g, '-')
     .replace(/^-+|-+$/g, '');
 }
 
@@ -50,7 +56,8 @@ export function eventLink(event: { id: number; title: string }, code: string, al
   const [head, ...rest] = link.split('?');
   if (rest.length > 1) link = `${head}?${rest.join('&')}`;
   // Without an alias, drop an empty aff= rather than sending it.
-  return link.replace(/[?&]aff=(?=&|$)/, '').replace(/\?&/, '?');
+  // Keeps the "?" when aff= came first (…?aff=&promo_code=X → …?promo_code=X).
+  return link.replace(/([?&])aff=(&|$)/, (_, sep: string, next: string) => (next ? sep : '')).replace(/\?&/, '?');
 }
 
 export const aliasPattern = /^[a-z0-9][a-z0-9_-]{1,29}$/;

@@ -1,0 +1,4 @@
+[test]
+# Sets the environment (temporary DATA_DIR, APP_URL...) before any test imports src/, whose modules
+# read the config and open the SQLite database at import.
+preload = ["./test/setup.ts"]
