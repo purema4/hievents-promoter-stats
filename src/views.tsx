@@ -1,0 +1,2187 @@
+import type { Child } from 'hono/jsx';
+import { avatarOf, initials, maxAvatarBytes } from './avatars';
+import { accentWarnings, brandVersion, getBrand, maxLogoBytes, type Brand } from './brand';
+import { chartCss, RangeLinks, SalesChart, type Range } from './chart';
+import type { Leaderboard, Sort } from './leaderboard';
+import { sessionsFor, type DeviceSession } from './auth';
+import { hasTwoFactor } from './two-factor';
+import { describeAdjustment, type Adjustment } from './adjustments';
+import { alerts, type Prefs } from './alert-prefs';
+import type { Rewards } from './rewards';
+import { config } from './config';
+import type { PromoCodeListing } from './hievents';
+import { commissionPercentFor, type User } from './local-db';
+import { formatMoney, formatPercent } from './money';
+import { countPendingPayouts, type Balance, type PayoutRequest } from './payouts';
+import { PayoutHistory, RewardHistory } from './promoter-views';
+import { countPendingRewards, describeReward, type RewardRequest } from './rewards';
+import { unreadCount, type Notification } from './notifications';
+import { definitions, emailTypes, getReplyTo, getTemplate, isCustomized, type EmailType } from './email-templates';
+import type { EmailLogEntry } from './mail';
+
+export const css = `
+:root {
+  --bg: #f6f6f4; --surface: #ffffff; --text: #1b1b1a; --muted: #6b6b66; --border: #e3e3de;
+  --accent: #2f5bea; --accent-text: #ffffff; --danger: #c0392b; --ok: #1e7a46; --warn: #a05a00;
+  --chart: #2f5bea;
+  color-scheme: light;
+}
+/* Dark follows the device unless the account picked Light; picking Dark forces it. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #121211; --surface: #1c1c1a; --text: #ececea; --muted: #9a9a94; --border: #2e2e2b;
+    --accent: #6f8cff; --accent-text: #0b0b0a; --danger: #ff7a6b; --ok: #5fd08f; --warn: #f0b35a;
+    --chart: #6482f5;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #121211; --surface: #1c1c1a; --text: #ececea; --muted: #9a9a94; --border: #2e2e2b;
+  --accent: #6f8cff; --accent-text: #0b0b0a; --danger: #ff7a6b; --ok: #5fd08f; --warn: #f0b35a;
+  --chart: #6482f5;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+a { color: var(--accent); }
+header { background: var(--surface); border-bottom: 1px solid var(--border); }
+header .inner, main { max-width: 960px; margin: 0 auto; padding: 0 16px; }
+/* Room for the phone's status bar and notch when running as an installed app. */
+header { padding-top: env(safe-area-inset-top); position: sticky; top: 0; z-index: 20; }
+.topbar .inner { max-width: 1280px; flex-wrap: nowrap; height: 56px; min-height: 0; padding-top: 0; padding-bottom: 0; }
+.topbar .brand { min-width: 0; overflow: hidden; white-space: nowrap; }
+.menu-button { display: none; color: var(--text); padding: 4px; margin-left: -4px; }
+.topbar-end { display: flex; align-items: center; gap: 16px; margin-left: auto; }
+.topbar-account { display: inline-flex; }
+/* A standard-width app: header, sidebar and page sit in one centred column, even on very wide screens. */
+.shell { max-width: 1280px; margin: 0 auto; display: grid; grid-template-columns: 230px minmax(0, 1fr); align-items: start; }
+.sidebar { position: sticky; z-index: 30; top: calc(57px + env(safe-area-inset-top)); height: calc(100vh - 57px - env(safe-area-inset-top)); width: 230px; overflow-y: auto; padding: 16px 12px calc(16px + env(safe-area-inset-bottom)); background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; gap: 18px; }
+.sidebar .nav-me { display: none; }
+.sidebar a { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px; border-radius: 8px; color: var(--text); text-decoration: none; font-size: 15px; }
+.sidebar a:hover { background: var(--bg); }
+.sidebar a[aria-current] { background: color-mix(in srgb, var(--accent) 12%, var(--surface)); color: var(--accent); font-weight: 600; }
+.nav-group { display: grid; gap: 2px; }
+.nav-title { font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); padding: 0 10px 4px; }
+.nav-count { min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px; background: var(--danger); color: #fff; font: 700 11px/20px system-ui; text-align: center; }
+.nav-signout { margin-top: auto; padding: 0 10px; }
+.nav-close { display: none !important; }
+.nav-overlay { display: none; }
+body.with-nav main { margin: 0; max-width: none; padding-left: 32px; padding-right: 32px; }
+body.with-nav .site-footer { margin: 0; max-width: none; padding-left: 32px; }
+/* The account menu under the avatar. */
+.account-menu { position: relative; }
+.account-menu summary { list-style: none; cursor: pointer; display: inline-flex; border-radius: 50%; }
+.account-menu summary::-webkit-details-marker { display: none; }
+.account-menu summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.account-menu .menu { position: absolute; right: 0; top: calc(100% + 10px); z-index: 40; width: 240px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 12px 32px rgb(0 0 0 / 0.18); padding: 8px; display: grid; gap: 2px; }
+.account-menu .menu-who { padding: 8px 10px 10px; border-bottom: 1px solid var(--border); margin-bottom: 4px; display: grid; gap: 2px; }
+.account-menu .menu-who span { font-size: 13px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.account-menu .menu a, .account-menu .menu button { display: flex; justify-content: space-between; align-items: center; padding: 8px 10px; border-radius: 8px; color: var(--text); text-decoration: none; font: inherit; font-size: 15px; font-weight: 400; background: none; width: 100%; text-align: left; }
+.account-menu .menu a:hover, .account-menu .menu button:hover { background: var(--bg); }
+.account-menu .menu form { margin: 0; border-top: 1px solid var(--border); margin-top: 4px; padding-top: 4px; }
+@media (max-width: 899px) {
+  .menu-button { display: inline-flex; }
+  .shell { display: block; }
+  body.with-nav main { padding-left: max(16px, env(safe-area-inset-left)); padding-right: max(16px, env(safe-area-inset-right)); }
+  body.with-nav .site-footer { padding-left: 16px; }
+  .sidebar { position: fixed; top: 0; bottom: 0; left: 0; height: auto; width: min(300px, 86vw); padding-top: calc(16px + env(safe-area-inset-top)); padding-left: max(12px, env(safe-area-inset-left)); transform: translateX(-105%); transition: transform 0.2s ease; box-shadow: 0 0 40px rgb(0 0 0 / 0.25); }
+  .sidebar .nav-me { display: grid; }
+  .sidebar:target, .sidebar.open { transform: none; }
+  .nav-close { display: block !important; align-self: flex-end; font-size: 28px; line-height: 1; padding: 0 8px !important; }
+  .sidebar:target ~ .nav-overlay, .sidebar.open ~ .nav-overlay { display: block; position: fixed; inset: 0; z-index: 25; background: rgb(0 0 0 / 0.35); }
+  body.with-nav main, body.with-nav .site-footer { margin-left: auto; }
+}
+@media (prefers-reduced-motion: reduce) { .sidebar { transition: none; } }
+header .inner { display: flex; align-items: center; gap: 8px 16px; min-height: 56px; flex-wrap: wrap; padding-top: 10px; padding-bottom: 10px; }
+header .inner, main, .site-footer { padding-left: max(16px, env(safe-area-inset-left)); padding-right: max(16px, env(safe-area-inset-right)); }
+header nav { flex-wrap: wrap; }
+.nav-end { display: inline-flex; gap: 14px; align-items: center; }
+.avatar { width: 40px; height: 40px; border-radius: 50%; object-fit: cover; flex: none; background: var(--bg); }
+.avatar.small { width: 28px; height: 28px; }
+.avatar.large { width: 72px; height: 72px; }
+.avatar-initials { display: inline-grid; place-items: center; background: var(--accent); color: var(--accent-text); font-weight: 700; font-size: 15px; }
+.avatar.small.avatar-initials { font-size: 11px; }
+.avatar.large.avatar-initials { font-size: 26px; }
+.who { display: flex; align-items: center; gap: 12px; }
+.who h1 { margin: 0; }
+.photo-row { display: flex; gap: 14px; align-items: center; }
+header .brand { font-weight: 650; margin-right: auto; text-decoration: none; color: var(--text); display: flex; align-items: center; gap: 10px; }
+.cover-thumb { width: 64px; height: 64px; flex: none; object-fit: cover; border-radius: 8px; background: var(--bg); }
+.cover-hero { display: block; width: 100%; max-height: 260px; object-fit: cover; border-radius: 10px; margin-bottom: 16px; background: var(--bg); }
+.install-banner { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; margin-bottom: 20px; border-color: var(--accent); }
+.install-banner img { border-radius: 10px; flex: none; }
+.install-text { flex: 1 1 220px; display: grid; gap: 4px; }
+.install-actions { display: flex; gap: 12px; align-items: center; }
+.inline-icon { vertical-align: -3px; }
+.install-steps { margin: 16px 0; }
+.install-steps dl { display: grid; gap: 4px 0; margin: 0; }
+.install-steps dt { font-weight: 600; margin-top: 8px; }
+.install-steps dd { margin: 0; color: var(--muted); }
+.template-list { display: grid; gap: 10px; }
+a.template-item { display: flex; gap: 12px; align-items: center; justify-content: space-between; color: inherit; text-decoration: none; }
+a.template-item:hover { border-color: var(--accent); }
+.badge { font-size: 12px; font-weight: 600; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); }
+.badge.edited { color: var(--accent); border-color: var(--accent); }
+.email-editor { display: grid; gap: 24px; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); align-items: start; }
+iframe.email-preview { width: 100%; height: 720px; border: 1px solid var(--border); border-radius: 10px; background: #f3f3f0; }
+.placeholders code { font-size: 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 0 5px; margin: 2px 2px 2px 0; display: inline-block; }
+.form-actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+td.failed { color: var(--danger); }
+.welcome { max-width: 620px; margin: 0 auto; }
+.steps { display: flex; gap: 6px; margin: 0 0 20px; }
+.steps span { flex: 1; height: 4px; border-radius: 999px; background: var(--border); }
+.steps span.done { background: var(--accent); }
+.welcome-hero { text-align: center; padding: 8px 0 16px; }
+.welcome-hero .avatar { margin: 0 auto 12px; }
+.how { display: grid; gap: 12px; margin: 16px 0; }
+.how .card { display: flex; gap: 14px; align-items: flex-start; }
+.how .num { flex: none; width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; font-weight: 700; background: color-mix(in srgb, var(--accent) 14%, var(--surface)); color: var(--accent); }
+.welcome-actions { display: flex; gap: 14px; align-items: center; justify-content: space-between; flex-wrap: wrap; margin-top: 20px; }
+.card-actions { display: flex; gap: 8px; flex-wrap: wrap; border-top: 1px solid var(--border); padding-top: 10px; }
+button.small { padding: 6px 12px; font-size: 14px; }
+.links-card { margin-bottom: 20px; display: grid; gap: 10px; }
+.links-card h2 { margin: 0; }
+.link-row { display: grid; gap: 6px; }
+.link-field { display: flex; gap: 8px; flex-wrap: wrap; }
+.link-field input { flex: 1 1 240px; font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; }
+button.copied { background: var(--ok); color: #fff; }
+.dash-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; justify-content: space-between; }
+.dash-head h1 { margin: 0; }
+table.leaderboard th a { color: var(--muted); text-decoration: none; }
+table.leaderboard th a[aria-current] { color: var(--text); font-weight: 700; }
+table.leaderboard td.rank { width: 40px; }
+.rank-badge { display: inline-grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; font-weight: 700; font-size: 13px; color: var(--muted); }
+.rank-1 { background: #f2c94c; color: #3d2c00; }
+.rank-2 { background: #c9ced6; color: #22262b; }
+.rank-3 { background: #d69a5c; color: #33200c; }
+table.leaderboard a.who { color: inherit; text-decoration: none; gap: 10px; }
+.level-badge.tiny { font-size: 11px; padding: 0 7px; border-width: 1px; margin-left: 8px; vertical-align: 1px; }
+.device-list { display: grid; gap: 8px; }
+.device { display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+.device strong { display: block; }
+.qr { width: 200px; height: 200px; background: #fff; padding: 8px; border-radius: 10px; }
+.qr svg { width: 100%; height: 100%; display: block; }
+.secret { font: 600 15px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: 0.08em; word-break: break-all; }
+.recovery { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 16px; font: 600 15px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; padding: 12px 16px; background: var(--bg); border-radius: 10px; margin: 8px 0; }
+.setup { display: flex; gap: 20px; flex-wrap: wrap; align-items: flex-start; }
+.setup-steps { flex: 1 1 260px; display: grid; gap: 10px; }
+.adjust-grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); align-items: start; }
+.adjust-grid h3 { margin: 0; }
+table.alert-settings td.check-cell, table.alert-settings th.check-cell { text-align: center; width: 110px; }
+table.alert-settings input[type=checkbox] { width: 20px; height: 20px; }
+table.alert-settings .hint { display: block; font-size: 13px; color: var(--muted); }
+details.alert-box { margin-bottom: 20px; }
+details.alert-box > summary { cursor: pointer; font-weight: 600; padding: 4px 0 12px; }
+.bell { position: relative; display: inline-flex; color: var(--text); }
+.bell-count { position: absolute; top: -6px; right: -9px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: var(--danger); color: #fff; font: 700 11px/18px system-ui; text-align: center; }
+.notification-list { display: grid; gap: 8px; }
+a.notification { display: grid; gap: 2px; color: inherit; text-decoration: none; }
+a.notification:hover { border-color: var(--accent); }
+a.notification.unread { border-left: 4px solid var(--accent); }
+.push-box { display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; margin-bottom: 20px; }
+.push-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.push-devices { flex-basis: 100%; margin: 0; }
+.logo { height: 28px; width: auto; max-width: 140px; object-fit: contain; }
+.login-brand { display: flex; align-items: center; gap: 12px; }
+.login-brand .logo { height: 40px; max-width: 180px; }
+.site-footer { max-width: 960px; margin: 0 auto; padding: 0 16px 32px; }
+.swatch-row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+input[type=color] { width: 56px; height: 40px; padding: 2px; }
+.preview { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; padding: 16px; border-radius: 10px; border: 1px solid var(--border); }
+.preview-dark { background: #1c1c1a; color: #ececea; }
+.preview-dark button { background: var(--accent-dark); color: var(--accent-dark-text); }
+.preview-dark a { color: var(--accent-dark); }
+.warn { color: var(--warn); }
+.logo-preview { max-height: 60px; max-width: 220px; object-fit: contain; background: var(--bg); border-radius: 8px; padding: 6px; }
+header nav { display: flex; gap: 14px; align-items: center; font-size: 14px; }
+main { padding-top: 24px; padding-bottom: 48px; }
+h1 { font-size: 22px; margin: 0 0 4px; }
+h2 { font-size: 17px; margin: 32px 0 12px; }
+.muted { color: var(--muted); font-size: 13px; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
+.grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); margin: 20px 0; }
+.stat .value { font-size: 30px; font-weight: 650; font-variant-numeric: tabular-nums; }
+.stat .label { color: var(--muted); font-size: 13px; }
+.stat.highlight { border-color: var(--accent); }
+.stat.highlight .value { color: var(--accent); }
+.rows { display: grid; gap: 10px; }
+.row { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+.row .event { flex: 1 1 240px; min-width: 0; }
+.row .event strong { display: block; overflow-wrap: anywhere; }
+.row .numbers { display: flex; gap: 20px; margin-left: auto; font-variant-numeric: tabular-nums; }
+.row .numbers div { text-align: right; }
+.row .numbers .big { font-size: 22px; font-weight: 650; }
+.code { display: inline-block; font: 12px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 0 6px; margin: 2px 4px 2px 0; }
+.pending { color: var(--warn); }
+form.stack { display: grid; gap: 12px; max-width: 420px; }
+label { display: grid; gap: 4px; font-size: 13px; color: var(--muted); }
+label.check { display: flex; align-items: center; gap: 8px; color: var(--text); font-size: 14px; }
+input, textarea, select { font: inherit; color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 9px 11px; width: 100%; }
+input[type=checkbox], input[type=radio] { width: auto; }
+textarea { min-height: 80px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
+button { font: inherit; font-weight: 600; background: var(--accent); color: var(--accent-text); border: 0; border-radius: 8px; padding: 9px 16px; cursor: pointer; justify-self: start; }
+a.button { display: inline-block; font-weight: 600; background: var(--accent); color: var(--accent-text); border-radius: 8px; padding: 9px 16px; text-decoration: none; }
+button.link { background: none; color: var(--accent); padding: 0; font-weight: 400; }
+button.danger { background: var(--danger); }
+.flash { border-radius: 8px; padding: 10px 14px; margin-bottom: 16px; border: 1px solid; }
+.flash.error { color: var(--danger); border-color: var(--danger); }
+.flash.ok { color: var(--ok); border-color: var(--ok); }
+.table-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+th { color: var(--muted); font-weight: 500; font-size: 13px; }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+.login { max-width: 380px; margin: 10vh auto 0; }
+.two-col { display: grid; gap: 24px; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); align-items: start; }
+.inline { margin: 0; }
+.codes-line { margin-bottom: 12px; }
+h2.first { margin-top: 0; }
+.event-card { display: grid; gap: 12px; }
+.event-card:hover { border-color: var(--accent); }
+a.event-card-main { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; color: inherit; text-decoration: none; }
+a.event-card-main .event-main { flex: 1 1 260px; min-width: 0; display: flex; gap: 12px; align-items: center; }
+a.event-card-main .event { flex: 1; min-width: 0; display: grid; gap: 2px; }
+a.event-card-main .event strong { overflow-wrap: anywhere; }
+a.event-card-main .numbers { display: flex; gap: 20px; margin-left: auto; font-variant-numeric: tabular-nums; }
+a.event-card-main .numbers > span { display: grid; text-align: right; }
+a.event-card-main .big { font-size: 22px; font-weight: 650; }
+.crumbs { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+.prev-next { display: flex; gap: 16px; margin-left: auto; }
+.status { display: inline-block; font-size: 12px; font-weight: 600; padding: 1px 8px; border-radius: 999px; border: 1px solid; }
+.status.pending { color: var(--warn); }
+.status.paid { color: var(--ok); }
+.status.rejected { color: var(--muted); }
+table.balance td { border: 0; padding: 4px 0; }
+table.balance tr.total td { border-top: 1px solid var(--border); font-weight: 650; padding-top: 8px; }
+.payout-block { margin-bottom: 16px; }
+.payout-actions { display: grid; gap: 8px; min-width: 220px; }
+.payout-actions form { display: flex; gap: 6px; }
+.payout-actions input { padding: 6px 8px; }
+.payout-actions button { padding: 6px 12px; white-space: nowrap; }
+button.secondary { background: var(--bg); color: var(--text); border: 1px solid var(--border); }
+input.code-input { font: 600 22px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: 0.3em; text-align: center; }
+.waiting { display: flex; gap: 10px; align-items: center; font-size: 14px; }
+.waiting::before { content: ''; flex: none; width: 10px; height: 10px; border-radius: 50%; background: var(--accent); animation: pulse 1.4s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: 0.25; } }
+@media (prefers-reduced-motion: reduce) { .waiting::before { animation: none; } }
+details.code-fallback { margin: 8px 0 16px; }
+h3 { font-size: 15px; margin: 0 0 12px; }
+.progress { height: 8px; border-radius: 999px; background: var(--bg); border: 1px solid var(--border); overflow: hidden; margin: 10px 0 6px; }
+.progress-fill { height: 100%; background: var(--chart); border-radius: 999px; }
+.level-card { margin-bottom: 20px; }
+.level-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.level-badge { font-weight: 700; font-size: 14px; padding: 2px 12px; border-radius: 999px; border: 2px solid var(--level, var(--border)); background: color-mix(in srgb, var(--level, var(--border)) 14%, var(--surface)); }
+.level-rookie { --level: #8a8a84; }
+.level-bronze { --level: #b06d2c; }
+.level-silver { --level: #8f97a3; }
+.level-gold { --level: #c9971a; }
+.level-platinum { --level: #4f8f9e; }
+.level-diamond { --level: var(--accent); }
+.level-next { margin: 0 0 8px; }
+.unlocks { list-style: none; padding: 0; margin: 0 0 10px; display: grid; gap: 4px; font-size: 14px; color: var(--muted); }
+.unlocks li::before { content: '○'; display: inline-block; width: 1.4em; }
+.unlocks li.ready { color: var(--text); font-weight: 600; }
+.unlocks li.ready::before { content: '●'; color: var(--ok); }
+.chip { display: inline-block; font-size: 12px; font-weight: 600; padding: 1px 8px; margin: 2px 0; border-radius: 999px; color: var(--ok); border: 1px solid var(--ok); }
+.reward-card { display: flex; gap: 16px; align-items: center; justify-content: space-between; margin-bottom: 20px; }
+.reward-card > div { flex: 1; }
+.reward-list { display: grid; gap: 14px; }
+.reward-row { display: grid; gap: 8px; }
+.reward-form { display: grid; gap: 8px; grid-template-columns: auto 1fr auto; }
+@media (max-width: 480px) { .reward-form { grid-template-columns: 1fr; } }
+.account-form { display: grid; gap: 16px; margin-bottom: 8px; }
+.stack-card { display: grid; gap: 12px; align-content: start; }
+.stack-card h2 { margin: 8px 0 0; }
+.stack-card h2.first { margin-top: 0; }
+.field-row { display: grid; gap: 12px; grid-template-columns: 1fr 1fr; }
+.theme-choice { display: flex; gap: 16px; flex-wrap: wrap; }
+.profile dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 16px; margin: 0; font-size: 14px; }
+.profile dt { color: var(--muted); }
+.profile dd { margin: 0; overflow-wrap: anywhere; }
+details.code-fallback summary { cursor: pointer; color: var(--muted); font-size: 14px; margin-bottom: 12px; }
+${chartCss}
+`;
+
+// Changes whenever the CSS does, so browsers never keep a stale copy.
+export const cssVersion = new Bun.CryptoHasher('sha256').update(css).digest('hex').slice(0, 10);
+
+export function formatDate(date: Date | null, timezone: string | null): string {
+  if (!date) return 'No date';
+  try {
+    return new Intl.DateTimeFormat('en-CA', { dateStyle: 'medium', timeStyle: 'short', timeZone: timezone ?? 'UTC' }).format(date);
+  } catch {
+    return new Intl.DateTimeFormat('en-CA', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'UTC' }).format(date);
+  }
+}
+
+
+function BrandMark(props: { brand: Brand }) {
+  return (
+    <>
+      {props.brand.logoType && <img class="logo" src={`/brand/logo?v=${props.brand.updatedAt}`} alt="" />}
+      <span>{props.brand.name}</span>
+    </>
+  );
+}
+
+export function Layout(props: { title: string; user?: User; children: Child; hideInstallBanner?: boolean }) {
+  const brand = getBrand();
+  return (
+    <html lang="en" data-theme={props.user?.theme === 'light' || props.user?.theme === 'dark' ? props.user.theme : undefined}>
+      <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+        <meta name="robots" content="noindex" />
+        <title>{props.title === brand.name ? brand.name : `${props.title} · ${brand.name}`}</title>
+        <link rel="stylesheet" href={`/app.css?v=${cssVersion}`} />
+        <link rel="stylesheet" href={`/brand.css?v=${brandVersion()}`} />
+        <link rel="manifest" href="/manifest.webmanifest" />
+        <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+        <link rel="apple-touch-icon" href="/icon-180.png" />
+        <meta name="theme-color" content={brand.accent} />
+        <meta name="apple-mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-title" content={brand.name} />
+        <script src="/app.js" defer></script>
+      </head>
+      <body class={props.user ? 'with-nav' : undefined}>
+        {props.user && (
+          <header class="topbar">
+            <div class="inner">
+              {/* Opens the sidebar on phones; works without scripts through the #sidebar target. */}
+              <a class="menu-button" href="#sidebar" aria-label="Menu" aria-controls="sidebar">
+                <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
+                  <path fill="currentColor" d="M3 6h18v2H3V6Zm0 5h18v2H3v-2Zm0 5h18v2H3v-2Z" />
+                </svg>
+              </a>
+              <a class="brand" href="/">
+                <BrandMark brand={brand} />
+              </a>
+              <span class="topbar-end">
+                <Bell userId={props.user.id} />
+                <AccountMenu user={props.user} />
+              </span>
+            </div>
+          </header>
+        )}
+        {props.user ? (
+          <div class="shell">
+            <Sidebar user={props.user} />
+            <a class="nav-overlay" href="#" aria-label="Close the menu" tabindex={-1}></a>
+            <div>
+              <main>
+                {!props.user.app_installed_at && !props.hideInstallBanner && <InstallBanner brand={brand} />}
+                {props.children}
+              </main>
+              {brand.footer && <footer class="site-footer muted">{brand.footer}</footer>}
+            </div>
+          </div>
+        ) : (
+          <>
+            <main>{props.children}</main>
+            {brand.footer && <footer class="site-footer muted">{brand.footer}</footer>}
+          </>
+        )}
+      </body>
+    </html>
+  );
+}
+
+const shareIcon = (
+  <svg class="inline-icon" viewBox="0 0 24 24" width="16" height="16" aria-label="Share">
+    <path fill="currentColor" d="M12 2 7.5 6.5l1.4 1.4L11 5.8V15h2V5.8l2.1 2.1 1.4-1.4L12 2Zm-7 9v9a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-9h-2v9H7v-9H5Z" />
+  </svg>
+);
+
+// Shown by /app.js only where it applies: not inside the installed app, and not after "Not now".
+function InstallBanner(props: { brand: Brand }) {
+  return (
+    <div class="card install-banner" data-install-banner hidden>
+      <img src="/icon-192.png" alt="" width="44" height="44" />
+      <div class="install-text">
+        <strong>Install the {props.brand.name} app</strong>
+        <span class="muted">
+          It works like an app on your phone: open it from your home screen and get notifications for payouts, rewards
+          and milestones.
+        </span>
+        <span data-install-ios hidden>
+          On iPhone: tap {shareIcon} <strong>Share</strong> in Safari, then <strong>Add to Home Screen</strong>.
+        </span>
+      </div>
+      <div class="install-actions">
+        <button type="button" data-install-button hidden>
+          Install
+        </button>
+        <button type="button" class="link" data-install-done>
+          I already installed it
+        </button>
+        <button type="button" class="link" data-install-dismiss>
+          Not now
+        </button>
+      </div>
+    </div>
+  );
+}
+
+export function InstallSteps() {
+  return (
+    <div class="card stack-card install-steps">
+      <h2 class="first">Install the app</h2>
+      <p class="muted">
+        This site is an app you can install (a PWA). Installed, it opens from your home screen like any other app and
+        can send you notifications.
+      </p>
+      <dl>
+        <dt>iPhone or iPad</dt>
+        <dd>
+          Open this site in Safari, tap {shareIcon} <strong>Share</strong>, then <strong>Add to Home Screen</strong>.
+          Open it from the home screen; notifications only work there.
+        </dd>
+        <dt>Android</dt>
+        <dd>
+          In Chrome, tap <strong>Install</strong> on the banner, or open the ⋮ menu and choose{' '}
+          <strong>Install app</strong> (or <strong>Add to Home screen</strong>).
+        </dd>
+        <dt>Computer</dt>
+        <dd>
+          In Chrome or Edge, click the install icon at the right of the address bar, or the menu, then{' '}
+          <strong>Install</strong>.
+        </dd>
+      </dl>
+      <p class="muted">After installing, sign in once in the app and turn on notifications from the bell.</p>
+    </div>
+  );
+}
+
+export function Avatar(props: { user: User; size?: 'small' | 'large' }) {
+  const avatar = avatarOf(props.user);
+  const cls = `avatar${props.size ? ` ${props.size}` : ''}`;
+  return avatar ? (
+    <img class={cls} src={`/avatar/${avatar.userId}?v=${avatar.version}`} alt="" />
+  ) : (
+    <span class={`${cls} avatar-initials`} aria-hidden="true">
+      {initials(props.user.name)}
+    </span>
+  );
+}
+
+function Bell(props: { userId: number }) {
+  const unread = unreadCount(props.userId);
+  return (
+    <a class="bell" href="/notifications" aria-label={unread ? `Notifications, ${unread} unread` : 'Notifications'}>
+      <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+        <path
+          fill="currentColor"
+          d="M12 22a2.5 2.5 0 0 0 2.45-2h-4.9A2.5 2.5 0 0 0 12 22Zm7-6V11a7 7 0 0 0-5.5-6.84V3.5a1.5 1.5 0 0 0-3 0v.66A7 7 0 0 0 5 11v5l-2 2v1h18v-1l-2-2Z"
+        />
+      </svg>
+      {unread > 0 && <span class="bell-count">{unread > 99 ? '99+' : unread}</span>}
+    </a>
+  );
+}
+
+// Opens under the avatar; a <details> element, so it works with the keyboard and without scripts.
+function AccountMenu(props: { user: User }) {
+  const u = props.user;
+  return (
+    <details class="account-menu">
+      <summary aria-label="Your account">
+        <Avatar user={u} size="small" />
+      </summary>
+      <div class="menu">
+        <div class="menu-who">
+          <strong>{u.name}</strong>
+          <span>{u.email}</span>
+        </div>
+        <a href="/notifications">Notifications {count(unreadCount(u.id))}</a>
+        <a href="/account">Account</a>
+        <a href="/account/security">Security</a>
+        <form method="post" action="/logout">
+          <button type="submit">Sign out</button>
+        </form>
+      </div>
+    </details>
+  );
+}
+
+function NavGroup(props: { title: string; children: Child }) {
+  return (
+    <div class="nav-group">
+      <div class="nav-title">{props.title}</div>
+      {props.children}
+    </div>
+  );
+}
+
+const count = (n: number) => (n > 0 ? <span class="nav-count">{n > 99 ? '99+' : n}</span> : null);
+
+// One grouped menu: a fixed sidebar on computers, a slide-in panel on phones. /app.js marks the
+// current page.
+function Sidebar(props: { user: User }) {
+  const u = props.user;
+  const unread = unreadCount(u.id);
+  return (
+    <nav class="sidebar" id="sidebar" aria-label="Main">
+      <a class="nav-close" href="#" aria-label="Close the menu">
+        ×
+      </a>
+      {u.is_admin ? (
+        <>
+          <NavGroup title="Overview">
+            <a href="/admin/dashboard">Dashboard</a>
+            <a href="/admin/payouts">Requests {count(countPendingPayouts() + countPendingRewards())}</a>
+          </NavGroup>
+          <NavGroup title="Promoters">
+            <a href="/admin">All promoters</a>
+          </NavGroup>
+          <NavGroup title="Settings">
+            <a href="/admin/branding">Branding</a>
+            <a href="/admin/emails">Emails</a>
+            <a href="/admin/links">Event links</a>
+          </NavGroup>
+        </>
+      ) : (
+        <NavGroup title="My sales">
+          <a href="/">Dashboard</a>
+          <a href="/payouts">Payouts &amp; rewards</a>
+        </NavGroup>
+      )}
+      {/* On computers these live in the avatar menu; the phone panel keeps them too. */}
+      <div class="nav-me">
+        <NavGroup title="Me">
+          <a href="/notifications">Notifications {count(unread)}</a>
+          <a href="/account">Account</a>
+          <a href="/account/security">Security</a>
+        </NavGroup>
+        <form class="nav-signout" method="post" action="/logout">
+          <button class="link" type="submit">
+            Sign out
+          </button>
+        </form>
+      </div>
+    </nav>
+  );
+}
+
+export function Flash(props: { error?: string; ok?: string }) {
+  return (
+    <>
+      {props.error && <div class="flash error">{props.error}</div>}
+      {props.ok && <div class="flash ok">{props.ok}</div>}
+    </>
+  );
+}
+
+export function LoginPage(props: {
+  error?: string;
+  email?: string;
+  sent?: boolean;
+  withPassword?: boolean;
+  offline?: boolean;
+}) {
+  return (
+    <Layout title={props.offline ? 'Offline' : 'Sign in'}>
+      <div class="login card">
+        <h1 class="login-brand">
+          <BrandMark brand={getBrand()} />
+        </h1>
+        {props.offline ? (
+          <p class="muted">{props.error}</p>
+        ) : props.sent ? (
+          <>
+            <p>Check your email.</p>
+            <p class="muted">
+              If <strong>{props.email}</strong> belongs to a promoter account, a sign-in link is on its way. It can take a
+              minute, and it may land in spam.
+            </p>
+            <p class="waiting" data-wait-login>
+              Open the link on any device. This page signs in by itself as soon as you do.
+            </p>
+            <Flash error={props.error} />
+            <details class="code-fallback" open={!!props.error}>
+              <summary>Or type the 6-digit code from the email</summary>
+            <form class="stack" method="post" action="/login/code">
+              <input type="hidden" name="email" value={props.email ?? ''} />
+              <label>
+                Code
+                <input
+                  class="code-input"
+                  name="code"
+                  inputmode="numeric"
+                  autocomplete="one-time-code"
+                  pattern="[0-9]{6}"
+                  maxlength={6}
+                  required
+                />
+              </label>
+              <button type="submit">Sign in</button>
+            </form>
+            </details>
+            <p class="muted">
+              <a href="/login">Use a different email</a>
+            </p>
+          </>
+        ) : props.withPassword ? (
+          <>
+            <Flash error={props.error} />
+            <form class="stack" method="post" action="/login">
+              <label>
+                Email
+                <input type="email" name="email" value={props.email ?? ''} autocomplete="username" required autofocus />
+              </label>
+              <label>
+                Password
+                <input type="password" name="password" autocomplete="current-password" required />
+              </label>
+              <button type="submit">Sign in</button>
+            </form>
+            <p class="muted">
+              <a href="/login">Email me a link instead</a>
+            </p>
+          </>
+        ) : (
+          <>
+            {getBrand().loginMessage && <p>{getBrand().loginMessage}</p>}
+            <p class="muted">Enter your email and we will send you a link to sign in. No password needed.</p>
+            <Flash error={props.error} />
+            <form class="stack" method="post" action="/login/link">
+              <label>
+                Email
+                <input type="email" name="email" value={props.email ?? ''} autocomplete="email" required autofocus />
+              </label>
+              <button type="submit">Email me a sign-in link</button>
+            </form>
+            <p class="muted">
+              <a href="/login?method=password">Sign in with a password</a>
+            </p>
+          </>
+        )}
+      </div>
+    </Layout>
+  );
+}
+
+// Mail scanners (Outlook Safe Links and similar) open links ahead of the user. They fetch this page
+// but do not run scripts, so the single-use token is only spent when /app.js submits the form in a
+// real browser, which happens instantly. The button is the fallback when scripts are off.
+export function LoginConfirmPage(props: { token: string }) {
+  return (
+    <Layout title="Signing in">
+      <div class="login card">
+        <h1 class="login-brand">
+          <BrandMark brand={getBrand()} />
+        </h1>
+        <p class="muted">Signing you in…</p>
+        <form class="stack" method="post" action="/login/verify" data-auto-submit>
+          <input type="hidden" name="token" value={props.token} />
+          <button type="submit">Continue</button>
+        </form>
+      </div>
+    </Layout>
+  );
+}
+
+function timeAgo(epochSeconds: number): string {
+  const minutes = Math.max(0, Math.round((Date.now() / 1000 - epochSeconds) / 60));
+  return minutes < 1 ? 'just now' : minutes === 1 ? '1 minute ago' : `${minutes} minutes ago`;
+}
+
+// Shown after a link is opened somewhere other than the browser or app that asked for it.
+export function ApproveDevicePage(props: { request?: { rowId: number; from: string | null; at: number }; done?: boolean }) {
+  return (
+    <Layout title="Sign in">
+      <div class="login card">
+        <h1>You're signed in</h1>
+        {props.request ? (
+          <>
+            <p>
+              Also sign in the device that asked for this link? It was requested {timeAgo(props.request.at)} from{' '}
+              <strong>{props.request.from ?? 'another device'}</strong>, for example the installed app on your phone.
+            </p>
+            <p class="muted">Only say yes if you asked for it yourself just now.</p>
+            <form class="stack" method="post" action="/login/approve">
+              <input type="hidden" name="request" value={String(props.request.rowId)} />
+              <button type="submit" name="answer" value="yes">
+                Yes, sign it in
+              </button>
+              <button class="secondary" type="submit" name="answer" value="no">
+                No, only this browser
+              </button>
+            </form>
+          </>
+        ) : props.done ? (
+          <p>Done. Go back to the app or the other device: it signs in by itself within a few seconds.</p>
+        ) : (
+          <p class="muted">
+            That request has expired. On the other device, ask for a new link. <a href="/">Continue here</a>
+          </p>
+        )}
+      </div>
+    </Layout>
+  );
+}
+
+export function AccountPage(props: { user: User; error?: string; ok?: string }) {
+  const u = props.user;
+  const theme = u.theme ?? 'system';
+  return (
+    <Layout title="Account" user={u}>
+      <h1>Account</h1>
+      <p class="muted">
+        Signed in as {u.email}.{u.password_hash ? '' : ' You sign in with a link sent to this email; to change it, ask the team.'}
+      </p>
+      <Flash error={props.error} ok={props.ok} />
+
+      <form class="account-form" method="post" action="/account/profile" enctype="multipart/form-data">
+        <div class="two-col">
+          <div class="card stack-card">
+            <h2 class="first">About you</h2>
+            <div class="photo-row">
+              <Avatar user={u} size="large" />
+              <div class="muted">
+                {u.avatar_source === 'upload'
+                  ? 'Your uploaded photo.'
+                  : u.avatar_source === 'instagram'
+                    ? `Your Instagram photo (${u.avatar_for ? `@${u.avatar_for}` : ''}), refreshed weekly.`
+                    : 'Add your Instagram below to use its photo, or upload one.'}
+              </div>
+            </div>
+            <label>
+              Upload a photo instead (PNG, JPEG or WebP, up to {Math.round(maxAvatarBytes / 1024 / 1024)} MB)
+              <input type="file" name="photo" accept="image/png,image/jpeg,image/webp" />
+            </label>
+            {u.avatar_source === 'upload' && (
+              <label class="check">
+                <input type="checkbox" name="use_instagram_photo" value="1" /> Remove my photo and use my Instagram one
+              </label>
+            )}
+            <div class="field-row">
+              <label>
+                First name
+                <input name="first_name" value={u.first_name ?? ''} autocomplete="given-name" maxlength={60} />
+              </label>
+              <label>
+                Last name
+                <input name="last_name" value={u.last_name ?? ''} autocomplete="family-name" maxlength={60} />
+              </label>
+            </div>
+            <label>
+              Phone
+              <input name="phone" type="tel" value={u.phone ?? ''} autocomplete="tel" maxlength={30} />
+            </label>
+            <label>
+              City or region
+              <input name="city" value={u.city ?? ''} autocomplete="address-level2" maxlength={80} />
+            </label>
+            <label>
+              Instagram
+              <input name="instagram" value={u.instagram ?? ''} placeholder="@yourname" maxlength={60} />
+            </label>
+            <label>
+              Promoter alias (in your links as aff=…; letters, numbers, - and _)
+              <input name="alias" value={u.alias ?? ''} pattern="[a-zA-Z0-9][a-zA-Z0-9_-]{1,29}" maxlength={30} required />
+            </label>
+          </div>
+          <div class="card stack-card">
+            <h2 class="first">Payouts</h2>
+            <label>
+              Preferred payout method
+              <select name="payout_method">
+                {config.payoutMethods.map((m) => (
+                  <option value={m} selected={m === (u.payout_method ?? config.payoutMethods[0])}>
+                    {m}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Payout email or account
+              <input name="payout_details" value={u.payout_details ?? ''} placeholder={u.email} maxlength={200} />
+            </label>
+            <p class="muted">Used to fill in your payout requests. You can still change it per request.</p>
+
+            <h2>Appearance</h2>
+            <div class="theme-choice" role="radiogroup" aria-label="Theme">
+              {(['system', 'light', 'dark'] as const).map((t) => (
+                <label class="check">
+                  <input type="radio" name="theme" value={t} checked={theme === t} />
+                  {t === 'system' ? 'Same as my device' : t === 'light' ? 'Light' : 'Dark'}
+                </label>
+              ))}
+            </div>
+          </div>
+        </div>
+        <button type="submit">Save</button>
+      </form>
+
+      <InstallSteps />
+
+      {u.password_hash ? <PasswordForm /> : null}
+    </Layout>
+  );
+}
+
+function PasswordForm() {
+  return (
+    <>
+      <h2>Change password</h2>
+      <form class="stack" method="post" action="/account/password">
+        <label>
+          Current password
+          <input type="password" name="current" autocomplete="current-password" required />
+        </label>
+        <label>
+          New password (at least 10 characters)
+          <input type="password" name="password" autocomplete="new-password" minlength={10} required />
+        </label>
+        <button type="submit">Update password</button>
+      </form>
+    </>
+  );
+}
+
+function CommissionField(props: { value: number | null }) {
+  return (
+    <label>
+      Commission % (leave empty for the default, {formatPercent(config.commissionPercent)})
+      <input
+        type="number"
+        name="commission_percent"
+        min="0"
+        max="100"
+        step="0.01"
+        value={props.value === null ? '' : String(props.value)}
+        placeholder={String(config.commissionPercent)}
+      />
+    </label>
+  );
+}
+
+export function AdminPage(props: {
+  user: User;
+  promoters: (User & { codes: string[] })[];
+  promoCodes: PromoCodeListing[];
+  owners: Map<string, string[]>;
+  error?: string;
+  ok?: string;
+}) {
+  return (
+    <Layout title="Promoters" user={props.user}>
+      <h1>Promoters</h1>
+      <p class="muted">
+        Each promoter sees the sales of the promo codes assigned to them, across all events, and their commission. The
+        default commission is {formatPercent(config.commissionPercent)}.
+      </p>
+      <Flash error={props.error} ok={props.ok} />
+
+      <div class="two-col">
+        <div class="card table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Codes</th>
+                <th class="num">Commission</th>
+              </tr>
+            </thead>
+            <tbody>
+              {props.promoters.map((p) => (
+                <tr>
+                  <td>
+                    <div class="who">
+                      <Avatar user={p} size="small" />
+                      <div>
+                        <a href={`/admin/promoters/${p.id}`}>{p.name}</a>
+                        {p.is_admin ? <span class="muted"> (admin)</span> : null}
+                        <div class="muted">
+                          {p.email}
+                          {p.alias ? ` · aff=${p.alias}` : ''}
+                        </div>
+                      </div>
+                    </div>
+                  </td>
+                  <td>{p.codes.length ? p.codes.map((c) => <span class="code">{c}</span>) : <span class="muted">None</span>}</td>
+                  <td class="num">{formatPercent(commissionPercentFor(p))}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <div class="card">
+          <h2 class="first">Add a promoter</h2>
+          <form class="stack" method="post" action="/admin/promoters">
+            <label>
+              Name
+              <input name="name" required />
+            </label>
+            <label>
+              Email
+              <input type="email" name="email" required />
+            </label>
+            <label>
+              Promo codes (comma or space separated, case does not matter)
+              <textarea name="codes" />
+            </label>
+            <CommissionField value={null} />
+            <label class="check">
+              <input type="checkbox" name="invite" value="1" checked /> Email them a sign-in link now
+            </label>
+            <label class="check">
+              <input type="checkbox" name="is_admin" value="1" /> Admin (can manage promoters)
+            </label>
+            <button type="submit">Create promoter</button>
+          </form>
+        </div>
+      </div>
+
+      <h2>Promo codes in Hi.Events</h2>
+      <div class="card table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Code</th>
+              <th>Event</th>
+              <th class="num">Orders</th>
+              <th>Assigned to</th>
+            </tr>
+          </thead>
+          <tbody>
+            {props.promoCodes.map((pc) => (
+              <tr>
+                <td>
+                  <span class="code">{pc.code}</span>
+                </td>
+                <td>
+                  {pc.event_title}
+                  <div class="muted">{formatDate(pc.event_start, pc.event_timezone)}</div>
+                </td>
+                <td class="num">{pc.order_usage_count}</td>
+                <td>{props.owners.get(pc.code.toLowerCase())?.join(', ') ?? <span class="muted">Nobody</span>}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </Layout>
+  );
+}
+
+export function PromoterPage(props: {
+  user: User;
+  promoter: User;
+  codes: string[];
+  balances: Balance[];
+  payouts: PayoutRequest[];
+  rewardRequests: RewardRequest[];
+  rewards: Rewards;
+  adjustments: Adjustment[];
+  error?: string;
+  ok?: string;
+}) {
+  const p = props.promoter;
+  const currency = props.balances[0]?.currency ?? 'CAD';
+  return (
+    <Layout title={p.name} user={props.user}>
+      <p class="muted">
+        <a href="/admin">Promoters</a> / {p.name}
+      </p>
+      <div class="who">
+        <Avatar user={p} size="large" />
+        <h1>{p.name}</h1>
+      </div>
+      <Flash error={props.error} ok={props.ok} />
+
+      <div class="two-col">
+        <div class="card">
+          <h2 class="first">Details and codes</h2>
+          <form class="stack" method="post" action={`/admin/promoters/${p.id}`}>
+            <label>
+              Name
+              <input name="name" value={p.name} required />
+            </label>
+            <label>
+              Email
+              <input type="email" name="email" value={p.email} required />
+            </label>
+            <label>
+              Promo codes
+              <textarea name="codes">{props.codes.join(', ')}</textarea>
+            </label>
+            <label>
+              Alias (in their links as aff=…; they can change it too)
+              <input name="alias" value={p.alias ?? ''} pattern="[a-zA-Z0-9][a-zA-Z0-9_-]{1,29}" maxlength={30} required />
+            </label>
+            <CommissionField value={p.commission_percent} />
+            <label class="check">
+              <input type="checkbox" name="is_admin" value="1" checked={!!p.is_admin} /> Admin
+            </label>
+            <button type="submit">Save</button>
+          </form>
+        </div>
+
+        <div class="card">
+          <h2 class="first">Sign-in link</h2>
+          <p class="muted">
+            Emails {p.email} a link that signs them in, valid {config.inviteLinkDays} days. Promoters can also request one
+            themselves on the sign-in page.
+          </p>
+          <form method="post" action={`/admin/promoters/${p.id}/invite`}>
+            <button type="submit">Email a sign-in link</button>
+          </form>
+          <h2>Delete</h2>
+          <form class="stack" method="post" action={`/admin/promoters/${p.id}/delete`}>
+            <label class="check">
+              <input type="checkbox" name="confirm" value="1" required /> Yes, delete {p.name}
+            </label>
+            <button class="danger" type="submit">Delete promoter</button>
+          </form>
+          <p class="muted">Deleting removes their login only. Nothing in Hi.Events changes.</p>
+        </div>
+      </div>
+
+      <h2>Security</h2>
+      <div class="card profile">
+        <dl>
+          <dt>Two-step</dt>
+          <dd>{hasTwoFactor(p) ? 'On' : 'Off'}</dd>
+          <dt>App</dt>
+          <dd>{p.app_installed_at ? `Installed (${new Date(p.app_installed_at * 1000).toISOString().slice(0, 10)})` : 'Not installed yet'}</dd>
+          <dt>Devices</dt>
+          <dd>
+            {sessionsFor(p.id)
+              .map((d) => `${d.device ?? 'Unknown device'}${d.is_app ? ' (app)' : ''}`)
+              .join(', ') || 'Not signed in anywhere'}
+          </dd>
+        </dl>
+        {hasTwoFactor(p) && (
+          <form class="stack" method="post" action={`/admin/promoters/${p.id}/2fa-reset`}>
+            <label class="check">
+              <input type="checkbox" name="confirm" value="1" required /> They lost their phone and recovery codes
+            </label>
+            <button class="secondary" type="submit">
+              Reset two-step verification
+            </button>
+          </form>
+        )}
+      </div>
+
+      <h2>Profile</h2>
+      <div class="card profile">
+        <dl>
+          <dt>Name</dt>
+          <dd>{[p.first_name, p.last_name].filter(Boolean).join(' ') || p.name}</dd>
+          <dt>Phone</dt>
+          <dd>{p.phone || '—'}</dd>
+          <dt>City</dt>
+          <dd>{p.city || '—'}</dd>
+          <dt>Instagram</dt>
+          <dd>{p.instagram || '—'}</dd>
+          <dt>Payout</dt>
+          <dd>
+            {p.payout_method ?? '—'}
+            {p.payout_details ? `: ${p.payout_details}` : ''}
+          </dd>
+        </dl>
+        <p class="muted">Filled in by the promoter on their Account page.</p>
+      </div>
+
+      <h2>Sales and commission</h2>
+      <div class="grid">
+        {props.balances.map((b) => (
+          <div class="card stat highlight">
+            <div class="value">{formatMoney(b.earned, b.currency)}</div>
+            <div class="label">Commission earned ({formatPercent(commissionPercentFor(p))})</div>
+          </div>
+        ))}
+        {props.balances.map((b) => (
+          <div class="card stat">
+            <div class="value">{formatMoney(b.available, b.currency)}</div>
+            <div class="label">Not yet requested</div>
+          </div>
+        ))}
+      </div>
+      <p>
+        <a href={`/admin/promoters/${p.id}/view`}>Open {p.name}'s dashboard</a>
+        <span class="muted"> · events, daily sales and commission, exactly as they see it</span>
+      </p>
+
+      <h2 id="adjust">Adjust by hand</h2>
+      <p class="muted">
+        For anything outside Hi.Events or a correction. Each change is added to {p.name}'s numbers with the reason you
+        give, shows in their history, and can be undone below.
+      </p>
+      <div class="adjust-grid">
+        <form class="card stack-card" method="post" action={`/admin/promoters/${p.id}/adjust`}>
+          <input type="hidden" name="kind" value="money" />
+          <h3>Money</h3>
+          <label>
+            Amount ({currency}; negative to remove)
+            <input name="amount" inputmode="decimal" placeholder="50.00" required />
+          </label>
+          <label>
+            Reason (they see it)
+            <input name="label" maxlength={200} placeholder="Bonus for the summer tour" required />
+          </label>
+          <NotifyBox />
+          <button type="submit">Add money</button>
+        </form>
+        <form class="card stack-card" method="post" action={`/admin/promoters/${p.id}/adjust`}>
+          <input type="hidden" name="kind" value="outside_sale" />
+          <h3>Sales outside Hi.Events</h3>
+          <label>
+            Event
+            <input name="label" maxlength={200} placeholder="Warehouse party, door sales" required />
+          </label>
+          <div class="field-row">
+            <label>
+              Tickets sold
+              <input name="quantity" type="number" step="1" placeholder="12" required />
+            </label>
+            <label>
+              Commission ({currency})
+              <input name="amount" inputmode="decimal" placeholder="30.00" />
+            </label>
+          </div>
+          <p class="muted">The tickets count for their levels, merch and ranking; the commission goes to their balance.</p>
+          <NotifyBox />
+          <button type="submit">Add sales</button>
+        </form>
+        <form class="card stack-card" method="post" action={`/admin/promoters/${p.id}/adjust`}>
+          <input type="hidden" name="kind" value="free_tickets" />
+          <h3>Free tickets</h3>
+          {props.rewards.tickets.length === 0 ? (
+            <p class="muted">They have no upcoming events with their codes.</p>
+          ) : (
+            <>
+              <label>
+                Event
+                <select name="event_id" required>
+                  {props.rewards.tickets.map((t) => (
+                    <option value={String(t.event.id)}>
+                      {t.event.title} ({t.available} available now)
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div class="field-row">
+                <label>
+                  How many (negative to take back)
+                  <input name="quantity" type="number" step="1" value="1" required />
+                </label>
+                <label>
+                  Reason
+                  <input name="label" maxlength={200} placeholder="Thanks for the flyers" required />
+                </label>
+              </div>
+              <NotifyBox />
+              <button type="submit">Give free tickets</button>
+            </>
+          )}
+        </form>
+        <form class="card stack-card" method="post" action={`/admin/promoters/${p.id}/adjust`}>
+          <input type="hidden" name="kind" value="merch" />
+          <h3>Merch</h3>
+          <p class="muted">
+            {props.rewards.merch.available} available to request now, {props.rewards.merch.used} requested so far.
+          </p>
+          <div class="field-row">
+            <label>
+              How many (negative to take back)
+              <input name="quantity" type="number" step="1" value="1" required />
+            </label>
+            <label>
+              Reason
+              <input name="label" maxlength={200} placeholder="Top seller of the month" required />
+            </label>
+          </div>
+          <NotifyBox />
+          <button type="submit">Give merch</button>
+        </form>
+      </div>
+
+      <h2>Changes made by hand</h2>
+      {props.adjustments.length === 0 ? (
+        <p class="muted">None yet.</p>
+      ) : (
+        <div class="card table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Change</th>
+                <th>Reason</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {props.adjustments.map((a) => (
+                <tr>
+                  <td>{a.created_at.slice(0, 10)}</td>
+                  <td>
+                    <strong>{describeAdjustment(a, formatMoney)}</strong>
+                    {a.kind === 'free_tickets' && a.event_id && (
+                      <div class="muted">{props.rewards.tickets.find((t) => t.event.id === a.event_id)?.event.title ?? `Event #${a.event_id}`}</div>
+                    )}
+                  </td>
+                  <td>{a.label}</td>
+                  <td>
+                    <form method="post" action={`/admin/promoters/${p.id}/adjust/${a.id}/undo`}>
+                      <button class="link" type="submit">
+                        Undo
+                      </button>
+                    </form>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <h2>Payouts</h2>
+      <PayoutHistory payouts={props.payouts} />
+      <h2>Rewards</h2>
+      <RewardHistory requests={props.rewardRequests} />
+    </Layout>
+  );
+}
+
+function NotifyBox() {
+  return (
+    <label class="check">
+      <input type="checkbox" name="notify" value="1" checked /> Tell them (notification)
+    </label>
+  );
+}
+
+export function AdminPayoutsPage(props: {
+  user: User;
+  pending: PayoutRequest[];
+  done: PayoutRequest[];
+  pendingRewards: RewardRequest[];
+  doneRewards: RewardRequest[];
+  error?: string;
+  ok?: string;
+}) {
+  return (
+    <Layout title="Requests" user={props.user}>
+      <h1>Requests</h1>
+      <p class="muted">What promoters asked for. Each decision emails them.</p>
+      <Flash error={props.error} ok={props.ok} />
+      <h2>Rewards waiting</h2>
+      {props.pendingRewards.length === 0 ? (
+        <p class="muted">No reward requests waiting.</p>
+      ) : (
+        <div class="card table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Promoter</th>
+                <th>Reward</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {props.pendingRewards.map((r) => (
+                <tr>
+                  <td>
+                    {r.user_id ? <a href={`/admin/promoters/${r.user_id}`}>{r.promoter_name}</a> : r.promoter_name}
+                    <div class="muted">Requested {r.created_at.slice(0, 16)}</div>
+                  </td>
+                  <td>
+                    <strong>{describeReward(r)}</strong>
+                    {r.details && <div>{r.details}</div>}
+                  </td>
+                  <td>
+                    <div class="payout-actions">
+                      <form method="post" action={`/admin/rewards/${r.id}/fulfil`}>
+                        <input name="admin_note" placeholder="Message (optional)" maxlength={200} />
+                        <button type="submit">Mark given</button>
+                      </form>
+                      <form method="post" action={`/admin/rewards/${r.id}/reject`}>
+                        <input name="admin_note" placeholder="Reason" maxlength={200} required />
+                        <button class="secondary" type="submit">Decline</button>
+                      </form>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {props.doneRewards.length > 0 && (
+        <details class="table-view">
+          <summary>Reward history ({props.doneRewards.length})</summary>
+          <RewardHistory requests={props.doneRewards} />
+        </details>
+      )}
+
+      <h2>Payouts waiting</h2>
+      <p class="muted">Pay them the usual way, then mark the request as paid here; the promoter gets an email.</p>
+
+      {props.pending.length === 0 ? (
+        <p class="muted">No requests waiting.</p>
+      ) : (
+        <div class="card table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Promoter</th>
+                <th class="num">Amount</th>
+                <th>Pay to</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {props.pending.map((r) => (
+                <tr>
+                  <td>
+                    {r.user_id ? <a href={`/admin/promoters/${r.user_id}`}>{r.promoter_name}</a> : r.promoter_name}
+                    <div class="muted">Requested {r.created_at.slice(0, 16).replace('T', ' ')}</div>
+                  </td>
+                  <td class="num">{formatMoney(r.amount_cents, r.currency)}</td>
+                  <td>
+                    <strong>{r.method}</strong>
+                    {r.details && <div>{r.details}</div>}
+                    {r.note && <div class="muted">Note: {r.note}</div>}
+                  </td>
+                  <td>
+                    <div class="payout-actions">
+                      <form method="post" action={`/admin/payouts/${r.id}/paid`}>
+                        <input name="admin_note" placeholder="Reference (optional)" maxlength={200} />
+                        <button type="submit">Mark paid</button>
+                      </form>
+                      <form method="post" action={`/admin/payouts/${r.id}/reject`}>
+                        <input name="admin_note" placeholder="Reason" maxlength={200} required />
+                        <button class="secondary" type="submit">Decline</button>
+                      </form>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <h2>Payout history</h2>
+      {props.done.length === 0 ? (
+        <p class="muted">Nothing paid yet.</p>
+      ) : (
+        <div class="card table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Promoter</th>
+                <th class="num">Amount</th>
+                <th>Status</th>
+                <th>Notes</th>
+              </tr>
+            </thead>
+            <tbody>
+              {props.done.map((r) => (
+                <tr>
+                  <td>
+                    {r.promoter_name}
+                    <div class="muted">{r.promoter_email}</div>
+                  </td>
+                  <td class="num">{formatMoney(r.amount_cents, r.currency)}</td>
+                  <td>
+                    <span class={`status ${r.status}`}>{r.status === 'paid' ? 'Paid' : 'Declined'}</span>
+                    <div class="muted">{r.processed_at?.slice(0, 10)}</div>
+                  </td>
+                  <td>
+                    {r.admin_note}
+                    <div class="muted">
+                      {r.method}
+                      {r.details ? `: ${r.details}` : ''}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Layout>
+  );
+}
+
+export function AdminBrandingPage(props: { user: User; error?: string; ok?: string }) {
+  const brand = getBrand();
+  const warnings = accentWarnings(brand.accent);
+  return (
+    <Layout title="Branding" user={props.user}>
+      <h1>Branding</h1>
+      <p class="muted">How the site, the installed app and the emails look to promoters. Only admins can change this.</p>
+      <Flash error={props.error} ok={props.ok} />
+      <form class="account-form" method="post" action="/admin/branding" enctype="multipart/form-data">
+        <div class="two-col">
+          <div class="card stack-card">
+            <h2 class="first">Name and text</h2>
+            <label>
+              Name (header, browser tab, installed app, emails)
+              <input name="name" value={brand.name} maxlength={40} required />
+            </label>
+            <label>
+              Welcome message on the sign-in page
+              <textarea name="login_message" maxlength={300}>
+                {brand.loginMessage}
+              </textarea>
+            </label>
+            <label>
+              Footer (for example a contact email; leave empty for none)
+              <input name="footer" value={brand.footer} maxlength={200} />
+            </label>
+          </div>
+          <div class="card stack-card">
+            <h2 class="first">Colour and logo</h2>
+            <label>
+              Accent colour (buttons, links, charts)
+              <span class="swatch-row">
+                <input type="color" name="accent" value={brand.accent} />
+                <span class="muted">{brand.accent}</span>
+              </span>
+            </label>
+            {warnings.map((w) => (
+              <p class="warn">{w}</p>
+            ))}
+            <p class="muted">A lighter version is worked out automatically for dark mode.</p>
+            <label>
+              Logo (PNG, JPEG or WebP, up to {Math.round(maxLogoBytes / 1024)} KB; shown about 28 px high)
+              <input type="file" name="logo" accept="image/png,image/jpeg,image/webp" />
+            </label>
+            {brand.logoType && (
+              <>
+                <img class="logo-preview" src={`/brand/logo?v=${brand.updatedAt}`} alt="Current logo" />
+                <label class="check">
+                  <input type="checkbox" name="remove_logo" value="1" /> Remove the logo
+                </label>
+              </>
+            )}
+          </div>
+        </div>
+        <button type="submit">Save branding</button>
+      </form>
+
+      <h2>Preview</h2>
+      <div class="two-col">
+        <div class="preview card">
+          <button type="button">Button</button>
+          <a href="/admin/branding">A link</a>
+          <span class="chip">1 free ticket ready</span>
+        </div>
+        <div class="preview preview-dark">
+          <button type="button">Button</button>
+          <a href="/admin/branding">A link</a>
+          <span>Dark mode</span>
+        </div>
+      </div>
+    </Layout>
+  );
+}
+
+function timeLabel(sqliteUtc: string): string {
+  const date = new Date(`${sqliteUtc.replace(' ', 'T')}Z`);
+  const minutes = Math.round((Date.now() - date.getTime()) / 60000);
+  if (minutes < 1) return 'just now';
+  if (minutes < 60) return `${minutes} min ago`;
+  if (minutes < 24 * 60) return `${Math.round(minutes / 60)} h ago`;
+  return new Intl.DateTimeFormat('en-CA', { dateStyle: 'medium', timeZone: config.timezone }).format(date);
+}
+
+// Admins choose, per alert, email and/or app notification (the bell and phone push). Both off = off.
+function AlertSettings(props: { prefs: Prefs }) {
+  return (
+    <details class="alert-box card" open>
+      <summary>What you are told about, and how</summary>
+      <form method="post" action="/notifications/settings">
+        <div class="table-wrap">
+          <table class="alert-settings">
+            <thead>
+              <tr>
+                <th>Alert</th>
+                <th class="check-cell">Email</th>
+                <th class="check-cell">App notification</th>
+              </tr>
+            </thead>
+            <tbody>
+              {alerts.map((a) => (
+                <tr>
+                  <td>
+                    {a.label}
+                    <span class="hint">
+                      {a.hint}
+                      {!props.prefs[a.key].email && !props.prefs[a.key].app ? ' Off.' : ''}
+                    </span>
+                  </td>
+                  <td class="check-cell">
+                    <input type="checkbox" name={`${a.key}:email`} value="1" checked={props.prefs[a.key].email} aria-label={`${a.label}: email`} />
+                  </td>
+                  <td class="check-cell">
+                    <input type="checkbox" name={`${a.key}:app`} value="1" checked={props.prefs[a.key].app} aria-label={`${a.label}: app notification`} />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <p class="muted">App notification means the bell here and a push on devices where you turned notifications on. Untick both to stop an alert.</p>
+        <button type="submit">Save</button>
+      </form>
+    </details>
+  );
+}
+
+export function NotificationsPage(props: {
+  user: User;
+  notifications: Notification[];
+  pushKey: string;
+  devices: number;
+  prefs?: Prefs;
+  ok?: string;
+  error?: string;
+}) {
+  return (
+    <Layout title="Notifications" user={props.user}>
+      <h1>Notifications</h1>
+      <Flash ok={props.ok} error={props.error} />
+      {props.prefs && <AlertSettings prefs={props.prefs} />}
+      <div class="card push-box" data-push-key={props.pushKey}>
+        <div>
+          <strong>Phone notifications</strong>
+          <div class="muted" data-push-status>
+            Get a notification on this device for payouts, rewards and milestones. On iPhone, add the app to your Home
+            Screen first (Share → Add to Home Screen) and open it from there.
+          </div>
+        </div>
+        <div class="push-actions">
+          <button type="button" data-push-toggle hidden>
+            Turn on
+          </button>
+          <form class="inline" method="post" action="/notifications/test">
+            <button class="secondary" type="submit">
+              Send a test
+            </button>
+          </form>
+        </div>
+        <p class="muted push-devices">
+          {props.devices === 0
+            ? 'No device has phone notifications on yet.'
+            : `Phone notifications are on for ${props.devices === 1 ? '1 device' : `${props.devices} devices`}.`}
+        </p>
+      </div>
+      {props.notifications.length === 0 ? (
+        <p class="muted">Nothing yet. Payouts, rewards and milestones will show up here.</p>
+      ) : (
+        <div class="notification-list">
+          {props.notifications.map((n) => (
+            <a class={`card notification${n.read_at ? '' : ' unread'}`} href={n.link ?? '/'}>
+              <strong>{n.title}</strong>
+              <span>{n.body}</span>
+              <span class="muted">{timeLabel(n.created_at)}</span>
+            </a>
+          ))}
+        </div>
+      )}
+    </Layout>
+  );
+}
+
+export function AdminEmailsPage(props: { user: User; log: EmailLogEntry[]; ok?: string; error?: string }) {
+  return (
+    <Layout title="Emails" user={props.user}>
+      <h1>Emails</h1>
+      <p class="muted">
+        Every email shares one layout with your branding (logo, colour, footer). Edit the wording of each one below.
+      </p>
+      <Flash ok={props.ok} error={props.error} />
+      <div class="two-col">
+        <div class="template-list">
+          {emailTypes.map((type) => (
+            <a class="card template-item" href={`/admin/emails/${type}`}>
+              <span>
+                <strong>{definitions[type].label}</strong>
+                <span class="muted"> · to {definitions[type].audience.toLowerCase()}</span>
+              </span>
+              <span class={`badge${isCustomized(type) ? ' edited' : ''}`}>{isCustomized(type) ? 'Edited' : 'Default'}</span>
+            </a>
+          ))}
+        </div>
+        <form class="card stack-card" method="post" action="/admin/emails/settings">
+          <h2 class="first">Replies</h2>
+          <label>
+            Reply-to address (where replies from promoters go; leave empty to use the sender)
+            <input type="email" name="reply_to" value={getReplyTo()} placeholder="promoters@example.com" />
+          </label>
+          <button type="submit">Save</button>
+        </form>
+      </div>
+
+      <h2>Recently sent</h2>
+      {props.log.length === 0 ? (
+        <p class="muted">Nothing sent yet.</p>
+      ) : (
+        <div class="card table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>When (UTC)</th>
+                <th>To</th>
+                <th>Subject</th>
+                <th>Result</th>
+              </tr>
+            </thead>
+            <tbody>
+              {props.log.map((e) => (
+                <tr>
+                  <td>{e.created_at.slice(5, 16)}</td>
+                  <td>{e.recipient}</td>
+                  <td>{e.subject}</td>
+                  <td class={e.status === 'failed' ? 'failed' : ''}>
+                    {e.status === 'sent' ? 'Sent' : 'Failed'}
+                    {e.attempts > 1 ? ` after ${e.attempts} tries` : ''}
+                    {e.error && <div class="muted">{e.error}</div>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Layout>
+  );
+}
+
+export function AdminEmailEditPage(props: { user: User; type: EmailType; version: string; ok?: string; error?: string }) {
+  const def = definitions[props.type];
+  const t = getTemplate(props.type);
+  return (
+    <Layout title={def.label} user={props.user}>
+      <p class="muted">
+        <a href="/admin/emails">Emails</a> / {def.label}
+      </p>
+      <h1>{def.label}</h1>
+      <p class="muted">Sent to {def.audience.toLowerCase()}.</p>
+      <Flash ok={props.ok} error={props.error} />
+      <div class="email-editor">
+        <form class="card stack-card" method="post" action={`/admin/emails/${props.type}`}>
+          <label>
+            Subject
+            <input name="subject" value={t.subject} maxlength={200} required />
+          </label>
+          <label>
+            Heading
+            <input name="heading" value={t.heading} maxlength={200} />
+          </label>
+          <label>
+            Text (leave a blank line between paragraphs; **bold** for emphasis)
+            <textarea name="body" rows={9} maxlength={4000}>
+              {t.body}
+            </textarea>
+          </label>
+          <label>
+            Button label (leave empty for no button)
+            <input name="button" value={t.button} maxlength={60} />
+          </label>
+          <p class="muted placeholders">
+            Placeholders:{' '}
+            {def.placeholders.map((p) => (
+              <code>{`{{${p}}}`}</code>
+            ))}
+          </p>
+          <div class="form-actions">
+            <button type="submit" name="action" value="save">
+              Save
+            </button>
+            <button class="secondary" type="submit" name="action" value="test">
+              Save and send me a test
+            </button>
+            {isCustomized(props.type) && (
+              <button class="link" type="submit" name="action" value="reset" formnovalidate>
+                Reset to default
+              </button>
+            )}
+          </div>
+        </form>
+        <div>
+          <p class="muted">Preview with sample details:</p>
+          <iframe
+            class="email-preview"
+            src={`/admin/emails/${props.type}/preview?v=${props.version}`}
+            sandbox="allow-same-origin"
+            title="Email preview"
+          ></iframe>
+        </div>
+      </div>
+    </Layout>
+  );
+}
+
+const WELCOME_STEPS = 3;
+
+function Steps(props: { at: number }) {
+  return (
+    <div class="steps" role="progressbar" aria-valuemin={1} aria-valuemax={WELCOME_STEPS} aria-valuenow={props.at} aria-label={`Step ${props.at} of ${WELCOME_STEPS}`}>
+      {Array.from({ length: WELCOME_STEPS }, (_, i) => (
+        <span class={i < props.at ? 'done' : ''} />
+      ))}
+    </div>
+  );
+}
+
+function SkipForm() {
+  return (
+    <form class="inline" method="post" action="/welcome/done">
+      <button class="link" type="submit">
+        Skip for now
+      </button>
+    </form>
+  );
+}
+
+export function WelcomePage(props: {
+  user: User;
+  step: number;
+  codes: string[];
+  percent: number;
+  rewardEvery: number;
+  merchEvery: number;
+  pushKey: string;
+}) {
+  const u = props.user;
+  const brand = getBrand();
+  const first = u.first_name || u.name.split(' ')[0];
+  return (
+    <Layout title="Welcome" user={u} hideInstallBanner>
+      <div class="welcome">
+        <Steps at={props.step} />
+        {props.step === 1 && (
+          <>
+            <div class="welcome-hero">
+              <Avatar user={u} size="large" />
+              <h1>Welcome to {brand.name}, {first}</h1>
+              <p class="muted">Two minutes to get you set up. Here is how it works.</p>
+            </div>
+            <div class="how">
+              <div class="card">
+                <span class="num">1</span>
+                <div>
+                  <strong>Share your promo codes</strong>
+                  <div class="muted">
+                    Every ticket bought with{' '}
+                    {props.codes.length ? props.codes.map((c) => <span class="code">{c}</span>) : 'your codes'} counts for you,
+                    on every event, live.
+                  </div>
+                </div>
+              </div>
+              <div class="card">
+                <span class="num">2</span>
+                <div>
+                  <strong>Earn {formatPercent(props.percent)} commission</strong>
+                  <div class="muted">
+                    On the full ticket price, before your code's discount, without taxes and fees. Request a payout whenever
+                    you like.
+                  </div>
+                </div>
+              </div>
+              <div class="card">
+                <span class="num">3</span>
+                <div>
+                  <strong>Unlock rewards and levels</strong>
+                  <div class="muted">
+                    Your first sale for an event gets you a free ticket to it, plus 1 more every {props.rewardEvery} sales.
+                    Every {props.merchEvery} tickets sold unlocks merch. Climb from Rookie to Diamond.
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="welcome-actions">
+              <SkipForm />
+              <a class="button" href="/welcome?step=2">
+                Next
+              </a>
+            </div>
+          </>
+        )}
+        {props.step === 2 && (
+          <>
+            <h1>About you</h1>
+            <p class="muted">So the team knows who you are and how to pay you. You can change this later in Account.</p>
+            <form class="card stack-card" method="post" action="/welcome/profile">
+              <div class="field-row">
+                <label>
+                  First name
+                  <input name="first_name" value={u.first_name ?? ''} autocomplete="given-name" maxlength={60} required />
+                </label>
+                <label>
+                  Last name
+                  <input name="last_name" value={u.last_name ?? ''} autocomplete="family-name" maxlength={60} />
+                </label>
+              </div>
+              <label>
+                Phone
+                <input name="phone" type="tel" value={u.phone ?? ''} autocomplete="tel" maxlength={30} />
+              </label>
+              <label>
+                City or region
+                <input name="city" value={u.city ?? ''} autocomplete="address-level2" maxlength={80} />
+              </label>
+              <label>
+                Instagram (its photo becomes your profile picture)
+                <input name="instagram" value={u.instagram ?? ''} placeholder="@yourname" maxlength={60} />
+              </label>
+              <label>
+                How should we pay you?
+                <select name="payout_method">
+                  {config.payoutMethods.map((m) => (
+                    <option value={m} selected={m === (u.payout_method ?? config.payoutMethods[0])}>
+                      {m}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Payout email (for e-Transfer)
+                <input name="payout_details" type="email" value={u.payout_details ?? u.email} maxlength={200} />
+              </label>
+              <div class="welcome-actions">
+                <a href="/welcome?step=1">Back</a>
+                <button type="submit">Next</button>
+              </div>
+            </form>
+          </>
+        )}
+        {props.step === 3 && (
+          <>
+            <h1>Get the app</h1>
+            <p class="muted">Install it on your phone and turn on notifications to hear about every payout, reward and milestone.</p>
+            <InstallSteps />
+            <div class="card push-box" data-push-key={props.pushKey}>
+              <div>
+                <strong>Notifications</strong>
+                <div class="muted" data-push-status>
+                  On iPhone, do this from the app on your Home Screen.
+                </div>
+              </div>
+              <div class="push-actions">
+                <button type="button" data-push-toggle hidden>
+                  Turn on
+                </button>
+              </div>
+            </div>
+            <form class="welcome-actions" method="post" action="/welcome/done">
+              <a href="/welcome?step=2">Back</a>
+              <button type="submit">Go to my dashboard</button>
+            </form>
+          </>
+        )}
+      </div>
+    </Layout>
+  );
+}
+
+export function AdminLinksPage(props: { user: User; baseUrl: string; template: string; example: string | null; ok?: string; error?: string }) {
+  return (
+    <Layout title="Event links" user={props.user}>
+      <h1>Event links</h1>
+      <p class="muted">
+        Each promoter gets a link per event with their promo code and alias, ready to copy and share. Hi.Events applies
+        the code from <code>promo_code=</code> and credits the affiliate from <code>aff=</code>.
+      </p>
+      <Flash ok={props.ok} error={props.error} />
+      <form class="card stack-card" method="post" action="/admin/links">
+        <label>
+          Ticketing site address (Hi.Events FRONTEND_URL)
+          <input type="url" name="base_url" value={props.baseUrl} placeholder="https://tickets.example.com" required />
+        </label>
+        <label>
+          Link format
+          <input name="template" value={props.template} maxlength={300} required />
+        </label>
+        <p class="muted placeholders">
+          <code>{'{event_url}'}</code> the event page, <code>{'{code}'}</code> the promo code, <code>{'{alias}'}</code> the
+          promoter's alias.
+        </p>
+        {props.example && (
+          <p>
+            Example: <code class="example-link">{props.example}</code>
+          </p>
+        )}
+        <button type="submit">Save</button>
+      </form>
+      <p class="muted">
+        For aff= tracking in Hi.Events, create an affiliate with the same code as the promoter's alias on the event
+        (Hi.Events → event → Affiliates).
+      </p>
+    </Layout>
+  );
+}
+
+// Drawn with CSS rather than emoji, which some phones and fonts show as empty boxes.
+const medal = (rank: number) => <span class={`rank-badge${rank <= 3 ? ` rank-${rank}` : ''}`}>{rank}</span>;
+
+export function AdminDashboardPage(props: { user: User; board: Leaderboard; range: Range; sort: Sort }) {
+  const { board, range, sort } = props;
+  const cur = board.currency;
+  const sortHref = (s: Sort) => `/admin/dashboard?range=${range}&sort=${s}`;
+  const rangeLabel = range === 'all' ? 'all time' : `last ${range} days`;
+  return (
+    <Layout title="Dashboard" user={props.user}>
+      <div class="dash-head">
+        <h1>Dashboard</h1>
+        <RangeLinks current={range} basePath={`/admin/dashboard`} />
+      </div>
+      <p class="muted">Sales through promoter codes, {rangeLabel}.</p>
+      <div class="grid">
+        <div class="card stat highlight">
+          <div class="value">{board.totals.tickets}</div>
+          <div class="label">Tickets sold by promoters</div>
+        </div>
+        <div class="card stat">
+          <div class="value">{formatMoney(board.totals.fullPrice, cur)}</div>
+          <div class="label">Sales at full price</div>
+        </div>
+        <div class="card stat">
+          <div class="value">{formatMoney(board.totals.commission, cur)}</div>
+          <div class="label">Commission earned</div>
+        </div>
+        <div class="card stat">
+          <div class="value">{formatMoney(board.totals.owed, cur)}</div>
+          <div class="label">
+            Still owed (all time){board.totals.pending > 0 && <> · <a href="/admin/payouts">{board.totals.pending} waiting</a></>}
+          </div>
+        </div>
+      </div>
+
+      <SalesChart title="Tickets sold per day" daily={board.daily} percent={100} range={range} basePath="/admin/dashboard" currency={cur} />
+
+      <h2>Best promoters</h2>
+      {board.entries.length === 0 ? (
+        <p class="muted">No promoters with codes yet.</p>
+      ) : (
+        <div class="card table-wrap">
+          <table class="leaderboard">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Promoter</th>
+                <th class="num">
+                  <a href={sortHref('tickets')} aria-current={sort === 'tickets' ? 'true' : undefined}>Tickets</a>
+                </th>
+                <th class="num">
+                  <a href={sortHref('sales')} aria-current={sort === 'sales' ? 'true' : undefined}>Sales</a>
+                </th>
+                <th class="num">
+                  <a href={sortHref('commission')} aria-current={sort === 'commission' ? 'true' : undefined}>Commission</a>
+                </th>
+                <th class="num">Owed</th>
+                <th>Last sale</th>
+              </tr>
+            </thead>
+            <tbody>
+              {board.entries.map((e, i) => (
+                <tr>
+                  <td class="rank">{medal(i + 1)}</td>
+                  <td>
+                    <a class="who" href={`/admin/promoters/${e.user.id}`}>
+                      <Avatar user={e.user} size="small" />
+                      <span>
+                        {e.user.name}
+                        <span class={`level-badge level-${e.level.toLowerCase()} tiny`}>{e.level}</span>
+                      </span>
+                    </a>
+                  </td>
+                  <td class="num">{e.tickets}</td>
+                  <td class="num">{formatMoney(e.fullPrice, cur)}</td>
+                  <td class="num">{formatMoney(e.commission, cur)}</td>
+                  <td class="num">{formatMoney(e.owed, cur)}</td>
+                  <td class="muted">{e.lastSale ?? 'No sales yet'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Layout>
+  );
+}
+
+export function TwoFactorPage(props: { error?: string }) {
+  return (
+    <Layout title="Two-step verification">
+      <div class="login card">
+        <h1 class="login-brand">
+          <BrandMark brand={getBrand()} />
+        </h1>
+        <p>Enter the 6-digit code from your authenticator app.</p>
+        <Flash error={props.error} />
+        <form class="stack" method="post" action="/login/2fa">
+          <label>
+            Code
+            <input
+              class="code-input"
+              name="code"
+              inputmode="numeric"
+              autocomplete="one-time-code"
+              maxlength={11}
+              required
+              autofocus
+            />
+          </label>
+          <button type="submit">Continue</button>
+        </form>
+        <p class="muted">No phone? Type one of your recovery codes instead (like abcde-12345). Each works once.</p>
+        <p class="muted">
+          <a href="/login">Start over</a>
+        </p>
+      </div>
+    </Layout>
+  );
+}
+
+function since(epoch: number | null): string {
+  if (!epoch) return 'unknown';
+  const minutes = Math.round((Date.now() / 1000 - epoch) / 60);
+  if (minutes < 5) return 'active now';
+  if (minutes < 60) return `${minutes} min ago`;
+  if (minutes < 48 * 60) return `${Math.round(minutes / 60)} h ago`;
+  return new Intl.DateTimeFormat('en-CA', { dateStyle: 'medium', timeZone: config.timezone }).format(new Date(epoch * 1000));
+}
+
+export function SecurityPage(props: {
+  user: User;
+  sessions: DeviceSession[];
+  currentSessionId: number;
+  twoFactorOn: boolean;
+  codesLeft: number;
+  setup: { uri: string; svg: string } | null;
+  setupSecret: string | null;
+  recoveryCodes?: string[];
+  ok?: string;
+  error?: string;
+}) {
+  const others = props.sessions.filter((d) => d.rowid !== props.currentSessionId).length;
+  return (
+    <Layout title="Security" user={props.user}>
+      <h1>Security</h1>
+      <Flash ok={props.ok} error={props.error} />
+
+      {props.recoveryCodes && (
+        <div class="card stack-card">
+          <h2 class="first">Your recovery codes</h2>
+          <p>
+            Save these somewhere safe (a password manager, or printed). If you lose your phone, each one signs you in
+            once instead of a code from the app. <strong>They are shown only now.</strong>
+          </p>
+          <div class="recovery">
+            {props.recoveryCodes.map((code) => (
+              <span>{code}</span>
+            ))}
+          </div>
+          <div class="link-field">
+            <input readonly value={props.recoveryCodes.join(' ')} aria-label="Recovery codes" />
+            <button type="button" data-copy>
+              Copy all
+            </button>
+          </div>
+        </div>
+      )}
+
+      <h2 id="two-step">Two-step verification</h2>
+      <div class="card stack-card">
+        {props.twoFactorOn ? (
+          <>
+            <p>
+              <strong>On.</strong> Signing in asks for a code from your authenticator app. {props.codesLeft} recovery codes
+              left.
+            </p>
+            <form class="stack" method="post" action="/account/security/2fa/new-codes">
+              <label>
+                Code from the app, to make new recovery codes
+                <input class="code-input" name="code" inputmode="numeric" autocomplete="one-time-code" maxlength={11} required />
+              </label>
+              <button class="secondary" type="submit">
+                Make new recovery codes
+              </button>
+            </form>
+            <form class="stack" method="post" action="/account/security/2fa/off">
+              <label>
+                Code from the app, to turn it off
+                <input class="code-input" name="code" inputmode="numeric" autocomplete="one-time-code" maxlength={11} required />
+              </label>
+              <button class="danger" type="submit">
+                Turn off two-step verification
+              </button>
+            </form>
+          </>
+        ) : props.setup && props.setupSecret ? (
+          <div class="setup">
+            <div class="qr" dangerouslySetInnerHTML={{ __html: props.setup.svg }} />
+            <div class="setup-steps">
+              <p>
+                <strong>1.</strong> Open an authenticator app (Google Authenticator, Microsoft Authenticator, 1Password,
+                Authy…) and scan this code.
+              </p>
+              <p class="muted">
+                On this phone? <a href={props.setup.uri}>Open in my authenticator app</a>, or type this key:
+              </p>
+              <p class="secret">{props.setupSecret.replace(/(.{4})/g, '$1 ').trim()}</p>
+              <form class="stack" method="post" action="/account/security/2fa/confirm">
+                <label>
+                  <strong>2.</strong> Enter the 6-digit code it shows
+                  <input class="code-input" name="code" inputmode="numeric" autocomplete="one-time-code" maxlength={6} required autofocus />
+                </label>
+                <button type="submit">Turn on</button>
+              </form>
+            </div>
+          </div>
+        ) : (
+          <>
+            <p>
+              Protect your account and your payouts: after the email link or code, signing in also asks for a code from an
+              authenticator app on your phone.
+            </p>
+            <form method="post" action="/account/security/2fa/start">
+              <button type="submit">Set up two-step verification</button>
+            </form>
+          </>
+        )}
+      </div>
+
+      <h2>Signed-in devices</h2>
+      <div class="device-list">
+        {props.sessions.map((d) => (
+          <div class="card device">
+            <div>
+              <strong>
+                {d.device ?? 'Unknown device'}
+                {d.is_app ? <span class="badge edited"> Installed app</span> : <span class="badge"> Browser</span>}
+              </strong>
+              <span class="muted">
+                {d.rowid === props.currentSessionId ? 'This device · ' : ''}
+                {since(d.last_seen_at)} · signed in {since(d.created_at)}
+                {d.ip ? ` · ${d.ip}` : ''}
+              </span>
+            </div>
+            {d.rowid !== props.currentSessionId && (
+              <form method="post" action={`/account/security/devices/${d.rowid}/sign-out`}>
+                <button class="secondary small" type="submit">
+                  Sign out
+                </button>
+              </form>
+            )}
+          </div>
+        ))}
+      </div>
+      {others > 0 && (
+        <form method="post" action="/account/security/devices/sign-out-others">
+          <button class="link" type="submit">
+            Sign out all other devices ({others})
+          </button>
+        </form>
+      )}
+    </Layout>
+  );
+}

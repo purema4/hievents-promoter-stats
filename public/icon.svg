@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="112" fill="#2f5bea"/>
+  <!-- A ticket with a perforated stub, inside the maskable safe zone -->
+  <path fill="#ffffff" d="M136 168h240a24 24 0 0 1 24 24v32a32 32 0 0 0 0 64v32a24 24 0 0 1-24 24H136a24 24 0 0 1-24-24v-32a32 32 0 0 0 0-64v-32a24 24 0 0 1 24-24z"/>
+  <g fill="#2f5bea">
+    <rect x="316" y="196" width="8" height="18" rx="4"/>
+    <rect x="316" y="230" width="8" height="18" rx="4"/>
+    <rect x="316" y="264" width="8" height="18" rx="4"/>
+    <rect x="316" y="298" width="8" height="18" rx="4"/>
+    <!-- rising bars: sales -->
+    <rect x="164" y="270" width="24" height="46" rx="5"/>
+    <rect x="204" y="242" width="24" height="74" rx="5"/>
+    <rect x="244" y="206" width="24" height="110" rx="5"/>
+  </g>
+</svg>

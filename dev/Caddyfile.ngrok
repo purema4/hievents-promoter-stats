@@ -1,0 +1,15 @@
+# In ngrok mode the tunnel reaches this proxy: the phone inbox under /mailpit/, the app everywhere else.
+{
+	admin off
+	auto_https off
+}
+
+:80 {
+	redir /mailpit /mailpit/
+	handle /mailpit/* {
+		reverse_proxy phone-mail:8025
+	}
+	handle {
+		reverse_proxy promoter-stats:3000
+	}
+}

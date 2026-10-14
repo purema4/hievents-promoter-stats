@@ -1,0 +1,46 @@
+# Local sandbox: a fake Hi.Events database with sample data plus the app.
+#   docker compose -f docker-compose.dev.yml up --build
+# Then open http://localhost:3000 and sign in as admin@example.com / dev-password-123 (Sign in with a password).
+# Emails (invites, sign-in links) land in the fake inbox at http://localhost:8027
+services:
+  hievents-db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: hi-events
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - ./dev/seed.sql:/docker-entrypoint-initdb.d/01-seed.sql:ro
+      - ./sql/readonly-role.sql:/docker-entrypoint-initdb.d/02-role.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d hi-events"]
+      interval: 2s
+      retries: 20
+
+  # Stands in for Hi.Events' image CDN.
+  cdn:
+    image: nginx:1.29-alpine
+    volumes:
+      - ./dev/covers:/usr/share/nginx/html:ro
+
+  mailpit:
+    image: axllent/mailpit:v1.27
+    ports:
+      - "8027:8025"
+
+  promoter-stats:
+    build: .
+    environment:
+      APP_URL: http://localhost:3000
+      HIEVENTS_DATABASE_URL: postgres://promoter_stats:change-me@hievents-db:5432/hi-events
+      ADMIN_EMAIL: admin@example.com
+      ADMIN_PASSWORD: dev-password-123
+      COOKIE_SECURE: "false"
+      SMTP_HOST: mailpit
+      SMTP_PORT: "1025"
+      MAIL_FROM: Promoter stats <promoters@example.com>
+      HIEVENTS_IMAGE_BASE_URL: http://cdn
+    ports:
+      - "3000:3000"
+    depends_on:
+      hievents-db:
+        condition: service_healthy

@@ -1,0 +1,52 @@
+# Public HTTPS address through your ngrok account, for trying the app on a phone against the
+# Hi.Events dev stack. Start it with ./dev-ngrok.sh, which reads NGROK_AUTHTOKEN, NGROK_DOMAIN and
+# NGROK_URL from the Hi.Events dev .env. The free plan allows one tunnel at a time, so stop the
+# Hi.Events dev tunnel (docker/development/dev-ngrok.sh down) first.
+#
+# Emails go to an inbox the phone can open too: ${NGROK_URL}/mailpit/ (user "phone", password
+# PHONE_INBOX_PASSWORD from .env). On the laptop it is also at http://localhost:8028/mailpit/.
+# The Hi.Events Mailpit (localhost:8025) does not get this app's emails in this mode.
+services:
+  promoter-stats:
+    environment:
+      APP_URL: ${NGROK_URL:?set NGROK_URL in the Hi.Events dev .env}
+      COOKIE_SECURE: "true"
+      SMTP_HOST: phone-mail
+      SMTP_PORT: "1025"
+
+  phone-mail:
+    image: axllent/mailpit:v1.27
+    restart: unless-stopped
+    environment:
+      MP_WEBROOT: mailpit
+      MP_UI_AUTH: "phone:${PHONE_INBOX_PASSWORD:?set PHONE_INBOX_PASSWORD in .env}"
+      MP_MAX_MESSAGES: "200"
+      # Kept on a volume so restarting the stack does not empty the inbox.
+      MP_DATABASE: /data/mailpit.db
+    volumes:
+      - phone-mail:/data
+    ports:
+      - "127.0.0.1:8028:8025"
+
+  proxy:
+    image: caddy:2.10-alpine
+    restart: unless-stopped
+    volumes:
+      - ./dev/Caddyfile.ngrok:/etc/caddy/Caddyfile:ro
+    depends_on:
+      - promoter-stats
+      - phone-mail
+
+  ngrok:
+    image: ngrok/ngrok:3
+    restart: unless-stopped
+    command: ["http", "proxy:80", "--url=${NGROK_DOMAIN:?set NGROK_DOMAIN in the Hi.Events dev .env}"]
+    environment:
+      NGROK_AUTHTOKEN: ${NGROK_AUTHTOKEN:?set NGROK_AUTHTOKEN in the Hi.Events dev .env}
+    ports:
+      - "127.0.0.1:4041:4040"
+    depends_on:
+      - proxy
+
+volumes:
+  phone-mail:

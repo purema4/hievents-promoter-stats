@@ -1,0 +1,1277 @@
+import { Hono, type Context } from 'hono';
+import { bodyLimit } from 'hono/body-limit';
+import { csrf } from 'hono/csrf';
+import { HTTPException } from 'hono/http-exception';
+import { secureHeaders } from 'hono/secure-headers';
+import {
+  allowLinkRequest,
+  markSessionApp,
+  revokeOtherSessions,
+  revokeSession,
+  sessionsFor,
+  approveWaiting,
+  consumeLoginCode,
+  currentUser,
+  exchangeWaiting,
+  startWaiting,
+  summarizeDevice,
+  consumeLoginToken,
+  createLoginToken,
+  endSession,
+  purgeExpiredSessions,
+  requireAdmin,
+  revokeAccess,
+  requireUser,
+  startSession,
+  verifyLogin,
+  type Env,
+} from './auth';
+import { config } from './config';
+import { audit } from './audit';
+import { alertAdmins, alerts, prefsFor, savePrefs, type Prefs } from './alert-prefs';
+import { addAdjustment, adjustmentsFor, describeAdjustment, findAdjustment, removeAdjustment } from './adjustments';
+import {
+  confirmSetup,
+  disableTwoFactor,
+  failPendingSignIn,
+  finishPendingSignIn,
+  hasTwoFactor,
+  newRecoveryCodes,
+  pendingSignIn,
+  purgePendingSignIns,
+  recoveryCodesLeft,
+  setupQr,
+  startPendingSignIn,
+  startSetup,
+  verifySecondFactor,
+} from './two-factor';
+import { leaderboard, type Sort } from './leaderboard';
+import { aliasPattern, aliasTaken, ensureAliases, eventLink, linkSettings, saveLinkSettings, setAlias, suggestAlias } from './links';
+import { maxAvatarBytes, readAvatar, refreshAllAvatars, refreshInstagramAvatar, saveUploadedAvatar, useInstagramAvatar } from './avatars';
+import { brandCss, getBrand, isHex, maxLogoBytes, readLogo, removeLogo, saveLogo, sniffImage, updateBrand } from './brand';
+import { parseRange } from './chart';
+import { checkAllMilestones, checkMilestones } from './milestones';
+import {
+  isPushEndpoint,
+  isPushKeys,
+  markAllRead,
+  notificationsFor,
+  notify,
+  purgeOldNotifications,
+  pushDeviceCount,
+  pushPublicKey,
+  removePushSubscription,
+  savePushSubscription,
+  sendTestNotification,
+} from './notifications';
+import { blankPng, eventCover } from './covers';
+import { allPromoCodes, dailyForCodes, sql, statsForCodes } from './hievents';
+import { recentEmails, sendEmail, purgeEmailLog } from './mail';
+import { emailTypes, getTemplate, renderEmail, resetTemplate, sampleVars, saveReplyTo, saveTemplate, type EmailType } from './email-templates';
+import { formatMoney, totalsByCurrency } from './money';
+import {
+  balances,
+  findPayout,
+  listPayouts,
+  payoutsFor,
+  requestPayout,
+  settlePayout,
+} from './payouts';
+import { DashboardPage, EventPage, PayoutsPage, summarizeEvents } from './promoter-views';
+import {
+  describeReward,
+  findRewardRequest,
+  listRewardRequests,
+  requestReward,
+  rewardRequestsFor,
+  rewardsFor,
+  settleReward,
+} from './rewards';
+import { publicAsset, publicText, serviceWorker } from './static';
+import {
+  codeOwners,
+  codesFor,
+  commissionPercentFor,
+  countAdmins,
+  createUser,
+  deleteUser,
+  findUser,
+  findUserByEmail,
+  listUsers,
+  normalizeCodes,
+  setCodes,
+  db,
+  markAppInstalled,
+  markOnboarded,
+  setPassword,
+  updateProfile,
+  updateUser,
+  type User,
+} from './local-db';
+import {
+  AccountPage,
+  AdminPage,
+  AdminBrandingPage,
+  AdminEmailEditPage,
+  AdminEmailsPage,
+  AdminLinksPage,
+  AdminDashboardPage,
+  AdminPayoutsPage,
+  ApproveDevicePage,
+  NotificationsPage,
+  SecurityPage,
+  TwoFactorPage,
+  WelcomePage,
+  css,
+  LoginConfirmPage,
+  LoginPage,
+  PromoterPage,
+} from './views';
+
+const MIN_PASSWORD = 10;
+const LINK_RESPONSE_MS = 300;
+
+// Flash messages travel as short keys in the query string so links cannot inject arbitrary text.
+const messages: Record<string, string> = {
+  created: 'Promoter created.',
+  invited: 'Promoter created and a sign-in link was emailed to them.',
+  link_sent: 'Sign-in link emailed.',
+  mail_failed: 'Saved, but the email could not be sent. Check the SMTP settings and the container log.',
+  commission: 'Commission must be a number between 0 and 100, or empty for the default.',
+  saved: 'Saved.',
+  password: 'Password updated.',
+  deleted: 'Promoter deleted.',
+  short: `Passwords need at least ${MIN_PASSWORD} characters.`,
+  exists: 'Another account already uses that email.',
+  wrong: 'Current password is incorrect.',
+  last_admin: 'You cannot remove the last admin.',
+  missing: 'Name and email are required.',
+  requested: 'Payout requested. The team has been notified and you will get an email once it is paid.',
+  invalid_amount: 'Enter an amount like 25 or 25.50.',
+  too_much: 'That is more than your available balance.',
+  already_pending: 'You already have a request waiting for this currency.',
+  missing_method: 'Choose how we should pay you.',
+  cash_step: `Cash is paid in steps of $${config.cashStepCents / 100}: choose $${config.cashStepCents / 100}, $${(config.cashStepCents * 2) / 100} and so on.`,
+  payout_paid: 'Marked as paid. The promoter has been emailed.',
+  payout_rejected: 'Request declined. The promoter has been emailed and the amount is available to them again.',
+  payout_gone: 'That request was already handled.',
+  bad_color: 'Pick a colour with the colour picker.',
+  bad_email: 'That is not a valid email address.',
+  adjusted: 'Change added.',
+  undone: 'Change undone.',
+  adjust_reason: 'Give a reason: the promoter sees it.',
+  adjust_amount: 'Enter an amount like 50 or -12.50, and whole numbers for tickets and merch (not 0).',
+  adjust_event: 'Pick one of their upcoming events.',
+  code_wrong: 'That code did not work. Use the newest 6-digit code from your authenticator app.',
+  device_out: 'That device is signed out.',
+  others_out: 'All your other devices are signed out.',
+  '2fa_off': 'Two-step verification is off.',
+  '2fa_reset': 'Two-step verification was reset. They can sign in with just the link and turn it on again.',
+  alias_invalid: 'The alias needs 2 to 30 letters, numbers, - or _, starting with a letter or number.',
+  alias_taken: 'Another promoter already uses that alias.',
+  bad_url: 'Enter the full address, starting with https://',
+  reset: 'Back to the default wording.',
+  test_sent: 'Saved, and a test was sent to your email address.',
+  test_failed: 'Saved, but the test could not be sent. The list of recent emails shows why.',
+  photo_size: `The photo must be ${Math.round(maxAvatarBytes / 1024 / 1024)} MB or less.`,
+  photo_type: 'The photo must be a PNG, JPEG or WebP image.',
+  logo_size: `The logo must be ${Math.round(maxLogoBytes / 1024)} KB or less.`,
+  logo_type: 'The logo must be a PNG, JPEG or WebP image.',
+  reward_requested: 'Reward requested. The team has been notified.',
+  not_available: 'That reward is not available any more.',
+  missing_details: 'Tell us which item and size you would like.',
+  reward_fulfilled: 'Marked as given. The promoter has been emailed.',
+  reward_rejected: 'Reward request declined. The promoter has been emailed and can request it again.',
+};
+const flash = (key?: string) => (key ? messages[key] : undefined);
+
+// '' means "use the default", anything else must be a percentage.
+function parseCommission(raw: unknown): number | null | 'invalid' {
+  const text = String(raw ?? '').trim().replace(',', '.');
+  if (text === '') return null;
+  const value = Number(text);
+  return Number.isFinite(value) && value >= 0 && value <= 100 ? value : 'invalid';
+}
+
+async function emailLoginLink(
+  user: User,
+  kind: 'invite' | 'login',
+  waiting?: { id: string; from: string },
+  attempts = 3,
+): Promise<boolean> {
+  const seconds = kind === 'invite' ? config.inviteLinkDays * 86400 : config.loginLinkMinutes * 60;
+  const { token, code } = createLoginToken(user.id, seconds, waiting);
+  const link = `${config.appUrl}/login/verify?token=${token}`;
+  const expiry = kind === 'invite' ? `${config.inviteLinkDays} days` : `${config.loginLinkMinutes} minutes`;
+  return sendEmail(kind, [user], { link, code, expiry }, undefined, { attempts });
+}
+
+const app = new Hono<Env>();
+
+const strictHeaders = secureHeaders({
+    // The pages use no scripts and no inline styles, so nothing else is allowed to load or run.
+    contentSecurityPolicy: {
+      defaultSrc: ["'none'"],
+      scriptSrc: ["'self'"],
+      connectSrc: ["'self'"],
+      workerSrc: ["'self'"],
+      manifestSrc: ["'self'"],
+      styleSrc: ["'self'"],
+      imgSrc: ["'self'", 'data:'],
+      formAction: ["'self'"],
+      // Only the admin email preview is framed, and only by this site.
+      frameSrc: ["'self'"],
+      frameAncestors: ["'none'"],
+      baseUri: ["'none'"],
+    },
+    xFrameOptions: 'DENY',
+  });
+// Email HTML relies on inline styles, so its preview gets its own policy: still no scripts, framed only here.
+const previewHeaders = secureHeaders({
+  contentSecurityPolicy: {
+    defaultSrc: ["'none'"],
+    styleSrc: ["'unsafe-inline'"],
+    imgSrc: ["'self'", 'data:', 'https:'],
+    frameAncestors: ["'self'"],
+    baseUri: ["'none'"],
+  },
+  xFrameOptions: 'SAMEORIGIN',
+});
+app.use((c, next) => (/^\/admin\/emails\/[a-z_]+\/preview$/.test(c.req.path) ? previewHeaders(c, next) : strictHeaders(c, next)));
+app.use(csrf({ origin: config.appUrl }));
+// Pages carry personal sales data: never keep them in the browser cache (shared computers, Back after
+// signing out, offline). Static files set their own caching.
+app.use(async (c, next) => {
+  await next();
+  if (!c.res.headers.has('Cache-Control')) c.header('Cache-Control', 'no-store');
+});
+// Every form here is a few short fields; only the branding form carries a file (the logo).
+const smallBodies = bodyLimit({ maxSize: 32 * 1024, onError: (c) => c.text('Request too large', 413) });
+// Room above the logo limit so an oversized file gets a clear message from the handler.
+const logoBodies = bodyLimit({ maxSize: 4 * maxLogoBytes, onError: (c) => c.redirect('/admin/branding?error=logo_size') });
+app.use((c, next) =>
+  c.req.path === '/admin/branding' || c.req.path === '/account/profile' ? logoBodies(c, next) : smallBodies(c, next),
+);
+
+app.get('/healthz', (c) => c.text('ok'));
+
+app.get('/app.css', (c) => {
+  c.header('Content-Type', 'text/css; charset=utf-8');
+  c.header('Cache-Control', 'public, max-age=31536000, immutable');
+  return c.body(css);
+});
+
+app.get('/app.js', (c) => publicAsset(c, 'app.js'));
+// The installed app takes its name and colour from the branding.
+app.get('/manifest.webmanifest', (c) => {
+  const brand = getBrand();
+  const manifest = JSON.parse(publicText('manifest.webmanifest'));
+  c.header('Content-Type', 'application/manifest+json');
+  c.header('Cache-Control', 'no-cache');
+  return c.body(JSON.stringify({ ...manifest, name: brand.name, short_name: brand.name.slice(0, 12), theme_color: brand.accent }));
+});
+app.get('/brand.css', (c) => {
+  c.header('Content-Type', 'text/css; charset=utf-8');
+  c.header('Cache-Control', 'public, max-age=31536000, immutable');
+  return c.body(brandCss());
+});
+app.get('/brand/logo', (c) => {
+  const logo = readLogo();
+  if (!logo) return c.notFound();
+  c.header('Content-Type', logo.type);
+  c.header('Cache-Control', 'public, max-age=31536000, immutable');
+  return c.body(new Uint8Array(logo.bytes));
+});
+app.get('/icon.svg', (c) => publicAsset(c, 'icon.svg'));
+app.get('/:icon{icon-[a-z0-9-]+\\.png}', (c) => publicAsset(c, c.req.param('icon')));
+app.get('/badge-96.png', (c) => publicAsset(c, 'badge-96.png'));
+app.get('/sw.js', (c) => serviceWorker(c));
+app.get('/offline', (c) =>
+  c.html(
+    <LoginPage error="You are offline. Your numbers will show again as soon as you are back online." offline />,
+  ),
+);
+
+app.get('/login', (c) => c.html(<LoginPage withPassword={c.req.query('method') === 'password'} />));
+
+app.post('/login', async (c) => {
+  const body = await c.req.parseBody();
+  const email = String(body.email ?? '');
+  const result = await verifyLogin(email, String(body.password ?? ''));
+  if (result === 'locked') {
+    audit(c, 'login.locked', { email });
+    return c.html(<LoginPage withPassword email={email} error="Too many attempts. Try again in 15 minutes." />, 429);
+  }
+  if (!result) {
+    audit(c, 'login.failed', { email });
+    return c.html(<LoginPage withPassword email={email} error="Wrong email or password." />, 401);
+  }
+  audit(c, 'login.password', { userId: result.id });
+  return c.redirect(signIn(c, result.id) ? '/' : '/login/2fa');
+});
+
+/**
+ * Finishes the first step of signing in. With two-step verification on, the browser gets a
+ * short-lived ticket for the code page instead of a session. Returns true when signed in.
+ */
+function signIn(c: Context, userId: number, approveRow?: number): boolean {
+  const user = findUser(userId);
+  if (user && hasTwoFactor(user)) {
+    startPendingSignIn(c, userId, approveRow);
+    return false;
+  }
+  startSession(c, userId);
+  return true;
+}
+
+// The device approval question, rebuilt from the sign-in link that asked for it.
+function approvalFor(rowId: number) {
+  const row = db
+    .query<{ requested_from: string | null; created_at: number | null }, [number]>('SELECT requested_from, created_at FROM login_tokens WHERE rowid = ?')
+    .get(rowId);
+  return row ? { rowId, from: row.requested_from, at: row.created_at ?? Math.floor(Date.now() / 1000) } : null;
+}
+
+// Always answers the same way so the form does not reveal which emails have accounts.
+app.post('/login/link', async (c) => {
+  const email = String((await c.req.parseBody()).email ?? '').trim();
+  const user = email ? findUserByEmail(email) : null;
+  const started = Date.now();
+  // Every answer gets a wait cookie, for known and unknown emails alike.
+  const waiting = { id: startWaiting(c), from: summarizeDevice(c.req.header('user-agent')) };
+  if (user) {
+    const allowed = allowLinkRequest(email);
+    audit(c, allowed ? 'link.requested' : 'link.rate_limited', { userId: user.id });
+    // Sent after the response, so waiting on SMTP cannot make known emails answer slower.
+    if (allowed) setTimeout(() => void emailLoginLink(user, 'login', waiting), 0);
+  }
+  // Pad every answer to the same duration so timing does not reveal which emails have accounts.
+  await Bun.sleep(Math.max(0, LINK_RESPONSE_MS - (Date.now() - started)));
+  return c.html(<LoginPage sent email={email} />);
+});
+
+app.get('/login/verify', (c) => {
+  const token = c.req.query('token');
+  if (!token) return c.redirect('/login');
+  return c.html(<LoginConfirmPage token={token} />);
+});
+
+app.post('/login/verify', async (c) => {
+  const link = consumeLoginToken(String((await c.req.parseBody()).token ?? ''), c);
+  if (!link) {
+    audit(c, 'link.invalid');
+    return c.html(<LoginPage error="This link has expired or was already used. Enter your email to get a new one." />, 400);
+  }
+  audit(c, 'login.link', { userId: link.userId });
+  if (!signIn(c, link.userId, link.waitingElsewhere?.rowId)) return c.redirect('/login/2fa');
+  // Another browser or the installed app asked for this link: offer to sign it in too.
+  if (link.waitingElsewhere) return c.html(<ApproveDevicePage request={link.waitingElsewhere} />);
+  return c.redirect('/');
+});
+
+app.post('/login/approve', async (c) => {
+  const user = currentUser(c);
+  if (!user) return c.redirect('/login');
+  const body = await c.req.parseBody();
+  if (body.answer !== 'yes') return c.redirect('/');
+  const approved = approveWaiting(Number(body.request), user.id);
+  audit(c, approved ? 'login.device_approved' : 'login.device_approve_failed', { userId: user.id });
+  return c.html(<ApproveDevicePage done={approved} />);
+});
+
+// Polled by the "check your email" page until the link is opened somewhere.
+app.post('/login/wait', (c) => {
+  if (currentUser(c)) return c.json({ signedIn: true });
+  const userId = exchangeWaiting(c);
+  if (!userId) return c.json({ signedIn: false });
+  audit(c, 'login.waiting_device', { userId });
+  // The waiting device proves the second step itself: approving it elsewhere is not enough.
+  if (!signIn(c, userId)) return c.json({ signedIn: false, twoFactor: true });
+  return c.json({ signedIn: true });
+});
+
+// For the installed app: a tapped email link opens the browser, so the email also carries a code.
+app.post('/login/code', async (c) => {
+  const body = await c.req.parseBody();
+  const email = String(body.email ?? '').trim();
+  const userId = consumeLoginCode(email, String(body.code ?? '').trim());
+  if (!userId) {
+    audit(c, 'code.invalid', { email });
+    return c.html(<LoginPage sent email={email} error="That code is wrong or has expired." />, 400);
+  }
+  audit(c, 'login.code', { userId });
+  return c.redirect(signIn(c, userId) ? '/' : '/login/2fa');
+});
+
+app.get('/login/2fa', (c) => {
+  if (!pendingSignIn(c)) return c.redirect('/login');
+  return c.html(<TwoFactorPage />);
+});
+
+app.post('/login/2fa', async (c) => {
+  const pending = pendingSignIn(c);
+  if (!pending) return c.redirect('/login');
+  const user = findUser(pending.userId);
+  if (!user) return c.redirect('/login');
+  const result = verifySecondFactor(user, String((await c.req.parseBody()).code ?? ''));
+  if (!result) {
+    audit(c, 'login.2fa_failed', { userId: user.id });
+    if (!failPendingSignIn(pending)) {
+      return c.html(<LoginPage error="Too many wrong codes. Sign in again from the start." />, 429);
+    }
+    return c.html(<TwoFactorPage error="That code did not work. Check the time on your phone and try the newest code." />, 400);
+  }
+  finishPendingSignIn(c, pending);
+  startSession(c, user.id);
+  audit(c, `login.2fa_${result}`, { userId: user.id });
+  if (result === 'recovery') {
+    notify(user.id, {
+      title: 'A recovery code was used',
+      body: `${recoveryCodesLeft(user.id)} recovery codes left. Make new ones under Security if you are running low.`,
+      link: '/account/security',
+    });
+  }
+  const approval = pending.approveRow ? approvalFor(pending.approveRow) : null;
+  if (approval) return c.html(<ApproveDevicePage request={approval} />);
+  return c.redirect('/');
+});
+
+app.post('/logout', (c) => {
+  endSession(c);
+  return c.redirect('/login');
+});
+
+app.use('/', requireUser);
+app.use('/events/*', requireUser);
+app.use('/payouts', requireUser);
+app.use('/rewards/*', requireUser);
+app.use('/event-image/*', requireUser);
+app.use('/notifications', requireUser);
+app.use('/notifications/*', requireUser);
+app.use('/push/*', requireUser);
+app.use('/avatar/*', requireUser);
+app.use('/welcome', requireUser);
+app.use('/welcome/*', requireUser);
+app.use('/account/*', requireUser);
+app.use('/account', requireUser);
+app.use('/admin/*', requireUser, requireAdmin);
+app.use('/admin', requireUser, requireAdmin);
+
+// Everything a promoter's pages need; admins load the same data to see exactly what a promoter sees.
+async function promoterData(promoter: User) {
+  const codes = codesFor(promoter.id);
+  const percent = commissionPercentFor(promoter);
+  const rows = await statsForCodes(codes);
+  return {
+    codes,
+    percent,
+    rows,
+    balances: balances(promoter.id, totalsByCurrency(rows, percent)),
+    rewards: rewardsFor(promoter.id, summarizeEvents(rows, percent)),
+  };
+}
+
+async function renderDashboard(c: Context<Env>, promoter: User, basePath: string) {
+  const data = await promoterData(promoter);
+  // Also checked on a timer; checking here makes a new milestone show up the moment they look.
+  if (basePath === '') checkMilestones(promoter, data.rewards);
+  return c.html(
+    <DashboardPage
+      viewer={c.get('user')}
+      promoter={promoter}
+      basePath={basePath}
+      codes={data.codes}
+      rows={data.rows}
+      daily={await dailyForCodes(data.codes)}
+      balances={data.balances}
+      rewards={data.rewards}
+      percent={data.percent}
+      range={parseRange(c.req.query('range'), '30')}
+    />,
+  );
+}
+
+async function renderEvent(c: Context<Env>, promoter: User, basePath: string) {
+  const eventId = Number(c.req.param('eventId'));
+  const data = await promoterData(promoter);
+  // Only events that have one of this promoter's codes exist for them.
+  if (!Number.isInteger(eventId) || !data.rows.some((r) => r.event_id === eventId)) return c.notFound();
+  return c.html(
+    <EventPage
+      viewer={c.get('user')}
+      promoter={promoter}
+      basePath={basePath}
+      rows={data.rows}
+      eventId={eventId}
+      daily={await dailyForCodes(data.codes, eventId)}
+      rewards={data.rewards}
+      percent={data.percent}
+      range={parseRange(c.req.query('range'), 'all')}
+    />,
+  );
+}
+
+app.get('/', async (c) => {
+  const user = c.get('user');
+  if (user.is_admin && codesFor(user.id).length === 0) return c.redirect('/admin/dashboard');
+  // First sign-in: a few welcome steps before the dashboard.
+  if (!user.is_admin && !user.onboarded_at) return c.redirect('/welcome');
+  return renderDashboard(c, user, '');
+});
+
+app.get('/events/:eventId', (c) => renderEvent(c, c.get('user'), ''));
+
+app.get('/welcome', (c) => {
+  const user = c.get('user');
+  const step = Math.min(3, Math.max(1, Number(c.req.query('step') ?? 1) || 1));
+  return c.html(
+    <WelcomePage
+      user={user}
+      step={step}
+      codes={codesFor(user.id)}
+      percent={commissionPercentFor(user)}
+      rewardEvery={config.rewardTicketEvery}
+      merchEvery={config.merchEvery}
+      pushKey={pushPublicKey}
+    />,
+  );
+});
+
+app.post('/welcome/profile', async (c) => {
+  const user = c.get('user');
+  const body = await c.req.parseBody();
+  const text = (key: string, max: number) => String(body[key] ?? '').trim().slice(0, max) || null;
+  const method = String(body.payout_method ?? '');
+  updateProfile(user.id, {
+    first_name: text('first_name', 60),
+    last_name: text('last_name', 60),
+    phone: text('phone', 30),
+    city: text('city', 80),
+    instagram: text('instagram', 60)?.replace(/^@?/, '@') ?? null,
+    payout_method: config.payoutMethods.includes(method) ? method : null,
+    payout_details: text('payout_details', 200),
+    theme: user.theme ?? 'system',
+  });
+  audit(c, 'account.profile_updated', { userId: user.id, during: 'welcome' });
+  const updated = findUser(user.id)!;
+  setTimeout(() => void refreshInstagramAvatar(updated), 0);
+  return c.redirect('/welcome?step=3');
+});
+
+app.post('/welcome/done', (c) => {
+  markOnboarded(c.get('user').id);
+  audit(c, 'account.onboarded', { userId: c.get('user').id });
+  return c.redirect('/');
+});
+
+// Opening the list marks everything as read.
+app.get('/notifications', (c) => {
+  const user = c.get('user');
+  const test = c.req.query('test');
+  const failed = test === 'none' || test === 'failed' || test === 'soon';
+  const page = c.html(
+    <NotificationsPage
+      user={user}
+      notifications={notificationsFor(user.id)}
+      pushKey={pushPublicKey}
+      devices={pushDeviceCount(user.id)}
+      prefs={user.is_admin ? prefsFor(user.id) : undefined}
+      ok={failed ? undefined : testMessage(test)}
+      error={failed ? testMessage(test) : undefined}
+    />,
+  );
+  markAllRead(user.id);
+  return page;
+});
+
+function testMessage(key?: string): string | undefined {
+  if (!key) return undefined;
+  if (key === 'none') return 'Sent to the list below, but no device has phone notifications turned on yet. Tap Turn on first.';
+  if (key === 'failed') return 'The push service did not accept it. Turn notifications off and on again on that device.';
+  if (key === 'soon') return 'Wait a few seconds before sending another test.';
+  if (key === 'settings') return 'Saved. Your alerts follow these settings from now on.';
+  const [delivered, devices] = key.split('-').map(Number);
+  if (!Number.isInteger(delivered) || !Number.isInteger(devices)) return undefined;
+  return delivered === devices
+    ? `Sent to ${devices === 1 ? 'your device' : `all ${devices} of your devices`}. It should appear in a few seconds.`
+    : `Sent to ${delivered} of your ${devices} devices; the others did not accept it.`;
+}
+
+app.post('/notifications/settings', async (c) => {
+  const user = c.get('user');
+  if (!user.is_admin) return c.text('Forbidden', 403);
+  const body = await c.req.parseBody();
+  const prefs = Object.fromEntries(alerts.map((a) => [a.key, { email: body[`${a.key}:email`] === '1', app: body[`${a.key}:app`] === '1' }])) as Prefs;
+  savePrefs(user.id, prefs);
+  audit(c, 'admin.alert_settings', { by: user.id, prefs });
+  return c.redirect('/notifications?test=settings');
+});
+
+app.post('/notifications/test', async (c) => {
+  const user = c.get('user');
+  const result = await sendTestNotification(user.id);
+  audit(c, 'push.test', { userId: user.id, result });
+  if (result === 'too_soon') return c.redirect('/notifications?test=soon');
+  if (result.devices === 0) return c.redirect('/notifications?test=none');
+  if (result.delivered === 0) return c.redirect('/notifications?test=failed');
+  return c.redirect(`/notifications?test=${result.delivered}-${result.devices}`);
+});
+
+app.post('/push/subscribe', async (c) => {
+  const body = await c.req.json<{ endpoint?: string; keys?: { p256dh?: string; auth?: string } }>().catch(() => null);
+  const endpoint = String(body?.endpoint ?? '');
+  const p256dh = String(body?.keys?.p256dh ?? '');
+  const auth = String(body?.keys?.auth ?? '');
+  if (!isPushEndpoint(endpoint) || !/^[A-Za-z0-9_-]{20,200}$/.test(p256dh) || !/^[A-Za-z0-9_-]{10,100}$/.test(auth) || !isPushKeys(p256dh, auth)) {
+    return c.json({ ok: false }, 400);
+  }
+  savePushSubscription(c.get('user').id, { endpoint, p256dh, auth });
+  audit(c, 'push.subscribed', { userId: c.get('user').id, host: new URL(endpoint).hostname });
+  return c.json({ ok: true });
+});
+
+app.post('/push/unsubscribe', async (c) => {
+  const body = await c.req.json<{ endpoint?: string }>().catch(() => null);
+  removePushSubscription(c.get('user').id, String(body?.endpoint ?? ''));
+  return c.json({ ok: true });
+});
+
+// Event covers from Hi.Events' storage, passed through so they load on any device and under the CSP.
+app.get('/event-image/:eventId', async (c) => {
+  const cover = Number.isInteger(Number(c.req.param('eventId'))) ? await eventCover(Number(c.req.param('eventId'))) : null;
+  c.header('Content-Type', cover?.type ?? 'image/png');
+  c.header('Cache-Control', cover ? 'private, max-age=3600' : 'private, max-age=300');
+  return c.body(new Uint8Array(cover ? cover.bytes : blankPng));
+});
+
+async function renderPayouts(c: Context<Env>, error?: string) {
+  const user = c.get('user');
+  const data = await promoterData(user);
+  return c.html(
+    <PayoutsPage
+      user={user}
+      balances={data.balances}
+      payouts={payoutsFor(user.id)}
+      rewards={data.rewards}
+      rewardRequests={rewardRequestsFor(user.id)}
+      adjustments={adjustmentsFor(user.id)}
+      ok={flash(c.req.query('ok'))}
+      error={error}
+    />,
+    error ? 400 : 200,
+  );
+}
+
+app.get('/payouts', (c) => renderPayouts(c, flash(c.req.query('error'))));
+
+app.post('/payouts', async (c) => {
+  const user = c.get('user');
+  const body = await c.req.parseBody();
+  const data = await promoterData(user);
+  const balance = data.balances.find((b) => b.currency === String(body.currency ?? ''));
+  if (!balance) return renderPayouts(c, messages.too_much);
+  const raw = String(body.amount ?? '').trim().replace(',', '.');
+  const amountCents = /^[0-9]+(\.[0-9]{1,2})?$/.test(raw) ? Math.round(Number(raw) * 100) : NaN;
+  const result = requestPayout(user, balance, {
+    amountCents,
+    method: String(body.method ?? ''),
+    details: String(body.details ?? '').slice(0, 200),
+    note: String(body.note ?? '').slice(0, 500),
+  });
+  if (result !== 'ok') return renderPayouts(c, messages[result]);
+  audit(c, 'payout.requested', { userId: user.id, amountCents, currency: balance.currency });
+  alertAdmins(
+    'payout_requested',
+    {
+      title: `${user.name} requested ${formatMoney(amountCents, balance.currency)}`,
+      body: `Payout by ${String(body.method)}. Review it on Requests.`,
+      link: '/admin/payouts',
+    },
+    {
+      promoter: `${user.name} (${user.email})`,
+      amount: formatMoney(amountCents, balance.currency),
+      method: String(body.method ?? ''),
+      details: String(body.details ?? '').slice(0, 200) || 'Not needed',
+      note: String(body.note ?? '').slice(0, 500),
+      link: `${config.appUrl}/admin/payouts`,
+    },
+  );
+  return c.redirect('/payouts?ok=requested');
+});
+
+app.post('/rewards/:kind{ticket|merch}', async (c) => {
+  const user = c.get('user');
+  const body = await c.req.parseBody();
+  const kind = c.req.param('kind') as 'ticket' | 'merch';
+  const data = await promoterData(user);
+  const result = requestReward(user, data.rewards, {
+    kind,
+    eventId: kind === 'ticket' ? Number(body.event_id) : undefined,
+    quantity: kind === 'ticket' ? Number(body.quantity ?? 1) : 1,
+    details: String(body.details ?? '').slice(0, 120),
+  });
+  if (result !== 'ok') return renderPayouts(c, messages[result]);
+  const request = rewardRequestsFor(user.id)[0];
+  audit(c, 'reward.requested', { userId: user.id, kind, rewardId: request.id });
+  alertAdmins(
+    'reward_requested',
+    { title: `${user.name} requested a reward`, body: describeReward(request), link: '/admin/payouts' },
+    {
+      promoter: `${user.name} (${user.email})`,
+      reward: describeReward(request),
+      details: request.details ?? 'None',
+      link: `${config.appUrl}/admin/payouts`,
+    },
+  );
+  return c.redirect('/payouts?ok=reward_requested#rewards');
+});
+
+app.get('/account', (c) =>
+  c.html(<AccountPage user={c.get('user')} ok={flash(c.req.query('ok'))} error={flash(c.req.query('error'))} />),
+);
+
+// Sent by the installed app the first time it opens, or by "I already installed it".
+app.post('/account/app-installed', (c) => {
+  markAppInstalled(c.get('user').id);
+  markSessionApp(c.get('sessionId'));
+  return c.json({ ok: true });
+});
+
+async function renderSecurity(c: Context<Env>, extra: { setupSecret?: string; recoveryCodes?: string[]; error?: string } = {}) {
+  const user = findUser(c.get('user').id)!;
+  const secret = extra.setupSecret ?? (c.req.query('setup') ? user.totp_pending : null);
+  return c.html(
+    <SecurityPage
+      user={user}
+      sessions={sessionsFor(user.id)}
+      currentSessionId={c.get('sessionId')}
+      twoFactorOn={hasTwoFactor(user)}
+      codesLeft={recoveryCodesLeft(user.id)}
+      setup={secret ? await setupQr(user, secret) : null}
+      setupSecret={secret ?? null}
+      recoveryCodes={extra.recoveryCodes}
+      ok={flash(c.req.query('ok'))}
+      error={extra.error ?? flash(c.req.query('error'))}
+    />,
+    extra.error ? 400 : 200,
+  );
+}
+
+app.get('/account/security', (c) => renderSecurity(c));
+
+app.post('/account/security/devices/:id/sign-out', (c) => {
+  const id = Number(c.req.param('id'));
+  if (id === c.get('sessionId')) return c.redirect('/account/security');
+  const done = revokeSession(c.get('user').id, id);
+  audit(c, 'security.device_signed_out', { userId: c.get('user').id, done });
+  return c.redirect('/account/security?ok=device_out');
+});
+
+app.post('/account/security/devices/sign-out-others', (c) => {
+  const n = revokeOtherSessions(c.get('user').id, c.get('sessionId'));
+  audit(c, 'security.others_signed_out', { userId: c.get('user').id, count: n });
+  return c.redirect('/account/security?ok=others_out');
+});
+
+app.post('/account/security/2fa/start', (c) => {
+  const user = c.get('user');
+  if (hasTwoFactor(user)) return c.redirect('/account/security');
+  startSetup(user.id);
+  return c.redirect('/account/security?setup=1#two-step');
+});
+
+app.post('/account/security/2fa/confirm', async (c) => {
+  const user = findUser(c.get('user').id)!;
+  const codes = confirmSetup(user, String((await c.req.parseBody()).code ?? ''));
+  if (!codes) return renderSecurity(c, { setupSecret: user.totp_pending ?? undefined, error: messages.code_wrong });
+  audit(c, 'security.2fa_on', { userId: user.id });
+  // Other devices signed in before; they keep their sessions, the next sign-ins ask for a code.
+  return renderSecurity(c, { recoveryCodes: codes });
+});
+
+app.post('/account/security/2fa/:action{off|new-codes}', async (c) => {
+  const user = findUser(c.get('user').id)!;
+  if (!hasTwoFactor(user)) return c.redirect('/account/security');
+  if (!verifySecondFactor(user, String((await c.req.parseBody()).code ?? ''))) return renderSecurity(c, { error: messages.code_wrong });
+  if (c.req.param('action') === 'off') {
+    disableTwoFactor(user.id);
+    audit(c, 'security.2fa_off', { userId: user.id });
+    return c.redirect('/account/security?ok=2fa_off');
+  }
+  audit(c, 'security.2fa_new_codes', { userId: user.id });
+  return renderSecurity(c, { recoveryCodes: newRecoveryCodes(user.id) });
+});
+
+// Promoters see their own photo; admins see everyone's.
+app.get('/avatar/:userId', (c) => {
+  const viewer = c.get('user');
+  const userId = Number(c.req.param('userId'));
+  if (viewer.id !== userId && !viewer.is_admin) return c.notFound();
+  const avatar = readAvatar(userId);
+  if (!avatar) return c.notFound();
+  c.header('Content-Type', avatar.type);
+  c.header('Cache-Control', 'private, max-age=604800');
+  return c.body(new Uint8Array(avatar.bytes));
+});
+
+app.post('/account/profile', async (c) => {
+  const user = c.get('user');
+  const body = await c.req.parseBody();
+  const alias = String(body.alias ?? user.alias ?? '').trim().toLowerCase();
+  if (!aliasPattern.test(alias)) return c.redirect('/account?error=alias_invalid');
+  if (aliasTaken(alias, user.id)) return c.redirect('/account?error=alias_taken');
+  setAlias(user.id, alias);
+  const text = (key: string, max: number) => String(body[key] ?? '').trim().slice(0, max) || null;
+  const theme = ['light', 'dark', 'system'].includes(String(body.theme)) ? String(body.theme) : 'system';
+  const method = String(body.payout_method ?? '');
+  updateProfile(user.id, {
+    first_name: text('first_name', 60),
+    last_name: text('last_name', 60),
+    phone: text('phone', 30),
+    city: text('city', 80),
+    instagram: text('instagram', 60)?.replace(/^@?/, '@') ?? null,
+    payout_method: config.payoutMethods.includes(method) ? method : null,
+    payout_details: text('payout_details', 200),
+    theme,
+  });
+  audit(c, 'account.profile_updated', { userId: user.id });
+  const photo = body.photo;
+  if (photo instanceof File && photo.size > 0) {
+    const result = saveUploadedAvatar(user.id, new Uint8Array(await photo.arrayBuffer()));
+    if (result !== 'ok') return c.redirect(`/account?error=${result === 'too_big' ? 'photo_size' : 'photo_type'}`);
+  } else if (body.use_instagram_photo === '1') {
+    await useInstagramAvatar(findUser(user.id)!);
+  } else {
+    // In the background: Instagram can be slow, and a missing photo is not worth waiting for.
+    const updated = findUser(user.id)!;
+    setTimeout(() => void refreshInstagramAvatar(updated, updated.instagram?.replace(/^@/, '').toLowerCase() !== user.avatar_for), 0);
+  }
+  return c.redirect('/account?ok=saved');
+});
+
+app.post('/account/password', async (c) => {
+  const user = c.get('user');
+  const body = await c.req.parseBody();
+  const password = String(body.password ?? '');
+  // Accounts that sign in by email link have no password to change.
+  if (!user.password_hash) return c.redirect('/account');
+  if (!(await Bun.password.verify(String(body.current ?? ''), user.password_hash))) {
+    return c.html(<AccountPage user={user} error={messages.wrong} />, 400);
+  }
+  if (password.length < MIN_PASSWORD) return c.html(<AccountPage user={user} error={messages.short} />, 400);
+  await setPassword(user.id, password);
+  audit(c, 'account.password_changed', { userId: user.id });
+  startSession(c, user.id);
+  return c.redirect('/account?ok=password');
+});
+
+app.get('/admin', async (c) =>
+  c.html(
+    <AdminPage
+      user={c.get('user')}
+      promoters={listUsers()}
+      promoCodes={await allPromoCodes()}
+      owners={codeOwners()}
+      ok={flash(c.req.query('ok'))}
+      error={flash(c.req.query('error'))}
+    />,
+  ),
+);
+
+app.post('/admin/promoters', async (c) => {
+  const body = await c.req.parseBody();
+  const name = String(body.name ?? '').trim();
+  const email = String(body.email ?? '').trim();
+  const commissionPercent = parseCommission(body.commission_percent);
+  if (!name || !email) return c.redirect('/admin?error=missing');
+  if (commissionPercent === 'invalid') return c.redirect('/admin?error=commission');
+  if (findUserByEmail(email)) return c.redirect('/admin?error=exists');
+  const id = await createUser({ name, email, isAdmin: body.is_admin === '1', commissionPercent });
+  setCodes(id, normalizeCodes(String(body.codes ?? '')));
+  setAlias(id, suggestAlias(name, id));
+  audit(c, 'admin.promoter_created', { by: c.get('user').id, userId: id, isAdmin: body.is_admin === '1', commissionPercent });
+  if (body.invite !== '1') return c.redirect(`/admin/promoters/${id}?ok=created`);
+  const sent = await emailLoginLink(findUser(id)!, 'invite', undefined, 1);
+  return c.redirect(sent ? `/admin/promoters/${id}?ok=invited` : `/admin/promoters/${id}?error=mail_failed`);
+});
+
+app.get('/admin/promoters/:id', async (c) => {
+  const promoter = findUser(Number(c.req.param('id')));
+  if (!promoter) return c.notFound();
+  const data = await promoterData(promoter);
+  return c.html(
+    <PromoterPage
+      user={c.get('user')}
+      promoter={promoter}
+      codes={data.codes}
+      balances={data.balances}
+      payouts={payoutsFor(promoter.id)}
+      rewardRequests={rewardRequestsFor(promoter.id)}
+      rewards={data.rewards}
+      adjustments={adjustmentsFor(promoter.id)}
+      ok={flash(c.req.query('ok'))}
+      error={flash(c.req.query('error'))}
+    />,
+  );
+});
+
+app.post('/admin/promoters/:id', async (c) => {
+  const promoter = findUser(Number(c.req.param('id')));
+  if (!promoter) return c.notFound();
+  const back = `/admin/promoters/${promoter.id}`;
+  const body = await c.req.parseBody();
+  const name = String(body.name ?? '').trim();
+  const email = String(body.email ?? '').trim();
+  const isAdmin = body.is_admin === '1';
+  const commissionPercent = parseCommission(body.commission_percent);
+  if (!name || !email) return c.redirect(`${back}?error=missing`);
+  if (commissionPercent === 'invalid') return c.redirect(`${back}?error=commission`);
+  const existing = findUserByEmail(email);
+  if (existing && existing.id !== promoter.id) return c.redirect(`${back}?error=exists`);
+  if (promoter.is_admin && !isAdmin && countAdmins() === 1) return c.redirect(`${back}?error=last_admin`);
+  const alias = String(body.alias ?? promoter.alias ?? '').trim().toLowerCase();
+  if (!aliasPattern.test(alias)) return c.redirect(`${back}?error=alias_invalid`);
+  if (aliasTaken(alias, promoter.id)) return c.redirect(`${back}?error=alias_taken`);
+  setAlias(promoter.id, alias);
+  updateUser(promoter.id, { name, email, isAdmin, commissionPercent });
+  if (email.toLowerCase() !== promoter.email.toLowerCase()) {
+    revokeAccess(promoter.id);
+    if (promoter.id === c.get('user').id) startSession(c, promoter.id);
+  }
+  audit(c, 'admin.promoter_updated', {
+    by: c.get('user').id,
+    userId: promoter.id,
+    emailChanged: email.toLowerCase() !== promoter.email.toLowerCase(),
+    isAdmin,
+    commissionPercent,
+  });
+  setCodes(promoter.id, normalizeCodes(String(body.codes ?? '')));
+  return c.redirect(`${back}?ok=saved`);
+});
+
+app.post('/admin/promoters/:id/invite', async (c) => {
+  const promoter = findUser(Number(c.req.param('id')));
+  if (!promoter) return c.notFound();
+  const sent = await emailLoginLink(promoter, 'invite', undefined, 1);
+  audit(c, 'admin.link_sent', { by: c.get('user').id, userId: promoter.id, sent });
+  return c.redirect(`/admin/promoters/${promoter.id}?${sent ? 'ok=link_sent' : 'error=mail_failed'}`);
+});
+
+// Changes by hand: money, sales outside Hi.Events, free tickets and merch.
+app.post('/admin/promoters/:id/adjust', async (c) => {
+  const promoter = findUser(Number(c.req.param('id')));
+  if (!promoter) return c.notFound();
+  const back = `/admin/promoters/${promoter.id}`;
+  const body = await c.req.parseBody();
+  const admin = c.get('user');
+  const kind = String(body.kind ?? '');
+  const label = String(body.label ?? '').trim();
+  const rawAmount = String(body.amount ?? '').trim().replace(',', '.');
+  const amountCents = rawAmount === '' ? 0 : /^-?[0-9]+(\.[0-9]{1,2})?$/.test(rawAmount) ? Math.round(Number(rawAmount) * 100) : NaN;
+  const quantity = Number(body.quantity ?? 0);
+  if (!label) return c.redirect(`${back}?error=adjust_reason#adjust`);
+  const data = await promoterData(promoter);
+  const currency = data.balances[0]?.currency ?? 'CAD';
+  const wholeNumber = Number.isInteger(quantity) && quantity !== 0 && Math.abs(quantity) <= 10_000;
+  let message: { title: string; body: string } | null = null;
+
+  if (kind === 'money') {
+    if (!Number.isFinite(amountCents) || amountCents === 0 || Math.abs(amountCents) > 10_000_00) return c.redirect(`${back}?error=adjust_amount#adjust`);
+    addAdjustment(admin, promoter.id, { kind: 'money', amountCents, currency, label });
+    message = {
+      title: amountCents > 0 ? `${formatMoney(amountCents, currency)} added to your balance` : `${formatMoney(-amountCents, currency)} removed from your balance`,
+      body: label,
+    };
+  } else if (kind === 'outside_sale') {
+    if (!wholeNumber || !Number.isFinite(amountCents) || Math.abs(amountCents) > 10_000_00) return c.redirect(`${back}?error=adjust_amount#adjust`);
+    addAdjustment(admin, promoter.id, { kind: 'tickets_sold', quantity, label });
+    if (amountCents !== 0) addAdjustment(admin, promoter.id, { kind: 'money', amountCents, currency, label: `${label} (commission)` });
+    message = {
+      title: `${quantity} ${Math.abs(quantity) === 1 ? 'ticket' : 'tickets'} added: ${label}`,
+      body: amountCents ? `${formatMoney(amountCents, currency)} commission added to your balance.` : 'They count for your levels and rewards.',
+    };
+  } else if (kind === 'free_tickets') {
+    const eventId = Number(body.event_id);
+    const event = data.rewards.tickets.find((t) => t.event.id === eventId)?.event;
+    if (!event) return c.redirect(`${back}?error=adjust_event#adjust`);
+    if (!wholeNumber) return c.redirect(`${back}?error=adjust_amount#adjust`);
+    addAdjustment(admin, promoter.id, { kind: 'free_tickets', quantity, eventId, label });
+    message = {
+      title: quantity > 0 ? `${quantity} free ${quantity === 1 ? 'ticket' : 'tickets'} for ${event.title}` : `Free tickets for ${event.title} changed`,
+      body: `${label}. Request them on Payouts & rewards.`,
+    };
+  } else if (kind === 'merch') {
+    if (!wholeNumber) return c.redirect(`${back}?error=adjust_amount#adjust`);
+    addAdjustment(admin, promoter.id, { kind: 'merch', quantity, label });
+    message = { title: quantity > 0 ? 'Merch for you' : 'Merch changed', body: `${label}. Request it on Payouts & rewards.` };
+  } else {
+    return c.redirect(back);
+  }
+  audit(c, 'admin.adjustment', { by: admin.id, userId: promoter.id, kind, amountCents, quantity, label });
+  if (body.notify === '1' && message) notify(promoter.id, { ...message, link: '/payouts' });
+  // A level or merch reached through these changes is announced right away.
+  checkMilestones(promoter, (await promoterData(promoter)).rewards);
+  return c.redirect(`${back}?ok=adjusted#adjust`);
+});
+
+app.post('/admin/promoters/:id/adjust/:adjustmentId/undo', (c) => {
+  const promoterId = Number(c.req.param('id'));
+  const entry = findAdjustment(Number(c.req.param('adjustmentId')));
+  if (!entry || entry.user_id !== promoterId) return c.notFound();
+  removeAdjustment(entry.id);
+  audit(c, 'admin.adjustment_undone', { by: c.get('user').id, userId: promoterId, entry: describeAdjustment(entry, formatMoney), label: entry.label });
+  return c.redirect(`/admin/promoters/${promoterId}?ok=undone#adjust`);
+});
+
+// For a promoter who lost their phone and their recovery codes.
+app.post('/admin/promoters/:id/2fa-reset', (c) => {
+  const promoter = findUser(Number(c.req.param('id')));
+  if (!promoter) return c.notFound();
+  disableTwoFactor(promoter.id);
+  audit(c, 'admin.2fa_reset', { by: c.get('user').id, userId: promoter.id });
+  notify(promoter.id, {
+    title: 'Two-step verification was reset',
+    body: 'An admin turned off two-step verification on your account. Turn it on again under Security.',
+    link: '/account/security',
+  });
+  return c.redirect(`/admin/promoters/${promoter.id}?ok=2fa_reset`);
+});
+
+app.post('/admin/promoters/:id/delete', async (c) => {
+  const promoter = findUser(Number(c.req.param('id')));
+  if (!promoter) return c.notFound();
+  if ((await c.req.parseBody()).confirm !== '1') return c.redirect(`/admin/promoters/${promoter.id}`);
+  if (promoter.is_admin && countAdmins() === 1) return c.redirect(`/admin/promoters/${promoter.id}?error=last_admin`);
+  deleteUser(promoter.id);
+  audit(c, 'admin.promoter_deleted', { by: c.get('user').id, userId: promoter.id, email: promoter.email });
+  return c.redirect('/admin?ok=deleted');
+});
+
+app.get('/admin/promoters/:id/view', async (c) => {
+  const promoter = findUser(Number(c.req.param('id')));
+  if (!promoter) return c.notFound();
+  return renderDashboard(c, promoter, `/admin/promoters/${promoter.id}/view`);
+});
+
+app.get('/admin/promoters/:id/view/events/:eventId', async (c) => {
+  const promoter = findUser(Number(c.req.param('id')));
+  if (!promoter) return c.notFound();
+  return renderEvent(c, promoter, `/admin/promoters/${promoter.id}/view`);
+});
+
+app.get('/admin/dashboard', async (c) => {
+  const range = parseRange(c.req.query('range'), '30');
+  const sortParam = c.req.query('sort');
+  const sort: Sort = sortParam === 'sales' || sortParam === 'commission' ? sortParam : 'tickets';
+  return c.html(<AdminDashboardPage user={c.get('user')} board={await leaderboard(range, sort)} range={range} sort={sort} />);
+});
+
+app.get('/admin/links', (c) => {
+  const { baseUrl, template } = linkSettings();
+  const example = baseUrl ? eventLink({ id: 123, title: 'Warehouse Night' }, 'DJMAX', 'dj-max') : null;
+  return c.html(
+    <AdminLinksPage user={c.get('user')} baseUrl={baseUrl} template={template} example={example} ok={flash(c.req.query('ok'))} error={flash(c.req.query('error'))} />,
+  );
+});
+
+app.post('/admin/links', async (c) => {
+  const body = await c.req.parseBody();
+  const baseUrl = String(body.base_url ?? '').trim();
+  if (!/^https?:\/\/[^\s/]+/.test(baseUrl)) return c.redirect('/admin/links?error=bad_url');
+  saveLinkSettings(baseUrl, String(body.template ?? '').slice(0, 300));
+  audit(c, 'admin.links_saved', { by: c.get('user').id });
+  return c.redirect('/admin/links?ok=saved');
+});
+
+app.get('/admin/emails', (c) =>
+  c.html(<AdminEmailsPage user={c.get('user')} log={recentEmails()} ok={flash(c.req.query('ok'))} error={flash(c.req.query('error'))} />),
+);
+
+app.post('/admin/emails/settings', async (c) => {
+  const replyTo = String((await c.req.parseBody()).reply_to ?? '').trim();
+  if (replyTo && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(replyTo)) return c.redirect('/admin/emails?error=bad_email');
+  saveReplyTo(replyTo);
+  audit(c, 'admin.email_settings', { by: c.get('user').id, replyTo });
+  return c.redirect('/admin/emails?ok=saved');
+});
+
+const emailType = (raw: string) => (emailTypes.includes(raw as EmailType) ? (raw as EmailType) : null);
+
+app.get('/admin/emails/:type', (c) => {
+  const type = emailType(c.req.param('type'));
+  if (!type) return c.notFound();
+  return c.html(
+    <AdminEmailEditPage
+      user={c.get('user')}
+      type={type}
+      version={String(Date.now())}
+      ok={flash(c.req.query('ok'))}
+      error={flash(c.req.query('error'))}
+    />,
+  );
+});
+
+app.get('/admin/emails/:type/preview', (c) => {
+  const type = emailType(c.req.param('type'));
+  if (!type) return c.notFound();
+  return c.html(renderEmail(type, sampleVars(type, c.get('user').name)).html);
+});
+
+app.post('/admin/emails/:type', async (c) => {
+  const type = emailType(c.req.param('type'));
+  if (!type) return c.notFound();
+  const body = await c.req.parseBody();
+  const back = `/admin/emails/${type}`;
+  if (body.action === 'reset') {
+    resetTemplate(type);
+    audit(c, 'admin.email_reset', { by: c.get('user').id, type });
+    return c.redirect(`${back}?ok=reset`);
+  }
+  saveTemplate(type, {
+    subject: String(body.subject ?? ''),
+    heading: String(body.heading ?? ''),
+    body: String(body.body ?? ''),
+    button: String(body.button ?? ''),
+  });
+  audit(c, 'admin.email_saved', { by: c.get('user').id, type });
+  if (body.action !== 'test') return c.redirect(`${back}?ok=saved`);
+  const me = c.get('user');
+  const sent = await sendEmail(type, [me], sampleVars(type, me.name), getTemplate(type), { attempts: 1 });
+  return c.redirect(`${back}?${sent ? 'ok=test_sent' : 'error=test_failed'}`);
+});
+
+app.get('/admin/branding', (c) =>
+  c.html(<AdminBrandingPage user={c.get('user')} ok={flash(c.req.query('ok'))} error={flash(c.req.query('error'))} />),
+);
+
+app.post('/admin/branding', async (c) => {
+  const body = await c.req.parseBody();
+  const accent = String(body.accent ?? '').trim();
+  if (!isHex(accent)) return c.redirect('/admin/branding?error=bad_color');
+  const logo = body.logo;
+  if (logo instanceof File && logo.size > 0) {
+    if (logo.size > maxLogoBytes) return c.redirect('/admin/branding?error=logo_size');
+    const bytes = new Uint8Array(await logo.arrayBuffer());
+    const type = sniffImage(bytes);
+    if (!type) return c.redirect('/admin/branding?error=logo_type');
+    saveLogo(bytes, type);
+  } else if (body.remove_logo === '1') {
+    removeLogo();
+  }
+  updateBrand({
+    name: String(body.name ?? ''),
+    accent,
+    loginMessage: String(body.login_message ?? ''),
+    footer: String(body.footer ?? ''),
+  });
+  audit(c, 'admin.branding_updated', { by: c.get('user').id, accent, logo: logo instanceof File && logo.size > 0 });
+  return c.redirect('/admin/branding?ok=saved');
+});
+
+app.get('/admin/payouts', (c) =>
+  c.html(
+    <AdminPayoutsPage
+      user={c.get('user')}
+      pending={listPayouts('pending')}
+      done={listPayouts('done')}
+      pendingRewards={listRewardRequests('pending')}
+      doneRewards={listRewardRequests('done')}
+      ok={flash(c.req.query('ok'))}
+      error={flash(c.req.query('error'))}
+    />,
+  ),
+);
+
+app.post('/admin/rewards/:id/:action{fulfil|reject}', async (c) => {
+  const reward = findRewardRequest(Number(c.req.param('id')));
+  if (!reward) return c.notFound();
+  const status = c.req.param('action') === 'fulfil' ? 'fulfilled' : 'rejected';
+  const adminNote = String((await c.req.parseBody()).admin_note ?? '').slice(0, 200);
+  if (status === 'rejected' && !adminNote.trim()) return c.redirect('/admin/payouts');
+  if (!settleReward(reward.id, c.get('user').id, status, adminNote)) return c.redirect('/admin/payouts?error=payout_gone');
+  audit(c, `reward.${status}`, { by: c.get('user').id, rewardId: reward.id, userId: reward.user_id });
+  const what = describeReward(reward);
+  if (reward.user_id) {
+    notify(reward.user_id, {
+      title: status === 'fulfilled' ? 'Reward on its way' : 'Reward request declined',
+      body: `${what}${adminNote.trim() ? `: ${adminNote.trim()}` : ''}`,
+      link: '/payouts#rewards',
+    });
+  }
+  setTimeout(
+    () =>
+      void sendEmail(status === 'fulfilled' ? 'reward_given' : 'reward_declined', [{ name: reward.promoter_name, email: reward.promoter_email }], {
+        reward: what,
+        note: adminNote.trim(),
+        link: `${config.appUrl}/payouts#rewards`,
+      }),
+    0,
+  );
+  return c.redirect(`/admin/payouts?ok=reward_${status}`);
+});
+
+app.post('/admin/payouts/:id/:action{paid|reject}', async (c) => {
+  const payout = findPayout(Number(c.req.param('id')));
+  if (!payout) return c.notFound();
+  const status = c.req.param('action') === 'paid' ? 'paid' : 'rejected';
+  const adminNote = String((await c.req.parseBody()).admin_note ?? '').slice(0, 200);
+  if (status === 'rejected' && !adminNote.trim()) return c.redirect('/admin/payouts');
+  if (!settlePayout(payout.id, c.get('user').id, status, adminNote)) return c.redirect('/admin/payouts?error=payout_gone');
+  audit(c, `payout.${status}`, { by: c.get('user').id, payoutId: payout.id, userId: payout.user_id });
+  const amount = formatMoney(payout.amount_cents, payout.currency);
+  if (payout.user_id) {
+    notify(payout.user_id, {
+      title: status === 'paid' ? `Payout sent: ${amount}` : `Payout request declined: ${amount}`,
+      body:
+        status === 'paid'
+          ? `By ${payout.method}${payout.details ? ` to ${payout.details}` : ''}.${adminNote.trim() ? ` Reference: ${adminNote.trim()}` : ''}`
+          : `${adminNote.trim()} The amount is available to request again.`,
+      link: '/payouts',
+    });
+  }
+  const to = [{ name: payout.promoter_name, email: payout.promoter_email }];
+  setTimeout(
+    () =>
+      void sendEmail(status === 'paid' ? 'payout_paid' : 'payout_declined', to, {
+        amount,
+        method: payout.method,
+        details: payout.details ? `to ${payout.details}` : '',
+        note: status === 'paid' ? (adminNote.trim() ? `Reference: ${adminNote.trim()}` : '') : adminNote.trim(),
+        link: `${config.appUrl}/payouts`,
+      }),
+    0,
+  );
+  return c.redirect(`/admin/payouts?ok=payout_${status}`);
+});
+
+app.onError((err, c) => {
+  if (err instanceof HTTPException) return err.getResponse();
+  console.error(err);
+  return c.text('Something went wrong. Please try again in a moment.', 500);
+});
+
+// Create the first admin from the environment so there is always a way in.
+if (config.adminEmail && config.adminPassword && !findUserByEmail(config.adminEmail)) {
+  await createUser({ email: config.adminEmail, name: 'Admin', password: config.adminPassword, isAdmin: true });
+  console.log(`Created admin ${config.adminEmail}`);
+}
+
+ensureAliases();
+purgeExpiredSessions();
+setInterval(() => {
+  purgeExpiredSessions();
+  purgeOldNotifications();
+  purgeEmailLog();
+  purgePendingSignIns();
+  void refreshAllAvatars();
+}, 60 * 60 * 1000);
+// New sales become milestone notifications within a few minutes, even if nobody has the app open.
+setInterval(() => void checkAllMilestones(), config.milestoneCheckMinutes * 60 * 1000);
+setTimeout(() => void checkAllMilestones(), 10_000);
+
+// Fail fast if the Hi.Events database is unreachable or the role lacks access.
+await sql`SELECT 1 FROM promo_codes LIMIT 1`;
+console.log(`Listening on :${config.port}`);
+
+// Above the slowest request (one mail attempt with its 10-20 s timeouts), so nobody gets an empty reply.
+export default { port: config.port, fetch: app.fetch, idleTimeout: 45 };

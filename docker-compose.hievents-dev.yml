@@ -1,0 +1,11 @@
+# Connects the app to the Hi.Events development stack (~/hi.events/docker/development),
+# so it can reach its Postgres ("pgsql") and Mailpit ("mailpit") by name.
+#   docker compose -f docker-compose.yml -f docker-compose.hievents-dev.yml up -d --build
+services:
+  promoter-stats:
+    networks: [default, hievents-dev]
+
+networks:
+  hievents-dev:
+    external: true
+    name: development_app
