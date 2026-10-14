@@ -1,0 +1,66 @@
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "23 6 * * 1" # Mondays 06:23 UTC
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    name: Analyze (javascript-typescript)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      actions: read # needed by CodeQL on private repositories
+      security-events: write # upload results to code scanning (when enabled)
+    env:
+      # Code scanning on a private repository needs GitHub Advanced Security (GitHub Code Security).
+      # Until it is available, set nothing: results are kept as an artifact and any finding fails the job.
+      # Once it is, add the repository variable CODE_SCANNING_UPLOAD=true to send results to the Security tab.
+      UPLOAD: ${{ vars.CODE_SCANNING_UPLOAD == 'true' && 'always' || 'never' }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: github/codeql-action/init@v4
+        with:
+          languages: javascript-typescript
+          build-mode: none
+
+      - uses: github/codeql-action/analyze@v4
+        with:
+          category: /language:javascript-typescript
+          upload: ${{ env.UPLOAD }}
+          output: ${{ runner.temp }}/codeql-results
+
+      - name: Keep the SARIF report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: codeql-sarif
+          path: ${{ runner.temp }}/codeql-results
+          if-no-files-found: ignore
+          retention-days: 30
+
+      - name: Fail on findings (when not uploading to code scanning)
+        if: env.UPLOAD == 'never'
+        run: |
+          count=$(jq '[.runs[].results[]] | length' "$RUNNER_TEMP"/codeql-results/*.sarif)
+          echo "CodeQL findings: $count"
+          if [ "$count" -gt 0 ]; then
+            jq -r '.runs[].results[] | "::error file=\(.locations[0].physicalLocation.artifactLocation.uri),line=\(.locations[0].physicalLocation.region.startLine)::\(.ruleId): \(.message.text)"' \
+              "$RUNNER_TEMP"/codeql-results/*.sarif
+            exit 1
+          fi
