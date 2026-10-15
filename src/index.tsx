@@ -1087,7 +1087,15 @@ app.get('/admin/dashboard', async (c) => {
   const range = parseRange(c.req.query('range'), '30');
   const sortParam = c.req.query('sort');
   const sort: Sort = sortParam === 'sales' || sortParam === 'commission' ? sortParam : 'tickets';
-  return c.html(<AdminDashboardPage user={c.get('user')} board={await leaderboard(range, sort)} range={range} sort={sort} />);
+  return c.html(
+    <AdminDashboardPage
+      user={c.get('user')}
+      board={await leaderboard(range, sort)}
+      range={range}
+      sort={sort}
+      promoters={listUsers().filter((u) => !u.is_admin)}
+    />,
+  );
 });
 
 app.get('/admin/links', async (c) => {

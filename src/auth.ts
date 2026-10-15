@@ -13,6 +13,19 @@ addColumn('sessions', 'last_seen_at', 'INTEGER');
 addColumn('sessions', 'device', 'TEXT');
 addColumn('sessions', 'ip', 'TEXT');
 addColumn('sessions', 'is_app', 'INTEGER NOT NULL DEFAULT 0');
+// Kept on the account for the admin dashboard, since sessions are deleted when they end or expire.
+addColumn('users', 'last_login_at', 'INTEGER');
+addColumn('users', 'last_seen_at', 'INTEGER');
+// Accounts from before these columns: filled from the sessions and sign-in links still around.
+db.exec(`
+  UPDATE users SET last_login_at = (
+    SELECT max(t) FROM (
+      SELECT max(created_at) AS t FROM sessions WHERE user_id = users.id
+      UNION ALL SELECT max(used_at) FROM login_tokens WHERE user_id = users.id))
+  WHERE last_login_at IS NULL;
+  UPDATE users SET last_seen_at = (SELECT max(last_seen_at) FROM sessions WHERE user_id = users.id)
+  WHERE last_seen_at IS NULL;
+`);
 db.exec(`
   CREATE TABLE IF NOT EXISTS known_devices (
     user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -53,6 +66,7 @@ export function startSession(c: Context, userId: number) {
   db.query(
     'INSERT INTO sessions (token_hash, user_id, expires_at, created_at, last_seen_at, device, ip) VALUES (?, ?, ?, ?, ?, ?, ?)',
   ).run(hashToken(token), userId, now + maxAge, now, now, device, clientIp(c));
+  db.query('UPDATE users SET last_login_at = ?, last_seen_at = ? WHERE id = ?').run(now, now, userId);
   // A sign-in from a kind of device never seen for this account gets a heads-up.
   const known = db.query<{ device: string }, [number]>('SELECT device FROM known_devices WHERE user_id = ?').all(userId);
   if (!known.some((k) => k.device === device)) {
@@ -96,6 +110,7 @@ function currentSession(c: Context): { user: User; sessionId: number } | null {
   // "Last active" is kept to the nearest few minutes rather than written on every request.
   if (!session.last_seen_at || now - session.last_seen_at > 300) {
     db.query('UPDATE sessions SET last_seen_at = ? WHERE rowid = ?').run(now, session.rowid);
+    db.query('UPDATE users SET last_seen_at = ? WHERE id = ?').run(now, user.id);
   }
   return { user, sessionId: session.rowid };
 }

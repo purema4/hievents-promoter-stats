@@ -165,6 +165,8 @@ table.leaderboard td.rank { width: 40px; }
 .rank-2 { background: #c9ced6; color: #22262b; }
 .rank-3 { background: #d69a5c; color: #33200c; }
 table.leaderboard a.who { color: inherit; text-decoration: none; gap: 10px; }
+table.activity td { vertical-align: middle; white-space: nowrap; }
+table.activity td .muted, table.activity td.muted { font-size: inherit; }
 .level-badge.tiny { font-size: 11px; padding: 0 7px; border-width: 1px; margin-left: 8px; vertical-align: 1px; }
 .device-list { display: grid; gap: 8px; }
 .device { display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
@@ -1997,7 +1999,75 @@ export function AdminLinksPage(props: {
 // Drawn with CSS rather than emoji, which some phones and fonts show as empty boxes.
 const medal = (rank: number) => <span class={`rank-badge${rank <= 3 ? ` rank-${rank}` : ''}`}>{rank}</span>;
 
-export function AdminDashboardPage(props: { user: User; board: Leaderboard; range: Range; sort: Sort }) {
+/** When each promoter last came, signed in, installed the app and turned on two-step verification. */
+function PromoterActivity(props: { promoters: User[] }) {
+  // Most recently active first; never signed in last.
+  const promoters = [...props.promoters].sort((a, b) => (b.last_seen_at ?? 0) - (a.last_seen_at ?? 0) || a.name.localeCompare(b.name));
+  const installed = promoters.filter((p) => p.app_installed_at).length;
+  const twoFactor = promoters.filter((p) => p.totp_enabled_at).length;
+  const ago = (epoch: number, now: string) => {
+    const text = since(epoch).replace('active now', now);
+    return text[0]!.toUpperCase() + text.slice(1);
+  };
+  const day = (epoch: number) => new Intl.DateTimeFormat('en-CA', { dateStyle: 'medium', timeZone: config.timezone }).format(new Date(epoch * 1000));
+  return (
+    <>
+      <h2 id="activity">Promoter activity</h2>
+      {promoters.length === 0 ? (
+        <p class="muted">No promoters yet.</p>
+      ) : (
+        <>
+          <p class="muted">
+            {installed} of {promoters.length} installed the app · {twoFactor} of {promoters.length} use two-step verification.
+          </p>
+          <div class="card table-wrap">
+            <table class="leaderboard activity">
+              <thead>
+                <tr>
+                  <th>Promoter</th>
+                  <th>Last active</th>
+                  <th>Last sign-in</th>
+                  <th>App</th>
+                  <th>Two-step</th>
+                </tr>
+              </thead>
+              <tbody>
+                {promoters.map((p) => (
+                  <tr>
+                    <td>
+                      <a class="who" href={`/admin/promoters/${p.id}`}>
+                        <Avatar user={p} size="small" />
+                        <span>{p.name}</span>
+                      </a>
+                    </td>
+                    <td class={p.last_seen_at ? undefined : 'muted'}>{p.last_seen_at ? ago(p.last_seen_at, 'active now') : 'Never'}</td>
+                    <td class={p.last_login_at ? undefined : 'muted'}>{p.last_login_at ? ago(p.last_login_at, 'just now') : 'Never'}</td>
+                    <td>
+                      {p.app_installed_at ? (
+                        <span class="chip" title={`Since ${day(p.app_installed_at)}`}>Installed</span>
+                      ) : (
+                        <span class="muted">No</span>
+                      )}
+                    </td>
+                    <td>
+                      {p.totp_enabled_at ? (
+                        <span class="chip" title={`Since ${day(p.totp_enabled_at)}`}>On</span>
+                      ) : (
+                        <span class="muted">Off</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+    </>
+  );
+}
+
+export function AdminDashboardPage(props: { user: User; board: Leaderboard; range: Range; sort: Sort; promoters: User[] }) {
   const { board, range, sort } = props;
   const cur = board.currency;
   const sortHref = (s: Sort) => `/admin/dashboard?range=${range}&sort=${s}`;
@@ -2079,6 +2149,8 @@ export function AdminDashboardPage(props: { user: User; board: Leaderboard; rang
           </table>
         </div>
       )}
+
+      <PromoterActivity promoters={props.promoters} />
     </Layout>
   );
 }

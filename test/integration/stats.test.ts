@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { Client, describeIntegration, newPromoter, signInAdmin, startServer, stats, text, type Server } from './harness';
+import { Client, createPromoter, currentStep, describeIntegration, newPromoter, signInAdmin, startServer, stats, text, totp, type Server } from './harness';
 
 // Expected numbers from dev/seed.sql for a promoter with the code DJMAX (also matches "djmax") at 10%,
 // with no HIEVENTS_ACCOUNT_IDS filter. Events: 1 Warehouse Night (+17 days), 2 Winter Opening (+60 days,
@@ -124,6 +124,23 @@ describeIntegration('sales numbers from the seeded Hi.Events database', () => {
   test('the admin dashboard counts the promoter', async () => {
     const html = await admin.page('/admin/dashboard?range=all');
     expect(html).toContain(promoter.name);
+  });
+
+  test('the admin dashboard shows when promoters were last active and signed in, the app and two-step', async () => {
+    const never = await createPromoter(admin, { codes: 'DJMAX' });
+    const active = await newPromoter(server, admin, { codes: 'DJMAX' });
+    expect((await active.client.post('/account/app-installed')).status).toBeLessThan(400);
+    await active.client.post('/account/security/2fa/start');
+    const secret = (await active.client.page('/account/security?setup=1')).match(/<p class="secret">([A-Z2-7 ]+)<\/p>/)![1]!.replace(/ /g, '');
+    expect((await active.client.post('/account/security/2fa/confirm', { code: totp(secret, currentStep()) })).status).toBe(200);
+
+    const page = text(await admin.page('/admin/dashboard'));
+    const activity = page.slice(page.indexOf('Promoter activity'));
+    expect(activity).toMatch(/\d+ of \d+ installed the app · \d+ of \d+ use two-step verification/);
+    expect(activity).toContain(`${active.name} Active now Just now Installed On`);
+    expect(activity).toContain(`${never.name} Never Never No Off`);
+    // Admins are not listed.
+    expect(activity).not.toContain('Admin');
   });
 
   test('event covers are fetched from HIEVENTS_IMAGE_BASE_URL and passed on', async () => {

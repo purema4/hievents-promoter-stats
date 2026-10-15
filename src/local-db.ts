@@ -106,6 +106,8 @@ export type User = {
   avatar_checked_at?: number | null;
   app_installed_at?: number | null;
   onboarded_at?: number | null;
+  last_login_at?: number | null;
+  last_seen_at?: number | null;
   alias?: string | null;
   totp_secret?: string | null;
   totp_pending?: string | null;

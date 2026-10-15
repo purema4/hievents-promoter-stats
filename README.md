@@ -69,7 +69,7 @@ Each change needs a reason, shows on the promoter's **Payouts & rewards** page u
 
 ## Admin dashboard
 
-Admins land on **Dashboard**: tickets, full-price sales and commission through promoter codes for 7 / 30 / 90 days or all time, what is still owed, a tickets-per-day chart, and the best promoters ranked by tickets, sales or commission with their level and last sale.
+Admins land on **Dashboard**: tickets, full-price sales and commission through promoter codes for 7 / 30 / 90 days or all time, what is still owed, a tickets-per-day chart, and the best promoters ranked by tickets, sales or commission with their level and last sale. Below that, **Promoter activity** lists every promoter with when they were last active and last signed in, whether they installed the app and whether two-step verification is on, most recently active first.
 
 ## Menu
 
