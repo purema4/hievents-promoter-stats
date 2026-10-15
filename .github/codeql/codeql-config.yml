@@ -1,0 +1,5 @@
+name: Promoter stats CodeQL config
+# The test helpers strip HTML from pages to read their text; that code never ships and never
+# handles untrusted input, so it is left out of the analysis of the application.
+paths-ignore:
+  - test/**

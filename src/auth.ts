@@ -1,3 +1,4 @@
+import { randomInt } from 'node:crypto';
 import type { Context, Next } from 'hono';
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
 import { config } from './config';
@@ -183,7 +184,8 @@ export function createLoginToken(
   waiting?: { id: string; from: string },
 ): { token: string; code: string } {
   const token = randomToken();
-  const code = String(crypto.getRandomValues(new Uint32Array(1))[0] % 1_000_000).padStart(6, '0');
+  // randomInt draws without the slight bias a plain modulo of a random number would have.
+  const code = String(randomInt(0, 1_000_000)).padStart(6, '0');
   const now = Math.floor(Date.now() / 1000);
   db.query(
     'INSERT INTO login_tokens (token_hash, user_id, expires_at, code_hash, wait_hash, requested_from, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
