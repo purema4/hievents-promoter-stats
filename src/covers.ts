@@ -34,12 +34,24 @@ async function fetchCover(eventId: number): Promise<Cover | null> {
   if (!path || !/^[A-Za-z0-9_\-./]+$/.test(path) || path.includes('..') || path.startsWith('/')) return null;
   try {
     const res = await fetch(`${config.imageBaseUrl}/${path}`, { signal: AbortSignal.timeout(8000), redirect: 'error' });
-    const type = res.headers.get('content-type') ?? '';
-    if (!res.ok || !/^image\/(png|jpeg|webp|gif|avif)$/.test(type.split(';')[0])) return null;
+    if (!res.ok || Number(res.headers.get('content-length') ?? 0) > MAX_BYTES) return null;
     const bytes = new Uint8Array(await res.arrayBuffer());
     if (bytes.byteLength > MAX_BYTES) return null;
-    return { bytes, type: type.split(';')[0] };
+    // The type comes from the file itself: Hi.Events' nginx labels PNG and WebP files as text/plain.
+    const type = imageType(bytes);
+    return type ? { bytes, type } : null;
   } catch {
     return null;
   }
+}
+
+/** The image type from a file's first bytes, for the formats a browser shows; null for anything else. */
+export function imageType(bytes: Uint8Array): string | null {
+  const ascii = (from: number, to: number) => String.fromCharCode(...bytes.subarray(from, to));
+  if (bytes.length >= 8 && [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a].every((b, i) => bytes[i] === b)) return 'image/png';
+  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return 'image/jpeg';
+  if (bytes.length >= 6 && (ascii(0, 6) === 'GIF87a' || ascii(0, 6) === 'GIF89a')) return 'image/gif';
+  if (bytes.length >= 12 && ascii(0, 4) === 'RIFF' && ascii(8, 12) === 'WEBP') return 'image/webp';
+  if (bytes.length >= 12 && ascii(4, 8) === 'ftyp' && ['avif', 'avis'].includes(ascii(8, 12))) return 'image/avif';
+  return null;
 }
