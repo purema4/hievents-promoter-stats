@@ -87,6 +87,7 @@ import {
   rewardsFor,
   settleReward,
 } from './rewards';
+import { prepareShortLinks, shortLinkStatus } from './short-links';
 import { publicAsset, publicText, serviceWorker } from './static';
 import {
   codeOwners,
@@ -490,6 +491,9 @@ async function renderDashboard(c: Context<Env>, promoter: User, basePath: string
   const data = await promoterData(promoter);
   // Also checked on a timer; checking here makes a new milestone show up the moment they look.
   if (basePath === '') checkMilestones(promoter, data.rewards);
+  // Upcoming event cards carry a link with the first code.
+  const upcoming = summarizeEvents(data.rows, data.percent).filter((e) => !e.end || e.end.getTime() >= Date.now());
+  await prepareShortLinks(promoter, upcoming.map((e) => ({ event: { id: e.id, title: e.title }, code: e.codes[0]! })));
   return c.html(
     <DashboardPage
       viewer={c.get('user')}
@@ -511,6 +515,8 @@ async function renderEvent(c: Context<Env>, promoter: User, basePath: string) {
   const data = await promoterData(promoter);
   // Only events that have one of this promoter's codes exist for them.
   if (!Number.isInteger(eventId) || !data.rows.some((r) => r.event_id === eventId)) return c.notFound();
+  const event = summarizeEvents(data.rows, data.percent).find((e) => e.id === eventId)!;
+  await prepareShortLinks(promoter, event.codes.map((code) => ({ event: { id: event.id, title: event.title }, code })));
   return c.html(
     <EventPage
       viewer={c.get('user')}
@@ -1085,7 +1091,15 @@ app.get('/admin/links', (c) => {
   const { baseUrl, template } = linkSettings();
   const example = baseUrl ? eventLink({ id: 123, title: 'Warehouse Night' }, 'DJMAX', 'dj-max') : null;
   return c.html(
-    <AdminLinksPage user={c.get('user')} baseUrl={baseUrl} template={template} example={example} ok={flash(c.req.query('ok'))} error={flash(c.req.query('error'))} />,
+    <AdminLinksPage
+      user={c.get('user')}
+      baseUrl={baseUrl}
+      template={template}
+      example={example}
+      shortLinks={shortLinkStatus()}
+      ok={flash(c.req.query('ok'))}
+      error={flash(c.req.query('error'))}
+    />,
   );
 });
 

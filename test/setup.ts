@@ -23,7 +23,7 @@ Object.assign(process.env, {
   APP_TIMEZONE: 'America/Toronto',
   HIEVENTS_PUBLIC_URL: 'https://tickets.example.com',
 });
-for (const key of ['SMTP_HOST', 'HIEVENTS_ACCOUNT_IDS', 'ADMIN_EMAIL', 'ADMIN_PASSWORD', 'HIEVENTS_IMAGE_BASE_URL', 'CASH_METHOD']) {
+for (const key of ['SMTP_HOST', 'HIEVENTS_ACCOUNT_IDS', 'ADMIN_EMAIL', 'ADMIN_PASSWORD', 'HIEVENTS_IMAGE_BASE_URL', 'CASH_METHOD', 'KUTT_URL', 'KUTT_API_KEY']) {
   delete process.env[key];
 }
 

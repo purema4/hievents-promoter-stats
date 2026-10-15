@@ -8,6 +8,7 @@ import { describeReward, levelFor, levels, type RewardRequest, type Rewards } fr
 import { describeAdjustment, type Adjustment } from './adjustments';
 import { Avatar, Flash, formatDate, Layout } from './views';
 import { eventLink } from './links';
+import { linkClicks, shareLink } from './short-links';
 
 export type EventSummary = {
   id: number;
@@ -307,7 +308,7 @@ export function DashboardPage(props: {
                   event={e}
                   href={eventHref(e)}
                   freeTickets={freeFor(e)}
-                  link={eventLink({ id: e.id, title: e.title }, e.codes[0]!, props.promoter.alias)}
+                  link={shareLink(props.promoter, { id: e.id, title: e.title }, e.codes[0]!)}
                 />
               ))}
             </div>
@@ -404,12 +405,16 @@ export function EventPage(props: {
         {eventLink({ id: e.id, title: e.title }, e.codes[0]!, props.promoter.alias) ? (
           <>
             <p class="muted">Share it: the promo code is applied automatically and the sale counts for you.</p>
-            {e.codes.map((code) => (
-              <div class="link-row">
-                {e.codes.length > 1 && <span class="code">{code}</span>}
-                <LinkField link={eventLink({ id: e.id, title: e.title }, code, props.promoter.alias)!} label={`${e.title} (${code})`} />
-              </div>
-            ))}
+            {e.codes.map((code) => {
+              const clicks = linkClicks(props.promoter, { id: e.id, title: e.title }, code);
+              return (
+                <div class="link-row">
+                  {e.codes.length > 1 && <span class="code">{code}</span>}
+                  <LinkField link={shareLink(props.promoter, { id: e.id, title: e.title }, code)!} label={`${e.title} (${code})`} />
+                  {clicks !== null && <span class="muted link-clicks">{plural(clicks, 'click')} on this link</span>}
+                </div>
+              );
+            })}
           </>
         ) : (
           <p class="muted">

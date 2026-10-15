@@ -30,6 +30,14 @@ export const config = {
   // Hi.Events' public site (its FRONTEND_URL), for event links. Admins can also set it on /admin/links.
   hieventsPublicUrl: (process.env.HIEVENTS_PUBLIC_URL ?? '').replace(/\/$/, ''),
   imageBaseUrl: (process.env.HIEVENTS_IMAGE_BASE_URL ?? '').replace(/\/$/, ''),
+  // Optional short links for promoters through a Kutt instance: its address and the API key of a Kutt
+  // account kept for this app. Short links are off when either is missing.
+  kutt: {
+    url: (process.env.KUTT_URL ?? '').trim().replace(/\/+$/, ''),
+    apiKey: (process.env.KUTT_API_KEY ?? '').trim(),
+    // How old click counts may get before they are read from Kutt again.
+    clicksMinutes: ((n) => (Number.isFinite(n) && n >= 0 ? n : 10))(Number(process.env.KUTT_CLICKS_MINUTES || 10)),
+  },
   cookieSecure: bool('COOKIE_SECURE', true),
   // Share of sales (after discounts, before taxes and fees) paid back to promoters. Can be overridden per promoter.
   commissionPercent: Number(process.env.COMMISSION_PERCENT ?? 10),

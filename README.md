@@ -44,6 +44,15 @@ Promoters request rewards on **Payouts & rewards** (with a guest-list name, or t
 
 Every promoter has an **alias** (made from their name, changeable by them on Account and by admins on their page), used in their links as `aff=`. On **Event links**, admins set the Hi.Events public site address (its `FRONTEND_URL`, or `HIEVENTS_PUBLIC_URL`) and the format, by default `{event_url}?promo_code={code}&aff={alias}`, where `{event_url}` is `<site>/event/<id>/<slug>` like Hi.Events builds it. Promoters get **Copy** and **Share** buttons on event pages and upcoming event cards. For `aff=` to be tracked by Hi.Events, create an affiliate with the same code as the alias on the event.
 
+### Short links (Kutt)
+
+With `KUTT_URL` and `KUTT_API_KEY` set, promoters share short links from a [Kutt](https://github.com/thedevs-network/kutt) site instead of the long ones, like `outkzt.link/halloween-blood-rave-djmax` (the event's first words and the alias, with `-2`, `-3`… when that is taken). Use the API key of a Kutt account made just for this app: the key can change and delete every link of its account.
+
+- A short link is made the first time a page shows the promoter's link for an event (one per promo code), then saved and reused. Past events get none until someone opens their page.
+- When the long link changes (the link format, an alias or an event title), the same short link is pointed at the new address, so links already shared keep working. A short link deleted in Kutt is made again.
+- Event pages show the clicks on each link, read from Kutt at most every `KUTT_CLICKS_MINUTES` (10 by default).
+- Pages wait at most 2.5 seconds for Kutt. While it is slow, down or refusing the key, promoters see the long links, Kutt is left alone for 5 minutes, and **Event links** shows the last error.
+
 ## Changes by hand
 
 For events outside Hi.Events, bonuses and corrections, an admin can change any promoter's numbers on their page (**Adjust by hand**):

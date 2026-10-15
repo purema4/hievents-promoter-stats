@@ -142,6 +142,7 @@ button.small { padding: 6px 12px; font-size: 14px; }
 .links-card { margin-bottom: 20px; display: grid; gap: 10px; }
 .links-card h2 { margin: 0; }
 .link-row { display: grid; gap: 6px; }
+.link-clicks { font-size: 14px; }
 .link-field { display: flex; gap: 8px; flex-wrap: wrap; }
 .link-field input { flex: 1 1 240px; font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; }
 button.copied { background: var(--ok); color: #fff; }
@@ -1882,7 +1883,18 @@ export function WelcomePage(props: {
   );
 }
 
-export function AdminLinksPage(props: { user: User; baseUrl: string; template: string; example: string | null; ok?: string; error?: string }) {
+type ShortLinkStatus = { enabled: boolean; host: string; count: number; lastError: { at: Date; message: string } | null };
+
+export function AdminLinksPage(props: {
+  user: User;
+  baseUrl: string;
+  template: string;
+  example: string | null;
+  shortLinks: ShortLinkStatus;
+  ok?: string;
+  error?: string;
+}) {
+  const short = props.shortLinks;
   return (
     <Layout title="Event links" user={props.user}>
       <h1>Event links</h1>
@@ -1915,6 +1927,29 @@ export function AdminLinksPage(props: { user: User; baseUrl: string; template: s
         For aff= tracking in Hi.Events, create an affiliate with the same code as the promoter's alias on the event
         (Hi.Events → event → Affiliates).
       </p>
+      <div class="card stack-card">
+        <h2 class="first">Short links</h2>
+        {short.enabled ? (
+          <>
+            <p>
+              On: promoters share short links from <strong>{short.host}</strong> ({short.count} {short.count === 1 ? 'link' : 'links'} so far), and
+              see how many clicks each one gets. A short link keeps working when the link format, an alias or an event
+              title changes.
+            </p>
+            {short.lastError && (
+              <p class="flash error">
+                Kutt last failed at {short.lastError.at.toLocaleString('en-CA', { timeZone: config.timezone })}: {short.lastError.message}.
+                Promoters see the long links until it answers again.
+              </p>
+            )}
+          </>
+        ) : (
+          <p class="muted">
+            Off. To give promoters short links with click counts, set <code>KUTT_URL</code> and <code>KUTT_API_KEY</code> to
+            a Kutt site and the API key of a Kutt account kept for this app, then restart.
+          </p>
+        )}
+      </div>
     </Layout>
   );
 }
