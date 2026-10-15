@@ -151,11 +151,13 @@ export function verifySecondFactor(user: User, input: string): 'app' | 'recovery
   const code = input.trim().replace(/\s/g, '');
   if (user.totp_secret && /^[0-9]{6}$/.test(code)) {
     const matched = matchStep(user.totp_secret, code);
-    if (matched !== null && matched > (user.totp_last_step ?? -1)) {
-      db.query('UPDATE users SET totp_last_step = ? WHERE id = ?').run(matched, user.id);
-      return 'app';
-    }
-    return null;
+    if (matched === null) return null;
+    // Checked against the stored step, not the one loaded with `user`: two requests carrying the same
+    // code at the same time must not both succeed.
+    const spent = db
+      .query('UPDATE users SET totp_last_step = ? WHERE id = ? AND coalesce(totp_last_step, -1) < ?')
+      .run(matched, user.id, matched);
+    return spent.changes === 1 ? 'app' : null;
   }
   const used = db
     .query('UPDATE recovery_codes SET used_at = ? WHERE user_id = ? AND code_hash = ? AND used_at IS NULL')
