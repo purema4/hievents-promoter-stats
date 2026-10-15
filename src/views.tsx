@@ -1883,7 +1883,7 @@ export function WelcomePage(props: {
   );
 }
 
-type ShortLinkStatus = { enabled: boolean; host: string; count: number; lastError: { at: Date; message: string } | null };
+type ShortLinkStatus = { enabled: boolean; host: string; domain: string; count: number; lastError: { at: Date; message: string } | null };
 
 export function AdminLinksPage(props: {
   user: User;
@@ -1891,10 +1891,13 @@ export function AdminLinksPage(props: {
   template: string;
   example: string | null;
   shortLinks: ShortLinkStatus;
+  /** The Kutt account's domains; null when Kutt is off or did not answer. */
+  kuttDomains: string[] | null;
   ok?: string;
   error?: string;
 }) {
   const short = props.shortLinks;
+  const domains = props.kuttDomains;
   return (
     <Layout title="Event links" user={props.user}>
       <h1>Event links</h1>
@@ -1927,12 +1930,12 @@ export function AdminLinksPage(props: {
         For aff= tracking in Hi.Events, create an affiliate with the same code as the promoter's alias on the event
         (Hi.Events → event → Affiliates).
       </p>
-      <div class="card stack-card">
+      <div class="card stack-card" id="short-links">
         <h2 class="first">Short links</h2>
         {short.enabled ? (
           <>
             <p>
-              On: promoters share short links from <strong>{short.host}</strong> ({short.count} {short.count === 1 ? 'link' : 'links'} so far), and
+              On: promoters share short links from <strong>{short.domain || short.host}</strong> ({short.count} {short.count === 1 ? 'link' : 'links'} so far), and
               see how many clicks each one gets. A short link keeps working when the link format, an alias or an event
               title changes.
             </p>
@@ -1942,6 +1945,34 @@ export function AdminLinksPage(props: {
                 Promoters see the long links until it answers again.
               </p>
             )}
+            <form class="stack-card" method="post" action="/admin/links/short-domain">
+              <label>
+                Domain for short links
+                <select name="domain">
+                  <option value="" selected={!short.domain}>
+                    {short.host} (Kutt's own domain)
+                  </option>
+                  {(domains ?? []).map((d) => (
+                    <option value={d} selected={d === short.domain}>
+                      {d}
+                    </option>
+                  ))}
+                  {short.domain && !(domains ?? []).includes(short.domain) && (
+                    <option value={short.domain} selected>
+                      {short.domain}
+                      {domains ? ' (no longer in the Kutt account)' : ''}
+                    </option>
+                  )}
+                </select>
+              </label>
+              <p class="muted">
+                {domains
+                  ? 'To add a domain, add it in Kutt (Settings → Domains) with the account this app uses, then reload this page.'
+                  : 'Kutt did not answer, so its domains could not be listed. Reload in a few minutes.'}{' '}
+                Changing the domain gives promoters new short links on it; the ones they already shared keep working.
+              </p>
+              <button type="submit">Save domain</button>
+            </form>
           </>
         ) : (
           <p class="muted">

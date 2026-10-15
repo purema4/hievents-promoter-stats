@@ -3,14 +3,20 @@ import { Client, describeIntegration, location, newPromoter, signInAdmin, startS
 
 /*
  * Short links through a fake Kutt that answers like Kutt's API v2: X-API-KEY, POST /links (with
- * customurl and reuse), PATCH /links/:id, GET /links. Seeded event 1 is "Warehouse Night" and the
+ * customurl, reuse and domain), PATCH /links/:id, GET /links, GET /users (the account's domains). Seeded event 1 is "Warehouse Night" and the
  * promoter's code for it is DJMAX.
  */
 // Fake, for the fake Kutt below.
 const API_KEY = ['fake', 'kutt', 'credential'].join('-');
 const SITE = 'https://tickets.example.test';
 
-type FakeLink = { id: string; address: string; target: string; visit_count: number; description?: string };
+type FakeLink = { id: string; address: string; target: string; visit_count: number; description?: string; domain?: string | null };
+// The account's own domains; Kutt's own is short.test.
+const DOMAINS = [
+  { id: crypto.randomUUID(), address: 'go.test', banned: false, homepage: 'short.test' },
+  { id: crypto.randomUUID(), address: 'banned.test', banned: true, homepage: 'short.test' },
+  { id: crypto.randomUUID(), address: '<b>bad</b>', banned: false, homepage: 'short.test' },
+];
 type Mode = 'ok' | 'down' | 'slow' | 'bad-link' | 'redirect';
 
 function fakeKutt() {
@@ -28,7 +34,7 @@ function fakeKutt() {
     },
   });
   const json = (body: unknown, status = 200) => Response.json(body, { status });
-  const shown = (l: FakeLink) => ({ ...l, link: `https://short.test/${l.address}` });
+  const shown = (l: FakeLink) => ({ ...l, link: `https://${l.domain ?? 'short.test'}/${l.address}` });
   const server = Bun.serve({
     port: 0,
     hostname: '127.0.0.1',
@@ -42,14 +48,16 @@ function fakeKutt() {
       if (req.headers.get('x-api-key') !== API_KEY) return json({ error: 'Unauthorized' }, 401);
       if (req.method === 'POST' && url.pathname === '/api/v2/links') {
         const target = String(body?.target ?? '');
+        const domain = typeof body?.domain === 'string' && body.domain !== 'short.test' ? body.domain : null;
+        if (domain && !DOMAINS.some((d) => d.address === domain && !d.banned)) return json({ error: "You can't use this domain." }, 400);
         if (body?.reuse) {
-          const same = [...links.values()].find((l) => l.target === target);
+          const same = [...links.values()].find((l) => l.target === target && (l.domain ?? null) === domain);
           if (same) return json(shown(same));
         }
         const address = typeof body?.customurl === 'string' ? body.customurl : Math.random().toString(36).slice(2, 8);
-        // Kutt reports a taken address as a 500.
-        if ([...links.values()].some((l) => l.address === address)) return json({ error: 'Custom URL is already in use.' }, 500);
-        const link: FakeLink = { id: crypto.randomUUID(), address, target, visit_count: 0, description: String(body?.description ?? '') };
+        // Kutt reports a taken address (on the same domain) as a 500.
+        if ([...links.values()].some((l) => l.address === address && (l.domain ?? null) === domain)) return json({ error: 'Custom URL is already in use.' }, 500);
+        const link: FakeLink = { id: crypto.randomUUID(), address, target, visit_count: 0, description: String(body?.description ?? ''), domain };
         links.set(link.id, link);
         if (state.mode === 'bad-link') return json({ ...shown(link), link: 'javascript:alert(1)' }, 201);
         return json(shown(link), 201);
@@ -61,6 +69,9 @@ function fakeKutt() {
         if (link.target === body?.target) return json({ error: 'Should at least update one field.' }, 400);
         link.target = String(body?.target);
         return json(shown(link));
+      }
+      if (req.method === 'GET' && url.pathname === '/api/v2/users') {
+        return json({ apikey: API_KEY, email: 'app@example.test', domains: DOMAINS });
       }
       if (req.method === 'GET' && url.pathname === '/api/v2/links') {
         const limit = Math.min(Number(url.searchParams.get('limit') ?? 10), 50);
@@ -172,6 +183,57 @@ describeIntegration('short links through Kutt', () => {
       expect(html).not.toContain(API_KEY);
     }
     expect(server.logs()).not.toContain(API_KEY);
+  });
+
+  test("admins pick the domain from the Kutt account's domains; promoters get links on it", async () => {
+    const page = await admin.page('/admin/links');
+    expect(page).toContain('<option value="go.test">go.test</option>');
+    expect(page).not.toContain('banned.test');
+    expect(page).not.toContain('bad</b>');
+    expect(page).not.toContain(API_KEY);
+    const before = sharedLink(await promoter.client.page('/events/1'))!;
+    expect(before).toStartWith('https://short.test/');
+    const oldLink = [...kutt.links.values()].find((l) => `https://short.test/${l.address}` === before)!;
+
+    expect(location(await admin.post('/admin/links/short-domain', { domain: 'go.test' }))).toBe('/admin/links?ok=domain_saved#short-links');
+    expect(text(await admin.page('/admin/links'))).toContain('On: promoters share short links from go.test');
+    const html = await promoter.client.page('/events/1');
+    // The same readable address, on the new domain, with its own click count.
+    expect(sharedLink(html)).toBe(before.replace('https://short.test/', 'https://go.test/'));
+    expect(kutt.created().at(-1)!.body!.domain).toBe('go.test');
+    expect(text(html)).toContain('0 clicks on this link');
+    // The link already shared still exists and leads to the same place.
+    expect(kutt.links.get(oldLink.id)?.target).toBe(String(kutt.created().at(-1)!.body!.target));
+
+    // Back to Kutt's own domain: the old short link (and its clicks) comes back.
+    expect(location(await admin.post('/admin/links/short-domain', { domain: '' }))).toBe('/admin/links?ok=domain_saved#short-links');
+    const back = await promoter.client.page('/events/1');
+    expect(sharedLink(back)).toBe(before);
+    expect(text(back)).toContain('42 clicks on this link');
+  });
+
+  test('only a usable domain of the Kutt account can be picked, and only by admins', async () => {
+    for (const domain of ['banned.test', 'evil.test', '<b>bad</b>']) {
+      expect(location(await admin.post('/admin/links/short-domain', { domain }))).toBe('/admin/links?error=bad_domain#short-links');
+    }
+    const asPromoter = await promoter.client.post('/admin/links/short-domain', { domain: 'go.test' });
+    expect(location(asPromoter) ?? '').not.toContain('ok=domain_saved');
+    expect(text(await admin.page('/admin/links'))).toContain('short links from 127.0.0.1');
+  });
+
+  test('a picked domain that Kutt stops accepting: the long link, and the admin is told', async () => {
+    expect(location(await admin.post('/admin/links/short-domain', { domain: 'go.test' }))).toBe('/admin/links?ok=domain_saved#short-links');
+    DOMAINS[0]!.banned = true;
+    try {
+      // Back on Kutt's own domain since the last test, so this promoter needs a new link on go.test.
+      expect(sharedLink(await promoter.client.page('/events/1'))).toStartWith(`${SITE}/event/1/`);
+      const page = await admin.page('/admin/links');
+      expect(text(page)).toContain('refused the domain go.test');
+      expect(text(page)).toContain('go.test (no longer in the Kutt account)');
+    } finally {
+      DOMAINS[0]!.banned = false;
+      await admin.post('/admin/links/short-domain', { domain: '' });
+    }
   });
 });
 

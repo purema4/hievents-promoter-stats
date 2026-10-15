@@ -50,6 +50,7 @@ With `KUTT_URL` and `KUTT_API_KEY` set, promoters share short links from a [Kutt
 
 - A short link is made the first time a page shows the promoter's link for an event (one per promo code), then saved and reused. Past events get none until someone opens their page.
 - When the long link changes (the link format, an alias or an event title), the same short link is pointed at the new address, so links already shared keep working. A short link deleted in Kutt is made again.
+- **Event links** has a domain picker: Kutt's own domain or any domain added to the app's Kutt account (Kutt → Settings → Domains). After a change, promoters get new short links on the new domain from their next visit (the same readable address when it is free there). The links they already shared keep working but are no longer updated, and click counts start again on the new links. Switching back brings the old links and their counts back.
 - Event pages show the clicks on each link, read from Kutt at most every `KUTT_CLICKS_MINUTES` (10 by default).
 - Pages wait at most 2.5 seconds for Kutt. While it is slow, down or refusing the key, promoters see the long links, Kutt is left alone for 5 minutes, and **Event links** shows the last error.
 

@@ -1,5 +1,5 @@
 import { config } from './config';
-import { db, type User } from './local-db';
+import { addColumn, db, type User } from './local-db';
 import { eventLink, slugify } from './links';
 
 /*
@@ -22,8 +22,10 @@ db.exec(`
     PRIMARY KEY (user_id, event_id, code)
   );
 `);
+// The Kutt domain the short link is on; '' for Kutt's own domain.
+addColumn('short_links', 'domain', "TEXT NOT NULL DEFAULT ''");
 
-type Row = { target: string; kutt_id: string; short_url: string; clicks: number | null };
+type Row = { target: string; kutt_id: string; short_url: string; clicks: number | null; domain: string };
 type EventRef = { id: number; title: string };
 
 const REQUEST_TIMEOUT = 5000;
@@ -58,6 +60,41 @@ function outage(message: string): KuttError {
   lastError = { at: new Date(), message };
   console.warn(`Kutt: ${message}; short links paused for ${PAUSE / 60000} minutes.`);
   return new KuttError(message);
+}
+
+/*
+ * The domain short links are made on, picked by admins on /admin/links from the domains of the
+ * Kutt account; '' is Kutt's own domain. Changing it gives every promoter a new short link on the
+ * new domain the next time a page shows it. The old short links keep working in Kutt.
+ */
+const DOMAIN_KEY = 'short_links:domain';
+
+export function shortDomain(): string {
+  return db.query<{ value: string }, [string]>('SELECT value FROM settings WHERE key = ?').get(DOMAIN_KEY)?.value ?? '';
+}
+
+export function saveShortDomain(domain: string) {
+  db.query('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value').run(DOMAIN_KEY, domain);
+  // Links refused on the old domain are tried again right away.
+  refusedUntil.clear();
+}
+
+const isHostname = (value: string) => value.length <= 253 && /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/i.test(value);
+
+/** The domains of the Kutt account that links can be made on, or null when Kutt does not answer. */
+export async function kuttDomains(): Promise<string[] | null> {
+  if (!kuttEnabled()) return null;
+  try {
+    const body = (await kutt('GET', '/users')) as { domains?: unknown } | null;
+    const domains = Array.isArray(body?.domains) ? (body.domains as Record<string, unknown>[]) : [];
+    return domains
+      .filter((d) => d?.banned !== true && typeof d?.address === 'string' && isHostname(d.address))
+      .map((d) => (d.address as string).toLowerCase())
+      .sort();
+  } catch (err) {
+    if (!(err instanceof KuttError)) console.error('Reading the Kutt domains failed:', err);
+    return null;
+  }
 }
 
 async function kutt(method: 'GET' | 'POST' | 'PATCH', path: string, body?: object): Promise<unknown> {
@@ -148,23 +185,31 @@ export function shortAddress(eventTitle: string, alias: string, attempt = 1): st
 }
 
 function find(userId: number, eventId: number, code: string): Row | null {
-  return db.query<Row, [number, number, string]>('SELECT target, kutt_id, short_url, clicks FROM short_links WHERE user_id = ? AND event_id = ? AND code = ?').get(userId, eventId, code);
+  return db
+    .query<Row, [number, number, string]>('SELECT target, kutt_id, short_url, clicks, domain FROM short_links WHERE user_id = ? AND event_id = ? AND code = ?')
+    .get(userId, eventId, code);
 }
 
-function save(userId: number, eventId: number, code: string, target: string, link: KuttLink) {
+/** True when a saved short link leads to the current long link, on the current domain. */
+const upToDate = (row: Row | null, target: string) => !!row && row.target === target && row.domain === shortDomain();
+
+function save(userId: number, eventId: number, code: string, target: string, domain: string, link: KuttLink, keepClicks = true) {
   db.query(
-    `INSERT INTO short_links (user_id, event_id, code, target, kutt_id, short_url, clicks) VALUES (?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO short_links (user_id, event_id, code, target, kutt_id, short_url, clicks, domain) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT (user_id, event_id, code) DO UPDATE SET target = excluded.target, kutt_id = excluded.kutt_id,
-       short_url = excluded.short_url, clicks = coalesce(excluded.clicks, short_links.clicks)`,
-  ).run(userId, eventId, code, target, link.id, link.link, link.clicks);
+       short_url = excluded.short_url, domain = excluded.domain,
+       clicks = ${keepClicks ? 'coalesce(excluded.clicks, short_links.clicks)' : 'excluded.clicks'}`,
+  ).run(userId, eventId, code, target, link.id, link.link, link.clicks, domain);
 }
 
 async function sync(user: User, event: EventRef, code: string, target: string) {
+  const domain = shortDomain();
   const row = find(user.id, event.id, code);
-  if (row?.target === target) return;
-  if (row) {
+  if (upToDate(row, target)) return;
+  // A link on another domain cannot be moved (Kutt does not change a link's domain): a new one is made.
+  if (row && row.domain === domain) {
     try {
-      save(user.id, event.id, code, target, parseLink(await kutt('PATCH', `/links/${row.kutt_id}`, { target })));
+      save(user.id, event.id, code, target, domain, parseLink(await kutt('PATCH', `/links/${row.kutt_id}`, { target })));
       return;
     } catch (err) {
       if (!(err instanceof KuttError && err.perLink)) throw err;
@@ -178,17 +223,23 @@ async function sync(user: User, event: EventRef, code: string, target: string) {
   }
   const description = `${user.alias ?? ''} · ${event.title} · ${code}`.slice(0, 200);
   // "reuse" returns the link this account already has for the same address, if any.
-  const create = (customurl?: string) => kutt('POST', '/links', { target, reuse: true, description, ...(customurl ? { customurl } : {}) });
+  const create = (customurl?: string) =>
+    kutt('POST', '/links', { target, reuse: true, description, ...(domain ? { domain } : {}), ...(customurl ? { customurl } : {}) });
   for (let attempt = 1; attempt <= 5; attempt++) {
     try {
-      save(user.id, event.id, code, target, parseLink(await create(shortAddress(event.title, user.alias ?? '', attempt))));
+      save(user.id, event.id, code, target, domain, parseLink(await create(shortAddress(event.title, user.alias ?? '', attempt))), false);
       return;
     } catch (err) {
       if (!(err instanceof KuttError && err.perLink)) throw err;
+      // The account cannot use the domain (removed from Kutt?): the admin needs to know, not just the log.
+      if (/this domain/i.test(err.message)) {
+        lastError = { at: new Date(), message: `refused the domain ${domain} (${err.message.replace(/\.$/, '')}); pick another on this page` };
+        throw err;
+      }
       if (!/already in use/i.test(err.message)) break; // the address itself was refused: Kutt picks one
     }
   }
-  save(user.id, event.id, code, target, parseLink(await create()));
+  save(user.id, event.id, code, target, domain, parseLink(await create()), false);
 }
 
 const running = new Map<string, Promise<void>>();
@@ -253,7 +304,7 @@ export async function prepareShortLinks(user: User, links: { event: EventRef; co
   const jobs: Promise<void>[] = [];
   for (const { event, code } of links) {
     const target = eventLink(event, code, user.alias);
-    if (target && find(user.id, event.id, code)?.target !== target) jobs.push(ensure(user, event, code, target));
+    if (target && !upToDate(find(user.id, event.id, code), target)) jobs.push(ensure(user, event, code, target));
   }
   if (Date.now() - clicksAt >= config.kutt.clicksMinutes * 60 * 1000 && db.query('SELECT 1 FROM short_links LIMIT 1').get()) jobs.push(refreshClicks());
   if (jobs.length) await Promise.race([Promise.allSettled(jobs), Bun.sleep(waitMs)]);
@@ -264,17 +315,17 @@ export function shareLink(user: User, event: EventRef, code: string): string | n
   const long = eventLink(event, code, user.alias);
   if (!long || !kuttEnabled()) return long;
   const row = find(user.id, event.id, code);
-  return row?.target === long ? row.short_url : long;
+  return row && upToDate(row, long) ? row.short_url : long;
 }
 
 /** Clicks on a promoter's short link, as Kutt counts them; null when there is none (yet). */
 export function linkClicks(user: User, event: EventRef, code: string): number | null {
   if (!kuttEnabled()) return null;
   const row = find(user.id, event.id, code);
-  return row && row.target === eventLink(event, code, user.alias) ? row.clicks : null;
+  return row && upToDate(row, eventLink(event, code, user.alias) ?? '') ? row.clicks : null;
 }
 
-export function shortLinkStatus(): { enabled: boolean; host: string; count: number; lastError: { at: Date; message: string } | null } {
+export function shortLinkStatus(): { enabled: boolean; host: string; domain: string; count: number; lastError: { at: Date; message: string } | null } {
   let host = '';
   try {
     host = kuttUrl ? new URL(kuttUrl).host : '';
@@ -282,5 +333,5 @@ export function shortLinkStatus(): { enabled: boolean; host: string; count: numb
     // not set
   }
   const count = db.query<{ n: number }, []>('SELECT count(*) AS n FROM short_links').get()!.n;
-  return { enabled: kuttEnabled(), host, count, lastError };
+  return { enabled: kuttEnabled(), host, domain: shortDomain(), count, lastError };
 }

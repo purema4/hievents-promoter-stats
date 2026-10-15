@@ -87,7 +87,7 @@ import {
   rewardsFor,
   settleReward,
 } from './rewards';
-import { prepareShortLinks, shortLinkStatus } from './short-links';
+import { kuttDomains, kuttEnabled, prepareShortLinks, saveShortDomain, shortLinkStatus } from './short-links';
 import { publicAsset, publicText, serviceWorker } from './static';
 import {
   codeOwners,
@@ -171,6 +171,9 @@ const messages: Record<string, string> = {
   alias_invalid: 'The alias needs 2 to 30 letters, numbers, - or _, starting with a letter or number.',
   alias_taken: 'Another promoter already uses that alias.',
   bad_url: 'Enter the full address, starting with https://',
+  domain_saved: 'Short link domain saved. Promoters get links on it from their next visit.',
+  bad_domain: 'Pick one of the domains of the Kutt account.',
+  kutt_unreachable: 'Kutt did not answer, so the domain could not be checked. Try again in a few minutes.',
   reset: 'Back to the default wording.',
   test_sent: 'Saved, and a test was sent to your email address.',
   test_failed: 'Saved, but the test could not be sent. The list of recent emails shows why.',
@@ -1087,7 +1090,7 @@ app.get('/admin/dashboard', async (c) => {
   return c.html(<AdminDashboardPage user={c.get('user')} board={await leaderboard(range, sort)} range={range} sort={sort} />);
 });
 
-app.get('/admin/links', (c) => {
+app.get('/admin/links', async (c) => {
   const { baseUrl, template } = linkSettings();
   const example = baseUrl ? eventLink({ id: 123, title: 'Warehouse Night' }, 'DJMAX', 'dj-max') : null;
   return c.html(
@@ -1097,6 +1100,7 @@ app.get('/admin/links', (c) => {
       template={template}
       example={example}
       shortLinks={shortLinkStatus()}
+      kuttDomains={kuttEnabled() ? await kuttDomains() : null}
       ok={flash(c.req.query('ok'))}
       error={flash(c.req.query('error'))}
     />,
@@ -1110,6 +1114,20 @@ app.post('/admin/links', async (c) => {
   saveLinkSettings(baseUrl, String(body.template ?? '').slice(0, 300));
   audit(c, 'admin.links_saved', { by: c.get('user').id });
   return c.redirect('/admin/links?ok=saved');
+});
+
+app.post('/admin/links/short-domain', async (c) => {
+  const body = await c.req.parseBody();
+  const domain = String(body.domain ?? '').trim().toLowerCase();
+  if (domain) {
+    // Only a domain of the Kutt account, as Kutt lists it now.
+    const domains = await kuttDomains();
+    if (!domains) return c.redirect('/admin/links?error=kutt_unreachable#short-links');
+    if (!domains.includes(domain)) return c.redirect('/admin/links?error=bad_domain#short-links');
+  }
+  saveShortDomain(domain);
+  audit(c, 'admin.short_domain_saved', { by: c.get('user').id, domain });
+  return c.redirect('/admin/links?ok=domain_saved#short-links');
 });
 
 app.get('/admin/emails', (c) =>
