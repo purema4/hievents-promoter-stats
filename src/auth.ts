@@ -168,7 +168,9 @@ export async function verifyLogin(email: string, password: string): Promise<User
     return user;
   }
   const count = entry && entry.until > Date.now() ? entry.count + 1 : 1;
-  failures.set(key, { count, until: Date.now() + LOCK_MS });
+  // Anyone can post any text here: only plausible emails get a counter, so the map cannot be
+  // filled with huge keys (expired entries are swept hourly in purgeExpiredSessions).
+  if (key.length <= 254) failures.set(key, { count, until: Date.now() + LOCK_MS });
   return null;
 }
 
@@ -318,6 +320,7 @@ export function revokeAccess(userId: number) {
 }
 
 export function purgeExpiredSessions() {
+  for (const [key, entry] of failures) if (entry.until < Date.now()) failures.delete(key);
   const now = Math.floor(Date.now() / 1000);
   db.query('DELETE FROM sessions WHERE expires_at < ?').run(now);
   db.query('DELETE FROM login_tokens WHERE expires_at < ?').run(now);

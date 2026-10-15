@@ -146,8 +146,24 @@ const hash = (text: string) => new Bun.CryptoHasher('sha256').update(text.toLowe
 // Tickets are random tokens and compared exactly.
 const tokenHash = (token: string) => new Bun.CryptoHasher('sha256').update(token).digest('hex');
 
+// Wrong codes per account, across every place a code is asked for. Without this, a stolen session
+// (turn off, new recovery codes) or a known password (a fresh sign-in ticket every 5 tries) could
+// guess the 6 digits at full speed. 10 wrong codes lock code checks for that account for 15 minutes.
+const secondFactorFailures = new Map<number, number[]>();
+const MAX_SECOND_FACTOR_FAILURES = 10;
+const SECOND_FACTOR_LOCK_MS = 15 * 60 * 1000;
+
 /** A code from the app (each usable once) or an unused recovery code. */
 export function verifySecondFactor(user: User, input: string): 'app' | 'recovery' | null {
+  const recent = (secondFactorFailures.get(user.id) ?? []).filter((t) => t > Date.now() - SECOND_FACTOR_LOCK_MS);
+  if (recent.length >= MAX_SECOND_FACTOR_FAILURES) return null;
+  const result = checkSecondFactor(user, input);
+  if (result) secondFactorFailures.delete(user.id);
+  else secondFactorFailures.set(user.id, [...recent, Date.now()]);
+  return result;
+}
+
+function checkSecondFactor(user: User, input: string): 'app' | 'recovery' | null {
   const code = input.trim().replace(/\s/g, '');
   if (user.totp_secret && /^[0-9]{6}$/.test(code)) {
     const matched = matchStep(user.totp_secret, code);
