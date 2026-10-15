@@ -42,7 +42,7 @@ Promoters request rewards on **Payouts & rewards** (with a guest-list name, or t
 
 ## Event links
 
-Every promoter has an **alias** (made from their name, changeable by them on Account and by admins on their page), used in their links as `aff=`. On **Event links**, admins set the Hi.Events public site address (its `FRONTEND_URL`, or `HIEVENTS_PUBLIC_URL`) and the format, by default `{event_url}?promo_code={code}&aff={alias}`, where `{event_url}` is `<site>/event/<id>/<slug>` like Hi.Events builds it. Promoters get **Copy** and **Share** buttons on event pages and upcoming event cards. For `aff=` to be tracked by Hi.Events, create an affiliate with the same code as the alias on the event.
+Every promoter has an **alias** (made from their name, changeable by them on Account and by admins on their page), used in their links as `aff=`. On **Event links**, admins set the Hi.Events public site address (its `FRONTEND_URL`, or `HIEVENTS_PUBLIC_URL`) and the format, by default `{event_url}?promo_code={code}&aff={alias}`, where `{event_url}` is `<site>/event/<id>/<slug>` like Hi.Events builds it. Promoters get **Copy** and **Share** buttons on event pages and upcoming event cards, and each promo code is a one-click copy button there too. The dashboard also has a **Your promo codes** card listing each code with the upcoming events it works on, for customers who type the code at checkout. For `aff=` to be tracked by Hi.Events, create an affiliate with the same code as the alias on the event.
 
 ### Short links (Kutt)
 

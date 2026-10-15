@@ -186,7 +186,7 @@ export function LinkField(props: { link: string; label: string }) {
     <div class="link-field">
       <input readonly value={props.link} aria-label={props.label} />
       <button type="button" data-copy>
-        Copy
+        Copy link
       </button>
       <button type="button" class="secondary" data-share data-share-title={props.label} hidden>
         Share
@@ -195,7 +195,47 @@ export function LinkField(props: { link: string; label: string }) {
   );
 }
 
-function EventCard(props: { event: EventSummary; href: string; freeTickets?: number; link?: string | null }) {
+/** A promo code as a button that copies it. */
+export function CodeCopy(props: { code: string }) {
+  return (
+    <button type="button" class="secondary small code-copy" data-copy-text={props.code} title="Copy the promo code">
+      <span class="code-value">{props.code}</span>
+      <span class="code-action">Copy</span>
+    </button>
+  );
+}
+
+/** Each of the promoter's codes, ready to copy, with the upcoming events it works on. */
+function CodesCard(props: { codes: string[]; rows: CodeStats[]; upcoming: EventSummary[] }) {
+  // Shown as Hi.Events spells the code; codes are kept lowercase here.
+  const spelled = new Map(props.rows.map((r) => [r.code.toLowerCase(), r.code]));
+  const eventsFor = (code: string) => props.upcoming.filter((e) => e.codes.some((c) => c.toLowerCase() === code));
+  return (
+    <div class="card codes-card">
+      <h2 class="first">{props.codes.length > 1 ? 'Your promo codes' : 'Your promo code'}</h2>
+      <p class="muted">Customers enter it at checkout and the sale counts for you. Your links already include it.</p>
+      <div class="code-list">
+        {props.codes.map((code) => {
+          const events = eventsFor(code);
+          return (
+            <div class="code-item">
+              <CodeCopy code={spelled.get(code) ?? code} />
+              <span class="muted">
+                {!spelled.has(code)
+                  ? 'Not in the ticketing system yet'
+                  : events.length
+                    ? events.map((e) => e.title).join(', ')
+                    : 'No upcoming events'}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function EventCard(props: { event: EventSummary; href: string; freeTickets?: number; link?: string | null; copyCodes?: boolean }) {
   const e = props.event;
   return (
     <div class="card event-card">
@@ -227,14 +267,19 @@ function EventCard(props: { event: EventSummary; href: string; freeTickets?: num
         </span>
       </span>
     </a>
-    {props.link && (
+    {(props.link || props.copyCodes) && (
       <div class="card-actions">
-        <button type="button" class="secondary small" data-copy-text={props.link}>
-          Copy my link
-        </button>
-        <button type="button" class="secondary small" data-share data-share-url={props.link} data-share-title={e.title} hidden>
-          Share
-        </button>
+        {props.link && (
+          <button type="button" class="secondary small" data-copy-text={props.link}>
+            Copy my link
+          </button>
+        )}
+        {props.copyCodes && e.codes.map((code) => <CodeCopy code={code} />)}
+        {props.link && (
+          <button type="button" class="secondary small" data-share data-share-url={props.link} data-share-title={e.title} hidden>
+            Share
+          </button>
+        )}
       </div>
     )}
     </div>
@@ -258,8 +303,6 @@ export function DashboardPage(props: {
   const upcoming = events.filter((e) => !isPast(e));
   const past = events.filter(isPast).reverse();
   const totals = totalsByCurrency(props.rows, props.percent);
-  const matched = new Set(props.rows.map((r) => r.code.toLowerCase()));
-  const unmatched = props.codes.filter((c) => !matched.has(c));
   const self = props.basePath === '';
   const eventHref = (e: EventSummary) => `${props.basePath}/events/${e.id}`;
 
@@ -289,6 +332,7 @@ export function DashboardPage(props: {
             payoutsHref={self ? '/payouts' : undefined}
           />
           <LevelCard rewards={props.rewards} rewardsHref={self ? '/payouts#rewards' : undefined} />
+          {props.codes.length > 0 && <CodesCard codes={props.codes} rows={props.rows} upcoming={upcoming} />}
           <SalesChart
             title="Tickets sold per day"
             daily={props.daily}
@@ -309,6 +353,7 @@ export function DashboardPage(props: {
                   href={eventHref(e)}
                   freeTickets={freeFor(e)}
                   link={shareLink(props.promoter, { id: e.id, title: e.title }, e.codes[0]!)}
+                  copyCodes
                 />
               ))}
             </div>
@@ -325,14 +370,6 @@ export function DashboardPage(props: {
             </>
           )}
 
-          {unmatched.length > 0 && (
-            <p class="muted">
-              Not found in Hi.Events yet:{' '}
-              {unmatched.map((c) => (
-                <span class="code">{c}</span>
-              ))}
-            </p>
-          )}
           <Footnote />
         </>
       )}
@@ -401,7 +438,7 @@ export function EventPage(props: {
       </div>
 
       <div class="card links-card">
-        <h2 class="first">{e.codes.length > 1 ? 'Your links' : 'Your link'}</h2>
+        <h2 class="first">{e.codes.length > 1 ? 'Your links and codes' : 'Your link and code'}</h2>
         {eventLink({ id: e.id, title: e.title }, e.codes[0]!, props.promoter.alias) ? (
           <>
             <p class="muted">Share it: the promo code is applied automatically and the sale counts for you.</p>
@@ -409,7 +446,10 @@ export function EventPage(props: {
               const clicks = linkClicks(props.promoter, { id: e.id, title: e.title }, code);
               return (
                 <div class="link-row">
-                  {e.codes.length > 1 && <span class="code">{code}</span>}
+                  <div class="link-code">
+                    <span class="muted">Promo code</span>
+                    <CodeCopy code={code} />
+                  </div>
                   <LinkField link={shareLink(props.promoter, { id: e.id, title: e.title }, code)!} label={`${e.title} (${code})`} />
                   {clicks !== null && <span class="muted link-clicks">{plural(clicks, 'click')} on this link</span>}
                 </div>
@@ -417,10 +457,14 @@ export function EventPage(props: {
             })}
           </>
         ) : (
-          <p class="muted">
-            Your code: {e.codes.map((c) => <span class="code">{c}</span>)}. Links will show here once the team sets up the
-            ticketing site address.
-          </p>
+          <>
+            <p class="muted">Links will show here once the team sets up the ticketing site address. Until then, share your code:</p>
+            <div class="code-list">
+              {e.codes.map((c) => (
+                <CodeCopy code={c} />
+              ))}
+            </div>
+          </>
         )}
       </div>
 

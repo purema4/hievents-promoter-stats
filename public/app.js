@@ -177,11 +177,13 @@ const copyText = async (text, button) => {
     document.execCommand('copy');
     field.remove();
   }
-  const label = button.textContent;
+  // A second click while it says "Copied" keeps the original content to put back.
+  if (button.classList.contains('copied')) return;
+  const content = [...button.childNodes];
   button.textContent = 'Copied';
   button.classList.add('copied');
   setTimeout(() => {
-    button.textContent = label;
+    button.replaceChildren(...content);
     button.classList.remove('copied');
   }, 1600);
 };

@@ -146,6 +146,15 @@ button.small { padding: 6px 12px; font-size: 14px; }
 .link-field { display: flex; gap: 8px; flex-wrap: wrap; }
 .link-field input { flex: 1 1 240px; font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; }
 button.copied { background: var(--ok); color: #fff; }
+.codes-card { margin-bottom: 20px; display: grid; gap: 10px; }
+.codes-card h2, .codes-card p { margin: 0; }
+.code-list { display: flex; flex-direction: column; gap: 8px; margin: 0; }
+.code-item { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.link-code { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+button.code-copy { display: inline-flex; align-items: center; gap: 8px; }
+.code-copy .code-value { font: 600 14px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: 0.03em; }
+.code-copy .code-action { font-size: 12px; color: var(--muted); }
+button.code-copy.copied .code-action { color: inherit; }
 .dash-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; justify-content: space-between; }
 .dash-head h1 { margin: 0; }
 table.leaderboard th a { color: var(--muted); text-decoration: none; }

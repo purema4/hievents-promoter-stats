@@ -43,6 +43,28 @@ describeIntegration('sales numbers from the seeded Hi.Events database', () => {
     expect(html).toContain('Bronze'); // 10 tickets
   });
 
+  test('promo codes are one click to copy: on the dashboard, the event cards and the event page', async () => {
+    const both = await newPromoter(server, admin, { codes: 'djmax, GHOST' });
+    const html = await both.client.page('/');
+    const card = html.slice(html.indexOf('class="card codes-card"'), html.indexOf('Tickets sold per day'));
+    expect(text(card)).toContain('Your promo codes');
+    // Spelled as in Hi.Events, with the upcoming events it works on.
+    expect(card).toContain('data-copy-text="DJMAX"');
+    expect(text(card)).toContain("Warehouse Night, Someone else's event, Winter Opening");
+    expect(card).toContain('data-copy-text="ghost"');
+    expect(text(card)).toContain('Not in the ticketing system yet');
+    // Upcoming event cards carry a copy button for their code; past ones do not.
+    const upcoming = html.slice(html.indexOf('Upcoming events'), html.indexOf('Past events'));
+    const past = html.slice(html.indexOf('Past events'));
+    // (One seeded event spells it "djmax": each card shows Hi.Events' spelling.)
+    expect(upcoming.match(/class="secondary small code-copy" data-copy-text="djmax"/gi)?.length).toBe(3);
+    expect(past).not.toContain('code-copy');
+
+    const event = await both.client.page('/events/1');
+    expect(text(event)).toContain('Your link and code');
+    expect(event).toContain('data-copy-text="DJMAX"');
+  });
+
   test('"Winter Opening": a $10 ticket bought with a 10% code counts at full price', async () => {
     const html = await promoter.client.page('/events/2');
     expect(html).toContain('<h1>Winter Opening</h1>');
