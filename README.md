@@ -206,3 +206,50 @@ The app is public while the tunnel runs: use a strong `ADMIN_PASSWORD`, never th
 ## Backups
 
 All promoter accounts are in the `promoter-data` volume (`promoters.sqlite`). Back it up, and do not remove it with `docker volume prune`.
+
+## CI/CD
+
+The code lives in the private repository `purema4/hievents-promoter-stats`. GitHub Actions runs two workflows on every push to `main`, on every pull request, and on demand from **Actions → Run workflow**. A newer commit on the same branch or pull request cancels the run it replaces. Each job gets only the permissions it needs, and third-party actions are pinned to full commit SHAs.
+
+**`ci.yml`**
+
+| Job | What it does |
+| --- | --- |
+| Typecheck and tests | Runs `bun install --frozen-lockfile` and `bun run typecheck`, starts Postgres, Mailpit and the CDN from `docker-compose.dev.yml` + `docker-compose.test.yml`, then runs `bun test` with `CI=true`. With `CI=true`, integration tests fail when the stack is missing instead of skipping. A failed run prints the container logs, and the job always removes the stack. |
+| Dependency audit | `bun audit` fails the job if any dependency has a known vulnerability. |
+| Secret scan | gitleaks scans the whole git history. |
+| DAST (ZAP baseline) | Starts the full sandbox with `docker compose -f docker-compose.dev.yml up -d --build --wait`, waits for `/healthz`, then runs the OWASP ZAP baseline scan on http://localhost:3000 with the rule overrides in `.zap/rules.tsv`. The report is attached to the run as the `zap-baseline-report` artifact. A rule set to `FAIL` in that file fails the job. `WARN` alerts only go in the report. |
+| Build, scan and publish image | Starts once the four jobs above pass. Builds the Docker image with Buildx, caching layers in GitHub Actions, and scans it with Trivy. Any HIGH or CRITICAL vulnerability that has a fix available fails the job. On a push to `main`, and only then, it pushes that same scanned image to GHCR. |
+
+**`codeql.yml`** runs CodeQL on the TypeScript code for pushes and pull requests to `main`, and every Monday. **Dependabot** reads `.github/dependabot.yml` and opens weekly pull requests for Bun packages, GitHub Actions and the Docker base image.
+
+### The image
+
+Every commit on `main` that passes CI is published twice:
+
+- `ghcr.io/purema4/hievents-promoter-stats:<full commit sha>`, which never changes. Use it to pin a version or roll back.
+- `ghcr.io/purema4/hievents-promoter-stats:latest`
+
+The package is private, like the repository. To pull it on a server, create a classic personal access token with only the `read:packages` scope, then:
+
+```sh
+echo "$TOKEN" | docker login ghcr.io -u purema4 --password-stdin
+docker pull ghcr.io/purema4/hievents-promoter-stats:latest
+```
+
+Run it with a `.env` made from `.env.example`. Fill in `APP_URL`, `HIEVENTS_DATABASE_URL`, `ADMIN_EMAIL`, `ADMIN_PASSWORD`, the `SMTP_*` settings and `MAIL_FROM`. The other settings have defaults. Keep `/data` on a volume:
+
+```sh
+docker run -d --name promoter-stats --restart unless-stopped \
+  --env-file .env -p 127.0.0.1:3000:3000 -v promoter-data:/data \
+  ghcr.io/purema4/hievents-promoter-stats:latest
+```
+
+With Compose, replace `build: .` in `docker-compose.yml` with `image: ghcr.io/purema4/hievents-promoter-stats:latest` and run `docker compose pull && docker compose up -d`. To go back to an earlier version, use its `:<sha>` tag instead of `:latest`.
+
+### Settings to make by hand
+
+- **Branch protection.** Under Settings → Rules → Rulesets, protect `main`, require a pull request, and require these checks: *Typecheck and tests*, *Dependency audit*, *Secret scan*, *DAST (ZAP baseline)*, *Build, scan and publish image* and *Analyze (javascript-typescript)*. A check only shows up in that list after it has run once.
+- **GitHub Advanced Security.** Code scanning and secret scanning on a private repository need GitHub Code Security and Secret Protection. GitHub sells those to organizations, so a private repository on a personal account does not get them. Until it does, CodeQL saves its results as the `codeql-sarif` artifact and fails the job on any finding. Once code scanning is available, or if the repository goes public, add the repository variable `CODE_SCANNING_UPLOAD=true` under Settings → Secrets and variables → Actions → Variables, and results go to the Security tab instead. Dependabot alerts work on private repositories without Advanced Security. Turn them on under Settings → Code security.
+- **Package access.** The first push to `main` creates the `hievents-promoter-stats` package on your GitHub profile, linked to this repository. Keep it private. Other people can be given access from the package settings.
+- **Deployment.** There is no deploy job yet. Once the target server is chosen, add one to `ci.yml` that runs after the image job, with `needs: build`, on pushes to `main` only.
