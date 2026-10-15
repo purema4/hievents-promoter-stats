@@ -183,7 +183,8 @@ const messages: Record<string, string> = {
   reward_fulfilled: 'Marked as given. The promoter has been emailed.',
   reward_rejected: 'Reward request declined. The promoter has been emailed and can request it again.',
 };
-const flash = (key?: string) => (key ? messages[key] : undefined);
+// Own keys only: ?ok=constructor must not pick up something from Object.prototype.
+const flash = (key?: string) => (key && Object.hasOwn(messages, key) ? messages[key] : undefined);
 
 // '' means "use the default", anything else must be a percentage.
 function parseCommission(raw: unknown): number | null | 'invalid' {
@@ -208,6 +209,8 @@ async function emailLoginLink(
 
 const app = new Hono<Env>();
 
+// Browser features the app never uses are turned off (clipboard and share stay on for event links).
+const permissionsPolicy = { camera: false, microphone: false, geolocation: false, payment: false, usb: false };
 const strictHeaders = secureHeaders({
     // The pages use no scripts and no inline styles, so nothing else is allowed to load or run.
     contentSecurityPolicy: {
@@ -225,20 +228,32 @@ const strictHeaders = secureHeaders({
       baseUri: ["'none'"],
     },
     xFrameOptions: 'DENY',
+    permissionsPolicy,
   });
 // Email HTML relies on inline styles, so its preview gets its own policy: still no scripts, framed only here.
 const previewHeaders = secureHeaders({
   contentSecurityPolicy: {
     defaultSrc: ["'none'"],
     styleSrc: ["'unsafe-inline'"],
-    imgSrc: ["'self'", 'data:', 'https:'],
+    // The only image is the logo, served by the app itself.
+    imgSrc: ["'self'", 'data:'],
+    formAction: ["'none'"],
     frameAncestors: ["'self'"],
     baseUri: ["'none'"],
   },
   xFrameOptions: 'SAMEORIGIN',
+  permissionsPolicy,
 });
 app.use((c, next) => (/^\/admin\/emails\/[a-z_]+\/preview$/.test(c.req.path) ? previewHeaders(c, next) : strictHeaders(c, next)));
 app.use(csrf({ origin: config.appUrl }));
+// hono/csrf only checks form content types. JSON and other POSTs (/push/*, /login/wait,
+// /account/app-installed) get the same check here, so no state change relies on CORS alone.
+app.use(async (c, next) => {
+  if (!/^(GET|HEAD|OPTIONS)$/.test(c.req.method) && c.req.header('origin') !== config.appUrl && c.req.header('sec-fetch-site') !== 'same-origin') {
+    return c.text('Forbidden', 403);
+  }
+  await next();
+});
 // Pages carry personal sales data: never keep them in the browser cache (shared computers, Back after
 // signing out, offline). Static files set their own caching.
 app.use(async (c, next) => {
@@ -1246,6 +1261,8 @@ app.post('/admin/payouts/:id/:action{paid|reject}', async (c) => {
 
 app.onError((err, c) => {
   if (err instanceof HTTPException) return err.getResponse();
+  // A malformed form body is the client's mistake: answer 400 instead of logging a server error.
+  if ((err as { code?: string }).code === 'ERR_FORMDATA_PARSE_ERROR') return c.text('Bad request', 400);
   console.error(err);
   return c.text('Something went wrong. Please try again in a moment.', 500);
 });

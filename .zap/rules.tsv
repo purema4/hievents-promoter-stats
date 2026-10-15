@@ -1,0 +1,22 @@
+10202	IGNORE	(Absence of Anti-CSRF Tokens) Mitigated: every form POST must carry an Origin (or Sec-Fetch-Site: same-origin) matching APP_URL (hono/csrf, 403 otherwise) and cookies are SameSite=Lax; JSON endpoints need a CORS preflight the app never grants. Verified with cross-origin and Origin-less POSTs.
+10049	IGNORE	(Non-Storable Content) Intended: pages carry personal sales data and are sent Cache-Control: no-store on purpose; static files set their own caching.
+10027	IGNORE	(Suspicious Comments) False positive: matches the word 'from' in plain-English comments in public/app.js; no secrets or hidden endpoints.
+10031	IGNORE	(User Controllable HTML Element Attribute) False positive: ?method= is only compared with a constant, and the typed email is reflected in a value attribute escaped by hono/jsx; tested with quote and tag payloads.
+10111	IGNORE	(Authentication Request Identified) Informational: marks the sign-in form, nothing to fix.
+10112	IGNORE	(Session Management Response Identified) Informational: marks the session and wait cookies, which are HttpOnly, SameSite=Lax and __Host- prefixed over HTTPS.
+10109	IGNORE	(Modern Web Application) Informational only.
+10104	IGNORE	(User Agent Fuzzer) Informational only: responses differ by User-Agent because device names are recorded for the sign-in list.
+90004	IGNORE	(Cross-Origin-Embedder-Policy missing) Accepted: the app loads no cross-origin resources and uses no cross-origin-isolated APIs; COOP same-origin and CORP same-origin are set.
+10106	IGNORE	(HTTP Only Site) The CI and local sandboxes run over plain http; production runs behind an HTTPS reverse proxy with HSTS and __Host- cookies.
+2	IGNORE	(Private IP Disclosure) Only on Account > Security, which shows the signed-in person the address of their own devices (the Docker gateway in the sandbox).
+10096	IGNORE	(Timestamp Disclosure - Unix) False positive: the numbers are cache-busting versions (?v=<branding update time>) and dates the user may see anyway.
+10010	FAIL	(Cookie No HttpOnly Flag) Every cookie must stay HttpOnly.
+10054	FAIL	(Cookie without SameSite Attribute) Every cookie must keep SameSite=Lax: part of the CSRF defence.
+10020	FAIL	(Anti-clickjacking Header) X-Frame-Options and frame-ancestors must stay set.
+10021	FAIL	(X-Content-Type-Options Header Missing) nosniff must stay set: uploads are served from the app.
+10038	FAIL	(Content Security Policy Header Not Set) The strict CSP must stay on every page.
+10055	FAIL	(CSP) The CSP must not gain unsafe directives. Only the admin-only email preview allows inline styles (email HTML needs them); signed-out pages, which the baseline sees, have none.
+10017	FAIL	(Cross-Domain JavaScript Source File Inclusion) Scripts load only from the app itself.
+10003	FAIL	(Vulnerable JS Library) No known-vulnerable client libraries.
+10098	FAIL	(Cross-Domain Misconfiguration) No permissive CORS headers.
+10063	FAIL	(Permissions Policy Header Not Set) The Permissions-Policy header must stay set.

@@ -57,7 +57,9 @@ export function eventLink(event: { id: number; title: string }, code: string, al
   if (rest.length > 1) link = `${head}?${rest.join('&')}`;
   // Without an alias, drop an empty aff= rather than sending it.
   // Keeps the "?" when aff= came first (…?aff=&promo_code=X → …?promo_code=X).
-  return link.replace(/([?&])aff=(&|$)/, (_, sep: string, next: string) => (next ? sep : '')).replace(/\?&/, '?');
+  link = link.replace(/([?&])aff=(&|$)/, (_, sep: string, next: string) => (next ? sep : '')).replace(/\?&/, '?');
+  // The format is free text: a template like "javascript:…" must not reach the links promoters share.
+  return /^https?:\/\//i.test(link) ? link : null;
 }
 
 export const aliasPattern = /^[a-z0-9][a-z0-9_-]{1,29}$/;
