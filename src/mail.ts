@@ -12,6 +12,9 @@ const transport = config.smtp.host
       host: config.smtp.host,
       port: config.smtp.port,
       secure: config.smtp.secure,
+      // On the submission port, refuse to send unless the server upgrades to TLS (STARTTLS), so
+      // a stripped or misconfigured upgrade never sends the password or mail in clear text.
+      requireTLS: !config.smtp.secure && config.smtp.port === 587,
       auth: config.smtp.user ? { user: config.smtp.user, pass: config.smtp.password } : undefined,
       // Fail fast when the mail server is unreachable (the default waits two minutes).
       connectionTimeout: 10_000,
