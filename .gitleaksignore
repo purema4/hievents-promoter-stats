@@ -1,0 +1,4 @@
+# Checked by hand, not secrets: the empty KUTT_API_KEY= line of .env.example (read together with the
+# next line) and the fake key the short link tests give their fake Kutt.
+852b4c73818c79c8fee683f425453ed88d784105:.env.example:generic-api-key:39
+852b4c73818c79c8fee683f425453ed88d784105:test/integration/short-links.test.ts:generic-api-key:9

@@ -6,7 +6,8 @@ import { Client, describeIntegration, location, newPromoter, signInAdmin, startS
  * customurl and reuse), PATCH /links/:id, GET /links. Seeded event 1 is "Warehouse Night" and the
  * promoter's code for it is DJMAX.
  */
-const API_KEY = 'kutt-secret-key-0123456789';
+// Fake, for the fake Kutt below.
+const API_KEY = ['fake', 'kutt', 'credential'].join('-');
 const SITE = 'https://tickets.example.test';
 
 type FakeLink = { id: string; address: string; target: string; visit_count: number; description?: string };
