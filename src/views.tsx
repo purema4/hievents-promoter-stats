@@ -14,12 +14,13 @@ import { pageLink } from './links';
 import { pageShortLink, shortDomain } from './short-links';
 import { hiddenByTeam } from './promoter-page';
 import { rateFor } from './commission';
+import { findInvite, inviteState, type InviteLink } from './invites';
 import { isTeamLead, teamCommissionPercentFor, type TeamCommission } from './teams';
 import type { PromoCodeListing } from './hievents';
 import { commissionPercentFor, type User } from './local-db';
 import { describeRate, describeRule, formatMoney, formatPercent, type EventRule } from './money';
 import { countPendingPayouts, type Balance, type PayoutRequest } from './payouts';
-import { PayoutHistory, RewardHistory } from './promoter-views';
+import { LinkField, PayoutHistory, RewardHistory } from './promoter-views';
 import { countPendingRewards, describeReward, type RewardRequest } from './rewards';
 import { unreadCount, type Notification } from './notifications';
 import { definitions, emailTypes, getReplyTo, getTemplate, isCustomized, type EmailType } from './email-templates';
@@ -393,6 +394,15 @@ body.impersonating .sidebar { padding-bottom: calc(96px + env(safe-area-inset-bo
 .team-members form { margin: 0; }
 .team-actions { display: grid; gap: 10px; margin-top: 12px; }
 .team-rate { margin: 12px 0 0; }
+/* Invite links */
+.invite-form { margin-top: 8px; }
+.invite-card { display: grid; gap: 8px; }
+.invite-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.invite-meta { margin: 0; }
+.invite-card form { margin: 0; }
+.invite-state { font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 999px; background: var(--bg); color: var(--muted); }
+.invite-state.invite-open { color: var(--ok); }
+.invite-closed strong { color: var(--muted); }
 /* Promoters → Commissions */
 .rate-card { margin-top: 16px; scroll-margin-top: 72px; }
 .rate-card > p.muted { margin: 2px 0 8px; }
@@ -717,6 +727,7 @@ function Sidebar(props: { user: User }) {
             <a href="/admin">All promoters</a>
             <a href="/admin/teams">Teams</a>
             <a href="/admin/commissions">Commissions</a>
+            <a href="/admin/invites">Invite links</a>
             <a href="/admin/pages">Promoter pages</a>
           </NavGroup>
           <NavGroup title="Settings">
@@ -1459,6 +1470,12 @@ export function PromoterPage(props: {
           <dd>{p.city || '—'}</dd>
           <dt>Instagram</dt>
           <dd>{p.instagram || '—'}</dd>
+          {p.joined_with_invite && (
+            <>
+              <dt>Joined with</dt>
+              <dd>Invite link "{findInvite(p.joined_with_invite)?.label ?? 'deleted'}"</dd>
+            </>
+          )}
           <dt>Public page</dt>
           <dd>
             <PageLinks promoter={p} />
@@ -2844,6 +2861,11 @@ export function TeamPage(props: {
       <p class="muted">
         {intro}, {rangeLabel}.{self && ' Payouts and rewards stay with each promoter and the admins.'}
       </p>
+      {self && (
+        <p>
+          <a href="/team/invites">Invite promoters to your team →</a>
+        </p>
+      )}
       <div class="grid">
         {mode === 'member' ? (
           <div class="card stat highlight">
@@ -2951,6 +2973,160 @@ function TeamCommissionForm(props: { lead: User; from: 'teams' | 'promoter' }) {
         </span>
       </label>
     </form>
+  );
+}
+
+// Invite links: on Promoters → Invite links for admins, and on My team → Invite for team leads.
+export function InvitesPage(props: {
+  user: User;
+  invites: InviteLink[];
+  teamLeads: User[]; // admins: the teams a link can put people on
+  names: Map<number, string>;
+  ok?: string;
+  error?: string;
+}) {
+  const admin = !!props.user.is_admin;
+  const base = admin ? '/admin/invites' : '/team/invites';
+  const state = { open: 'Working', off: 'Turned off', expired: 'Expired', full: 'Full' } as const;
+  const day = (epoch: number) => new Intl.DateTimeFormat('en-CA', { dateStyle: 'medium', timeZone: config.timezone }).format(new Date(epoch * 1000));
+  return (
+    <Layout title="Invite links" user={props.user}>
+      {!admin && (
+        <p class="muted">
+          <a href="/team">My team</a> / Invite links
+        </p>
+      )}
+      <h1>Invite links</h1>
+      <p class="muted">
+        {admin
+          ? 'Share a link: whoever opens it enters their name and email, gets a sign-in link by email and becomes a promoter. You are told when someone joins, so you can give them their promo codes.'
+          : 'Share a link: whoever opens it enters their name and email, gets a sign-in link by email and joins your team. The admins give them their promo codes.'}
+      </p>
+      <Flash error={props.error} ok={props.ok} />
+
+      <form class="card stack-card invite-form" method="post" action={base}>
+        <h2 class="first">New invite link</h2>
+        <label>
+          Name (for you, like "Montreal street team")
+          <input name="label" maxlength={80} required />
+        </label>
+        <div class="field-row">
+          {admin && (
+            <label>
+              Team
+              <select name="team_lead_id">
+                <option value="">No team</option>
+                {props.teamLeads.map((l) => (
+                  <option value={String(l.id)}>{l.name}'s team</option>
+                ))}
+              </select>
+            </label>
+          )}
+          <label>
+            Works for
+            <select name="days">
+              <option value="7">7 days</option>
+              <option value="1">1 day</option>
+              <option value="30">30 days</option>
+              <option value="">No end date</option>
+            </select>
+          </label>
+          <label>
+            Sign-ups (empty for no limit)
+            <input name="max_uses" type="number" min="1" max="1000" step="1" />
+          </label>
+        </div>
+        <button type="submit">Create link</button>
+      </form>
+
+      <h2>Links</h2>
+      {props.invites.length === 0 ? (
+        <p class="muted">No invite links yet.</p>
+      ) : (
+        <div class="rows">
+          {props.invites.map((i) => {
+            const st = inviteState(i);
+            return (
+              <div class={`card invite-card${st === 'open' ? '' : ' invite-closed'}`}>
+                <div class="invite-head">
+                  <strong>{i.label}</strong>
+                  <span class={`invite-state invite-${st}`}>{state[st]}</span>
+                </div>
+                <p class="muted invite-meta">
+                  {i.uses} {i.uses === 1 ? 'sign-up' : 'sign-ups'}
+                  {i.max_uses !== null ? ` of ${i.max_uses}` : ''}
+                  {i.expires_at ? ` · ${i.expires_at < Date.now() / 1000 ? 'ended' : 'works until'} ${day(i.expires_at)}` : ' · no end date'}
+                  {admin && (i.team_lead_id ? ` · ${props.names.get(i.team_lead_id) ?? 'a team lead'}'s team` : ' · no team')}
+                  {admin && i.created_by && ` · made by ${props.names.get(i.created_by) ?? 'someone'}`}
+                </p>
+                {st === 'open' && <LinkField link={`${config.appUrl}/join/${i.token}`} label={`Join: ${i.label}`} />}
+                {(st === 'open' || st === 'off') && (
+                  <form method="post" action={`${base}/${i.id}/${st === 'off' ? 'on' : 'off'}`}>
+                    <button class="link" type="submit">
+                      {st === 'off' ? 'Turn back on' : 'Turn off'}
+                    </button>
+                  </form>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </Layout>
+  );
+}
+
+// The page an invite link opens: name and email, or why the link does not work.
+export function JoinPage(props: { invite: InviteLink | null; team?: string | null; signedIn?: boolean; error?: string; values?: Record<string, string> }) {
+  const brand = getBrand();
+  const st = props.invite ? inviteState(props.invite) : null;
+  return (
+    <Layout title="Join">
+      <div class="login card">
+        <h1 class="login-brand">
+          <BrandMark brand={brand} />
+        </h1>
+        {!props.invite || st !== 'open' ? (
+          <>
+            <p>{props.invite ? 'This invite link no longer works.' : 'This invite link does not work.'}</p>
+            <p class="muted">Ask whoever sent it for a new one.</p>
+          </>
+        ) : props.signedIn ? (
+          <>
+            <p>You already have an account.</p>
+            <p>
+              <a href="/">Go to your dashboard</a>
+            </p>
+          </>
+        ) : (
+          <>
+            <p>
+              Join as a promoter{props.team ? ` on ${props.team}'s team` : ''}: follow the tickets you sell, your commission and
+              your rewards, live.
+            </p>
+            <Flash error={props.error} />
+            <form class="stack" method="post" action={`/join/${props.invite.token}`}>
+              <div class="field-row">
+                <label>
+                  First name
+                  <input name="first_name" value={props.values?.first_name ?? ''} maxlength={60} autocomplete="given-name" required />
+                </label>
+                <label>
+                  Last name
+                  <input name="last_name" value={props.values?.last_name ?? ''} maxlength={60} autocomplete="family-name" required />
+                </label>
+              </div>
+              <label>
+                Email
+                <input type="email" name="email" value={props.values?.email ?? ''} maxlength={254} autocomplete="email" required />
+              </label>
+              <button type="submit">Join</button>
+            </form>
+            <p class="muted">We email you a link to sign in. Already a promoter? <a href="/login">Sign in</a></p>
+          </>
+        )}
+      </div>
+    </Layout>
   );
 }
 

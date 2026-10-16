@@ -114,6 +114,7 @@ export type User = {
   is_team_lead?: number;
   team_lead_id?: number | null;
   team_commission_percent?: number | null;
+  joined_with_invite?: number | null;
   // Set only while an admin views the app as this promoter (never stored).
   impersonator?: { id: number; name: string; until: number };
   totp_secret?: string | null;

@@ -97,6 +97,19 @@ import { MyPagePage, PageMissing, PromoterPublicPage } from './page-views';
 import { hiddenByTeam, pageEvents, pageOwner, setPageHidden } from './promoter-page';
 import { allEventRules, rateFor, setEventRule } from './commission';
 import {
+  allowSignup,
+  canManageInvite,
+  createInvite,
+  findInvite,
+  inviteByToken,
+  inviteState,
+  inviteTeamLead,
+  invitesFor,
+  markJoined,
+  setInviteDisabled,
+  useInvite,
+} from './invites';
+import {
   assignTeam,
   hadTeam,
   isTeamLead,
@@ -144,6 +157,8 @@ import {
   AdminDashboardPage,
   AdminTeamsPage,
   AdminCommissionsPage,
+  InvitesPage,
+  JoinPage,
   TeamPage,
   ReadOnlyPage,
   AdminRewardsPage,
@@ -236,6 +251,12 @@ const messages: Record<string, string> = {
   team_self: 'A promoter cannot be on their own team.',
   team_pick: 'Choose a promoter.',
   impersonate_admin: 'Admins cannot be viewed as.',
+  invite_created: 'Invite link created. Copy it below and share it.',
+  invite_off: 'Invite link turned off. It no longer works.',
+  invite_on: 'Invite link turned back on.',
+  invite_label: 'Give the link a name.',
+  invite_days: 'Pick how long the link works.',
+  invite_max: 'Sign-ups must be a whole number from 1 to 1000, or empty.',
   rate_saved: 'Commission saved. It applies to all their sales for this event, earlier ones too.',
   rate_event: 'Pick one of the promoters on an event that is not over.',
   rate_percent: 'The percentage must be a number between 0 and 100.',
@@ -413,6 +434,80 @@ app.get('/p/:alias/cover/:eventId', async (c) => {
 });
 
 app.get('/page.js', (c) => publicAsset(c, 'page.js'));
+
+// --- Joining with an invite link (public) --------------------------------------------------------------
+
+/** An invite link that can still be used: open, and made by a team lead who still is one. */
+function openInvite(token: string) {
+  const invite = inviteByToken(token);
+  if (!invite) return { invite: null, lead: null };
+  const lead = inviteTeamLead(invite);
+  // A team lead's own link stops when they are no longer a team lead.
+  const closed = inviteState(invite) !== 'open' || (invite.team_lead_id !== null && !lead && invite.created_by === invite.team_lead_id);
+  return { invite, lead, closed };
+}
+
+app.get('/join/:token', (c) => {
+  const { invite, lead, closed } = openInvite(c.req.param('token'));
+  if (!invite) return c.html(<JoinPage invite={null} />, 404);
+  if (closed) return c.html(<JoinPage invite={{ ...invite, disabled_at: invite.disabled_at ?? 1 }} />, 410);
+  return c.html(<JoinPage invite={invite} team={lead?.name} signedIn={!!currentUser(c)} />);
+});
+
+const emailPattern = /^[^\s@]+@[^\s@.]+(\.[^\s@.]+)+$/;
+
+app.post('/join/:token', async (c) => {
+  const { invite, lead, closed } = openInvite(c.req.param('token'));
+  if (!invite) return c.html(<JoinPage invite={null} />, 404);
+  if (closed) return c.html(<JoinPage invite={{ ...invite, disabled_at: invite.disabled_at ?? 1 }} />, 410);
+  const body = await c.req.parseBody();
+  const values = {
+    first_name: String(body.first_name ?? '').trim().slice(0, 60),
+    last_name: String(body.last_name ?? '').trim().slice(0, 60),
+    email: String(body.email ?? '').trim().slice(0, 254),
+  };
+  const again = (error: string, status: 400 | 429) => c.html(<JoinPage invite={invite} team={lead?.name} values={values} error={error} />, status);
+  if (!values.first_name || !values.last_name) return again('Enter your first and last name.', 400);
+  if (!emailPattern.test(values.email)) return again('That is not a valid email address.', 400);
+  if (!allowSignup(invite.id)) return again('Too many people joined with this link in the last hour. Try again later.', 429);
+
+  const started = Date.now();
+  const waiting = { id: startWaiting(c), from: summarizeDevice(c.req.header('user-agent')) };
+  const existing = findUserByEmail(values.email);
+  if (existing) {
+    // Already a promoter: a sign-in link, and the same answer as a new sign-up, so the page does not tell
+    // who has an account.
+    if (allowLinkRequest(values.email)) setTimeout(() => void emailLoginLink(existing, 'login', waiting), 0);
+    audit(c, 'invite.existing_account', { inviteId: invite.id, userId: existing.id });
+  } else {
+    if (!useInvite(invite.id)) return c.html(<JoinPage invite={{ ...invite, disabled_at: 1 }} />, 410);
+    const name = `${values.first_name} ${values.last_name}`;
+    let id: number;
+    try {
+      id = await createUser({ name, email: values.email, isAdmin: false });
+    } catch {
+      // The same email sent twice at once: the first one made the account.
+      await Bun.sleep(Math.max(0, LINK_RESPONSE_MS - (Date.now() - started)));
+      return c.html(<LoginPage sent email={values.email} />);
+    }
+    db.query('UPDATE users SET first_name = ?, last_name = ? WHERE id = ?').run(values.first_name, values.last_name, id);
+    setAlias(id, suggestAlias(name, id));
+    markJoined(id, invite.id);
+    const user = findUser(id)!;
+    if (lead) assignTeam(user, lead.id);
+    audit(c, 'invite.joined', { inviteId: invite.id, userId: id, teamLeadId: lead?.id ?? null });
+    const message = {
+      title: 'New promoter joined',
+      body: `${name} (${values.email}) joined with the invite link "${invite.label}"${lead ? ` on ${lead.name}'s team` : ''}. Give them their promo codes.`,
+      link: `/admin/promoters/${id}`,
+    };
+    notify('admins', message);
+    if (lead) notify(lead.id, { title: 'New promoter on your team', body: `${name} joined your team with your invite link "${invite.label}".`, link: '/team' });
+    setTimeout(() => void emailLoginLink(findUser(id)!, 'invite', waiting), 0);
+  }
+  await Bun.sleep(Math.max(0, LINK_RESPONSE_MS - (Date.now() - started)));
+  return c.html(<LoginPage sent email={values.email} />);
+});
 
 app.get('/login', (c) => c.html(<LoginPage withPassword={c.req.query('method') === 'password'} />));
 
@@ -1259,6 +1354,61 @@ app.post('/impersonate/stop', requireUser, (c) => {
   audit(c, 'admin.impersonation_stopped', { by: user.impersonator.id, userId: user.id });
   return c.redirect(`/admin/promoters/${user.id}`);
 });
+
+// --- Invite links: admins (any team) and team leads (their own team) ------------------------------------
+
+function renderInvites(c: Context<Env>) {
+  const user = c.get('user');
+  return c.html(
+    <InvitesPage
+      user={user}
+      invites={invitesFor(user)}
+      teamLeads={user.is_admin ? teamLeads() : []}
+      names={new Map(listUsers().map((u) => [u.id, u.name]))}
+      ok={flash(c.req.query('ok'))}
+      error={flash(c.req.query('error'))}
+    />,
+  );
+}
+
+async function createInviteFrom(c: Context<Env>, base: string) {
+  const user = c.get('user');
+  const body = await c.req.parseBody();
+  const label = String(body.label ?? '').trim().slice(0, 80);
+  if (!label) return c.redirect(`${base}?error=invite_label`);
+  const days = String(body.days ?? '') === '' ? null : Number(body.days);
+  if (days !== null && ![1, 7, 30].includes(days)) return c.redirect(`${base}?error=invite_days`);
+  const rawMax = String(body.max_uses ?? '').trim();
+  const maxUses = rawMax === '' ? null : Number(rawMax);
+  if (maxUses !== null && !(Number.isInteger(maxUses) && maxUses >= 1 && maxUses <= 1000)) return c.redirect(`${base}?error=invite_max`);
+  let teamLeadId: number | null = null;
+  if (user.is_admin) {
+    if (body.team_lead_id) {
+      const lead = findUser(Number(body.team_lead_id));
+      if (!lead || !isTeamLead(lead)) return c.redirect(`${base}?error=team_not_lead`);
+      teamLeadId = lead.id;
+    }
+  } else teamLeadId = user.id; // a team lead's links are for their own team
+  const invite = createInvite(user, { label, teamLeadId, maxUses, days });
+  audit(c, 'invite.created', { by: user.id, inviteId: invite.id, teamLeadId, maxUses, days });
+  return c.redirect(`${base}?ok=invite_created`);
+}
+
+function toggleInvite(c: Context<Env>, base: string) {
+  const invite = findInvite(Number(c.req.param('id')));
+  if (!invite || !canManageInvite(c.get('user'), invite)) return c.notFound();
+  const off = c.req.param('action') === 'off';
+  setInviteDisabled(invite.id, off);
+  audit(c, off ? 'invite.turned_off' : 'invite.turned_on', { by: c.get('user').id, inviteId: invite.id });
+  return c.redirect(`${base}?ok=${off ? 'invite_off' : 'invite_on'}`);
+}
+
+app.get('/admin/invites', (c) => renderInvites(c));
+app.post('/admin/invites', (c) => createInviteFrom(c, '/admin/invites'));
+app.post('/admin/invites/:id/:action{off|on}', (c) => toggleInvite(c, '/admin/invites'));
+app.get('/team/invites', (c) => renderInvites(c));
+app.post('/team/invites', (c) => createInviteFrom(c, '/team/invites'));
+app.post('/team/invites/:id/:action{off|on}', (c) => toggleInvite(c, '/team/invites'));
 
 // --- Commission per event ---------------------------------------------------------------------------
 

@@ -82,6 +82,15 @@ With `KUTT_URL` and `KUTT_API_KEY` set, promoters share short links from a [Kutt
 - Event pages show the clicks on each link, read from Kutt at most every `KUTT_CLICKS_MINUTES` (10 by default).
 - Pages wait at most 2.5 seconds for Kutt. While it is slow, down or refusing the key, promoters see the long links, Kutt is left alone for 5 minutes, and **Event links** shows the last error.
 
+## Invite links
+
+On **Promoters → Invite links**, admins make links to share (a group chat, a flyer QR, a DM): whoever opens one enters their first and last name and email, and gets the usual welcome email with a sign-in link, so the address is theirs before they can sign in. They then go through the welcome steps like any new promoter. Admins are notified of every sign-up, to give them their promo codes; the promoter's admin page says which link they joined with.
+
+- A link has a name (only for you), can put new promoters straight on a team, works for 1, 7 or 30 days or without an end date, and can be limited to a number of sign-ups. It can be turned off and on again; a full or expired link stops working.
+- **Team leads** make their own links from **My team → Invite promoters to your team**: their links always put new promoters on their team, and they are notified when someone joins. They see and manage only their own links; admins see every link and who made it. A team lead's links stop working if they stop being a team lead.
+- An email that already has an account gets a normal sign-in link instead, and the page looks the same either way, so it does not tell who has an account. That does not use up the link.
+- At most 20 sign-ups an hour per link, so a link that leaks cannot be used to send lots of email.
+
 ## Commission per event
 
 **Promoters → Commissions** lists every event that is not over (drafts included) with the promoters who have one of its codes. For each promoter and event, choose **Usual rate** (their own %), **% of sales** (another percentage) or **per ticket** (a flat amount for each ticket sold). Like the usual rate, a change applies to all their sales for that event, earlier ones too, and stays when the event is over. Promoters see it on the event page ("Commission ($3.00 per ticket)") and their dashboard says "10%, other rates on some events". Their balance, payouts, charts and the admin dashboard all use it. A team lead's team commission stays a percentage of their promoters' sales.
