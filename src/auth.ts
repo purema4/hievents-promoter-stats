@@ -6,6 +6,7 @@ import { getConnInfo } from 'hono/bun';
 import { addColumn, db, findUser, findUserByEmail, type User } from './local-db';
 import { notify } from './notifications';
 import { alertUser } from './alert-prefs';
+import { isTeamLead } from './teams';
 
 // What each signed-in device looks like, for Account → Security.
 addColumn('sessions', 'created_at', 'INTEGER');
@@ -161,6 +162,11 @@ export function markSessionApp(rowid: number) {
 
 export async function requireAdmin(c: Context<Env>, next: Next) {
   if (!c.get('user').is_admin) return c.text('Forbidden', 403);
+  await next();
+}
+
+export async function requireTeamLead(c: Context<Env>, next: Next) {
+  if (!isTeamLead(c.get('user'))) return c.text('Forbidden', 403);
   await next();
 }
 

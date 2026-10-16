@@ -13,6 +13,7 @@ import { config } from './config';
 import { pageLink } from './links';
 import { pageShortLink, shortDomain } from './short-links';
 import { hiddenByTeam } from './promoter-page';
+import { isTeamLead } from './teams';
 import type { PromoCodeListing } from './hievents';
 import { commissionPercentFor, type User } from './local-db';
 import { formatMoney, formatPercent } from './money';
@@ -261,7 +262,7 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .two-col { display: grid; gap: 24px; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); align-items: start; }
 .inline { margin: 0; }
 .codes-line { margin-bottom: 12px; }
-h2.first { margin-top: 0; }
+h2.first, p.first { margin-top: 0; }
 .event-card { display: grid; gap: 12px; }
 .event-card:hover { border-color: var(--accent); }
 a.event-card-main { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; color: inherit; text-decoration: none; }
@@ -373,6 +374,18 @@ table.page-table td { vertical-align: top; }
 table.page-table a.who { color: inherit; text-decoration: none; gap: 10px; }
 .page-link-kind { font-size: 11px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); min-width: 34px; }
 @media (min-width: 700px) { table.page-table a.who { white-space: nowrap; } }
+/* Teams (/admin/teams) and the team field on a promoter's admin page. */
+.inline-form { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.inline-form select { flex: 1 1 200px; width: auto; min-width: 0; }
+.team-card { margin-top: 16px; }
+.team-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+.team-head a.who, .team-members a.who { color: inherit; text-decoration: none; gap: 10px; }
+.team-members { list-style: none; margin: 12px 0; padding: 0; display: grid; gap: 4px; }
+.team-members li { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 6px 0; border-top: 1px solid var(--border); }
+.team-members form { margin: 0; }
+.team-actions { display: grid; gap: 10px; margin-top: 12px; }
+.team-actions form { margin: 0; }
+button.link.danger-link { color: var(--danger); text-align: left; }
 /* Promoters' public pages (/p/<alias>): link-in-bio style, built for phones first. */
 body.lp { min-height: 100vh; min-height: 100dvh; background: var(--bg); overflow-x: hidden; -webkit-font-smoothing: antialiased; }
 .lp-backdrop { position: fixed; inset: 0; z-index: 0; overflow: hidden; pointer-events: none; }
@@ -647,6 +660,7 @@ function Sidebar(props: { user: User }) {
           </NavGroup>
           <NavGroup title="Promoters">
             <a href="/admin">All promoters</a>
+            <a href="/admin/teams">Teams</a>
             <a href="/admin/pages">Promoter pages</a>
           </NavGroup>
           <NavGroup title="Settings">
@@ -664,6 +678,7 @@ function Sidebar(props: { user: User }) {
           <a href="/">Dashboard</a>
           <a href="/payouts">Payouts &amp; rewards</a>
           <a href="/page">My page</a>
+          {isTeamLead(u) && <a href="/team">My team</a>}
         </NavGroup>
       )}
       {/* On computers these live in the avatar menu; the phone panel keeps them too. */}
@@ -985,6 +1000,8 @@ export function AdminPage(props: {
   error?: string;
   ok?: string;
 }) {
+  // For "X's team" under each name.
+  const names = new Map(props.promoters.map((p) => [p.id, p.name]));
   return (
     <Layout title="Promoters" user={props.user}>
       <h1>Promoters</h1>
@@ -1013,9 +1030,11 @@ export function AdminPage(props: {
                       <div>
                         <a href={`/admin/promoters/${p.id}`}>{p.name}</a>
                         {p.is_admin ? <span class="muted"> (admin)</span> : null}
+                        {isTeamLead(p) ? <span class="muted"> (team lead)</span> : null}
                         <div class="muted">
                           {p.email}
                           {p.alias ? ` · aff=${p.alias}` : ''}
+                          {p.team_lead_id && names.has(p.team_lead_id) ? ` · ${names.get(p.team_lead_id)}'s team` : ''}
                         </div>
                       </div>
                     </div>
@@ -1226,6 +1245,8 @@ export function PromoterPage(props: {
   rewardRequests: RewardRequest[];
   rewards: Rewards;
   adjustments: Adjustment[];
+  teamLeads: User[];
+  team: User[]; // their promoters, when they are a team lead
   error?: string;
   ok?: string;
 }) {
@@ -1288,6 +1309,60 @@ export function PromoterPage(props: {
           </form>
           <p class="muted">Deleting removes their login only. Nothing in Hi.Events changes.</p>
         </div>
+      </div>
+
+      <h2>Team</h2>
+      <div class="card">
+        {p.is_admin ? (
+          <p class="muted first">Admins see every team and are on none.</p>
+        ) : isTeamLead(p) ? (
+          <>
+            <p class="first">
+              Team lead of{' '}
+              {props.team.length === 0
+                ? 'no promoters yet'
+                : props.team.map((m, i) => (
+                    <>
+                      {i > 0 && ', '}
+                      <a href={`/admin/promoters/${m.id}`}>{m.name}</a>
+                    </>
+                  ))}
+              . <a href={`/admin/teams/${p.id}`}>Team sales →</a>
+            </p>
+            <p class="muted">Add or remove promoters on <a href="/admin/teams">Teams</a>.</p>
+            <form method="post" action="/admin/teams/lead">
+              <input type="hidden" name="user_id" value={String(p.id)} />
+              <input type="hidden" name="lead" value="0" />
+              <input type="hidden" name="from" value="promoter" />
+              <button class="secondary" type="submit">
+                No longer team lead
+              </button>
+            </form>
+          </>
+        ) : (
+          <>
+            <form class="inline-form" method="post" action={`/admin/promoters/${p.id}/team`}>
+              <select name="team_lead_id" aria-label="Team lead">
+                <option value="">No team</option>
+                {props.teamLeads.map((l) => (
+                  <option value={String(l.id)} selected={l.id === p.team_lead_id}>
+                    {l.name}'s team
+                  </option>
+                ))}
+              </select>
+              <button type="submit">Save</button>
+            </form>
+            <p class="muted">Their team lead sees their sales, nothing else.</p>
+            <form method="post" action="/admin/teams/lead">
+              <input type="hidden" name="user_id" value={String(p.id)} />
+              <input type="hidden" name="lead" value="1" />
+              <input type="hidden" name="from" value="promoter" />
+              <button class="secondary" type="submit">
+                Make {p.name} a team lead
+              </button>
+            </form>
+          </>
+        )}
       </div>
 
       <h2>Security</h2>
@@ -2484,6 +2559,56 @@ function PromoterActivity(props: { promoters: User[] }) {
   );
 }
 
+// Promoters ranked for the period, on the admin dashboard and on team pages.
+function BoardTable(props: { board: Leaderboard; sort: Sort; sortHref: (s: Sort) => string; href: (u: User) => string; owed?: boolean }) {
+  const { board, sort, sortHref } = props;
+  const cur = board.currency;
+  return (
+    <div class="card table-wrap">
+      <table class="leaderboard">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Promoter</th>
+            <th class="num">
+              <a href={sortHref('tickets')} aria-current={sort === 'tickets' ? 'true' : undefined}>Tickets</a>
+            </th>
+            <th class="num">
+              <a href={sortHref('sales')} aria-current={sort === 'sales' ? 'true' : undefined}>Sales</a>
+            </th>
+            <th class="num">
+              <a href={sortHref('commission')} aria-current={sort === 'commission' ? 'true' : undefined}>Commission</a>
+            </th>
+            {props.owed && <th class="num">Owed</th>}
+            <th>Last sale</th>
+          </tr>
+        </thead>
+        <tbody>
+          {board.entries.map((e, i) => (
+            <tr>
+              <td class="rank">{medal(i + 1)}</td>
+              <td>
+                <a class="who" href={props.href(e.user)}>
+                  <Avatar user={e.user} size="small" />
+                  <span>
+                    {e.user.name}
+                    <LevelBadge level={e.level} tiny />
+                  </span>
+                </a>
+              </td>
+              <td class="num">{e.tickets}</td>
+              <td class="num">{formatMoney(e.fullPrice, cur)}</td>
+              <td class="num">{formatMoney(e.commission, cur)}</td>
+              {props.owed && <td class="num">{formatMoney(e.owed, cur)}</td>}
+              <td class="muted">{e.lastSale ?? 'No sales yet'}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 export function AdminDashboardPage(props: { user: User; board: Leaderboard; range: Range; sort: Sort; promoters: User[] }) {
   const { board, range, sort } = props;
   const cur = board.currency;
@@ -2523,51 +2648,190 @@ export function AdminDashboardPage(props: { user: User; board: Leaderboard; rang
       {board.entries.length === 0 ? (
         <p class="muted">No promoters with codes yet.</p>
       ) : (
-        <div class="card table-wrap">
-          <table class="leaderboard">
-            <thead>
-              <tr>
-                <th>#</th>
-                <th>Promoter</th>
-                <th class="num">
-                  <a href={sortHref('tickets')} aria-current={sort === 'tickets' ? 'true' : undefined}>Tickets</a>
-                </th>
-                <th class="num">
-                  <a href={sortHref('sales')} aria-current={sort === 'sales' ? 'true' : undefined}>Sales</a>
-                </th>
-                <th class="num">
-                  <a href={sortHref('commission')} aria-current={sort === 'commission' ? 'true' : undefined}>Commission</a>
-                </th>
-                <th class="num">Owed</th>
-                <th>Last sale</th>
-              </tr>
-            </thead>
-            <tbody>
-              {board.entries.map((e, i) => (
-                <tr>
-                  <td class="rank">{medal(i + 1)}</td>
-                  <td>
-                    <a class="who" href={`/admin/promoters/${e.user.id}`}>
-                      <Avatar user={e.user} size="small" />
-                      <span>
-                        {e.user.name}
-                        <LevelBadge level={e.level} tiny />
-                      </span>
-                    </a>
-                  </td>
-                  <td class="num">{e.tickets}</td>
-                  <td class="num">{formatMoney(e.fullPrice, cur)}</td>
-                  <td class="num">{formatMoney(e.commission, cur)}</td>
-                  <td class="num">{formatMoney(e.owed, cur)}</td>
-                  <td class="muted">{e.lastSale ?? 'No sales yet'}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <BoardTable board={board} sort={sort} sortHref={sortHref} href={(u) => `/admin/promoters/${u.id}`} owed />
       )}
 
       <PromoterActivity promoters={props.promoters} />
+    </Layout>
+  );
+}
+
+// A team's sales: for the team lead on /team, and for admins on /admin/teams/:id. Nothing to act on.
+export function TeamPage(props: {
+  user: User;
+  lead: User;
+  members: User[];
+  board: Leaderboard;
+  range: Range;
+  sort: Sort;
+  basePath: string;
+  memberHref: (u: User) => string;
+}) {
+  const { board, range, sort } = props;
+  const cur = board.currency;
+  const self = props.lead.id === props.user.id;
+  const sortHref = (s: Sort) => `${props.basePath}?range=${range}&sort=${s}`;
+  const rangeLabel = range === 'all' ? 'all time' : `last ${range} days`;
+  const ranked = new Set(board.entries.map((e) => e.user.id));
+  const notSelling = props.members.filter((m) => !ranked.has(m.id));
+  return (
+    <Layout title={self ? 'My team' : `${props.lead.name}'s team`} user={props.user}>
+      {!self && (
+        <p class="muted">
+          <a href="/admin/teams">Teams</a> / {props.lead.name}
+        </p>
+      )}
+      <div class="dash-head">
+        <h1>{self ? 'My team' : `${props.lead.name}'s team`}</h1>
+        <RangeLinks current={range} basePath={props.basePath} />
+      </div>
+      <p class="muted">
+        {self ? 'Sales by the promoters on your team' : `Sales by the promoters on ${props.lead.name}'s team`}, {rangeLabel}.
+        {self && ' Payouts and rewards stay with each promoter and the admins.'}
+      </p>
+      {props.members.length === 0 ? (
+        <div class="card muted">{self ? 'No promoters on your team yet. An admin adds them.' : 'No promoters on this team yet.'}</div>
+      ) : (
+        <>
+          <div class="grid">
+            <div class="card stat highlight">
+              <div class="value">{board.totals.tickets}</div>
+              <div class="label">Tickets sold by the team</div>
+            </div>
+            <div class="card stat">
+              <div class="value">{formatMoney(board.totals.fullPrice, cur)}</div>
+              <div class="label">Sales at full price</div>
+            </div>
+            <div class="card stat">
+              <div class="value">{formatMoney(board.totals.commission, cur)}</div>
+              <div class="label">Commission earned</div>
+            </div>
+            <div class="card stat">
+              <div class="value">{props.members.length}</div>
+              <div class="label">{props.members.length === 1 ? 'Promoter' : 'Promoters'} on the team</div>
+            </div>
+          </div>
+
+          <SalesChart title="Tickets sold per day" daily={board.daily} percent={100} range={range} basePath={props.basePath} currency={cur} />
+
+          <h2>{self ? 'Your promoters' : 'Promoters'}</h2>
+          {board.entries.length > 0 && <BoardTable board={board} sort={sort} sortHref={sortHref} href={props.memberHref} />}
+          {notSelling.length > 0 && (
+            <p class="muted">
+              No codes yet:{' '}
+              {notSelling.map((m, i) => (
+                <>
+                  {i > 0 && ', '}
+                  <a href={props.memberHref(m)}>{m.name}</a>
+                </>
+              ))}
+            </p>
+          )}
+        </>
+      )}
+    </Layout>
+  );
+}
+
+function PromoterSelect(props: { name: string; promoters: User[]; label: string }) {
+  return (
+    <select name={props.name} required aria-label={props.label}>
+      <option value="">{props.label}</option>
+      {props.promoters.map((p) => (
+        <option value={String(p.id)}>{p.name}</option>
+      ))}
+    </select>
+  );
+}
+
+// Admins make team leads and put promoters on their teams.
+export function AdminTeamsPage(props: { user: User; leads: { lead: User; members: User[] }[]; promoters: User[]; ok?: string; error?: string }) {
+  const leadIds = new Set(props.leads.map((t) => t.lead.id));
+  const candidates = props.promoters.filter((p) => !leadIds.has(p.id));
+  const unassigned = candidates.filter((p) => !p.team_lead_id);
+  return (
+    <Layout title="Teams" user={props.user}>
+      <h1>Teams</h1>
+      <p class="muted">
+        A team lead sees the sales of the promoters on their team, and nothing else: payouts and rewards stay with each
+        promoter and the admins. Promoters are told when they join a team.
+      </p>
+      <Flash error={props.error} ok={props.ok} />
+
+      <div class="card">
+        <h2 class="first">Make a team lead</h2>
+        {candidates.length === 0 ? (
+          <p class="muted">Every promoter is already a team lead.</p>
+        ) : (
+          <form class="inline-form" method="post" action="/admin/teams/lead">
+            <PromoterSelect name="user_id" promoters={candidates} label="Choose a promoter" />
+            <input type="hidden" name="lead" value="1" />
+            <button type="submit">Make team lead</button>
+          </form>
+        )}
+        <p class="muted">A promoter on a team leaves it when they become a team lead. Admins are on no team.</p>
+      </div>
+
+      {props.leads.length === 0 ? (
+        <p class="muted">No team leads yet.</p>
+      ) : (
+        props.leads.map(({ lead, members }) => (
+          <div class="card team-card">
+            <div class="team-head">
+              <a class="who" href={`/admin/promoters/${lead.id}`}>
+                <Avatar user={lead} size="small" />
+                <strong>{lead.name}</strong>
+              </a>
+              <a href={`/admin/teams/${lead.id}`}>Team sales →</a>
+            </div>
+            {members.length === 0 ? (
+              <p class="muted">No promoters on this team yet.</p>
+            ) : (
+              <ul class="team-members">
+                {members.map((m) => (
+                  <li>
+                    <a class="who" href={`/admin/promoters/${m.id}`}>
+                      <Avatar user={m} size="small" />
+                      <span>{m.name}</span>
+                    </a>
+                    <form method="post" action={`/admin/promoters/${m.id}/team`}>
+                      <input type="hidden" name="team_lead_id" value="" />
+                      <input type="hidden" name="from" value="teams" />
+                      <button class="link" type="submit">
+                        Remove
+                      </button>
+                    </form>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <div class="team-actions">
+              {candidates.some((p) => p.team_lead_id !== lead.id) && (
+                <form class="inline-form" method="post" action="/admin/teams/add">
+                  <input type="hidden" name="team_lead_id" value={String(lead.id)} />
+                  <PromoterSelect name="user_id" promoters={candidates.filter((p) => p.team_lead_id !== lead.id)} label="Add a promoter" />
+                  <button class="secondary" type="submit">
+                    Add
+                  </button>
+                </form>
+              )}
+              <form method="post" action="/admin/teams/lead">
+                <input type="hidden" name="user_id" value={String(lead.id)} />
+                <input type="hidden" name="lead" value="0" />
+                <button class="link danger-link" type="submit">
+                  No longer team lead{members.length > 0 ? ` (their ${members.length === 1 ? 'promoter is' : `${members.length} promoters are`} left without a team)` : ''}
+                </button>
+              </form>
+            </div>
+          </div>
+        ))
+      )}
+
+      {unassigned.length > 0 && props.leads.length > 0 && (
+        <p class="muted">
+          Not on a team: {unassigned.map((p) => p.name).join(', ')}.
+        </p>
+      )}
     </Layout>
   );
 }

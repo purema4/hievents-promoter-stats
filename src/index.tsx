@@ -20,6 +20,7 @@ import {
   endSession,
   purgeExpiredSessions,
   requireAdmin,
+  requireTeamLead,
   revokeAccess,
   requireUser,
   startSession,
@@ -91,6 +92,7 @@ import { describeProblem, isCustomized as isRulesCustomized, rewardRules, saveRe
 import { kuttDomains, kuttEnabled, pageClicks, pageShortLink, prepareShortLinks, renamePageLink, saveShortDomain, shortLinkStatus } from './short-links';
 import { MyPagePage, PageMissing, PromoterPublicPage } from './page-views';
 import { hiddenByTeam, pageEvents, pageOwner, setPageHidden } from './promoter-page';
+import { assignTeam, isTeamLead, leaveTeams, setTeamLead, teamLeads, teamMember, teamMembers } from './teams';
 import QRCode from 'qrcode';
 import { publicAsset, publicText, serviceWorker } from './static';
 import {
@@ -122,6 +124,8 @@ import {
   AdminEmailsPage,
   AdminLinksPage,
   AdminDashboardPage,
+  AdminTeamsPage,
+  TeamPage,
   AdminRewardsPage,
   AdminPayoutsPage,
   ApproveDevicePage,
@@ -202,6 +206,14 @@ const messages: Record<string, string> = {
   short_invalid: 'Use letters, numbers, - or _ (64 at most), starting with a letter or number.',
   short_refused: 'Kutt refused that address (some words are reserved). Pick another.',
   short_unavailable: 'Kutt did not answer. Try again in a few minutes.',
+  team_saved: 'Team saved.',
+  team_lead_on: 'They are a team lead now and have been told. Add promoters to their team below.',
+  team_lead_off: 'They are no longer a team lead. Their promoters have no team now.',
+  team_admin: 'Admins see every team and cannot be on one.',
+  team_is_lead: 'A team lead cannot be on another team.',
+  team_not_lead: 'Pick one of the team leads.',
+  team_self: 'A promoter cannot be on their own team.',
+  team_pick: 'Choose a promoter.',
 };
 // Own keys only: ?ok=constructor must not pick up something from Object.prototype.
 const flash = (key?: string) => (key && Object.hasOwn(messages, key) ? messages[key] : undefined);
@@ -529,6 +541,8 @@ app.use('/account/*', requireUser);
 app.use('/account', requireUser);
 app.use('/page', requireUser);
 app.use('/page/*', requireUser);
+app.use('/team', requireUser, requireTeamLead);
+app.use('/team/*', requireUser, requireTeamLead);
 app.use('/admin/*', requireUser, requireAdmin);
 app.use('/admin', requireUser, requireAdmin);
 
@@ -916,11 +930,11 @@ app.post('/account/security/2fa/:action{off|new-codes}', async (c) => {
   return renderSecurity(c, { recoveryCodes: newRecoveryCodes(user.id) });
 });
 
-// Promoters see their own photo; admins see everyone's.
+// Promoters see their own photo, team leads their team's; admins see everyone's.
 app.get('/avatar/:userId', (c) => {
   const viewer = c.get('user');
   const userId = Number(c.req.param('userId'));
-  if (viewer.id !== userId && !viewer.is_admin) return c.notFound();
+  if (viewer.id !== userId && !viewer.is_admin && !teamMember(viewer, userId)) return c.notFound();
   const avatar = readAvatar(userId);
   if (!avatar) return c.notFound();
   c.header('Content-Type', avatar.type);
@@ -1024,6 +1038,8 @@ app.get('/admin/promoters/:id', async (c) => {
       rewardRequests={rewardRequestsFor(promoter.id)}
       rewards={data.rewards}
       adjustments={adjustmentsFor(promoter.id)}
+      teamLeads={teamLeads().filter((l) => l.id !== promoter.id)}
+      team={teamMembers(promoter.id)}
       ok={flash(c.req.query('ok'))}
       error={flash(c.req.query('error'))}
     />,
@@ -1049,6 +1065,7 @@ app.post('/admin/promoters/:id', async (c) => {
   if (aliasTaken(alias, promoter.id)) return c.redirect(`${back}?error=alias_taken`);
   setAlias(promoter.id, alias);
   updateUser(promoter.id, { name, email, isAdmin, commissionPercent });
+  if (isAdmin && !promoter.is_admin) leaveTeams(promoter.id);
   if (email.toLowerCase() !== promoter.email.toLowerCase()) {
     revokeAccess(promoter.id);
     if (promoter.id === c.get('user').id) startSession(c, promoter.id);
@@ -1240,6 +1257,99 @@ app.post('/admin/pages/:id/visibility', async (c) => {
   setPageHidden(promoter.id, hidden, c.get('user').id);
   audit(c, hidden ? 'admin.page_hidden' : 'admin.page_shown', { userId: promoter.id });
   return c.redirect('/admin/pages?ok=page_saved');
+});
+
+// --- Teams ----------------------------------------------------------------------------------------------
+
+/** A team's ranking for the period: only the team's promoters, each with their own rate. */
+async function renderTeam(c: Context<Env>, lead: User, basePath: string, memberHref: (u: User) => string) {
+  const range = parseRange(c.req.query('range'), '30');
+  const sortParam = c.req.query('sort');
+  const sort: Sort = sortParam === 'sales' || sortParam === 'commission' ? sortParam : 'tickets';
+  const members = teamMembers(lead.id);
+  return c.html(
+    <TeamPage
+      user={c.get('user')}
+      lead={lead}
+      members={members}
+      board={await leaderboard(range, sort, members)}
+      range={range}
+      sort={sort}
+      basePath={basePath}
+      memberHref={memberHref}
+    />,
+  );
+}
+
+// Team leads: their team's sales, and each promoter's dashboard as an admin sees it. Nothing to act on.
+app.get('/team', (c) => renderTeam(c, c.get('user'), '/team', (u) => `/team/${u.id}`));
+
+app.get('/team/:id', (c) => {
+  const member = teamMember(c.get('user'), Number(c.req.param('id')));
+  if (!member) return c.notFound();
+  return renderDashboard(c, member, `/team/${member.id}`);
+});
+
+app.get('/team/:id/events/:eventId', (c) => {
+  const member = teamMember(c.get('user'), Number(c.req.param('id')));
+  if (!member) return c.notFound();
+  return renderEvent(c, member, `/team/${member.id}`);
+});
+
+app.get('/admin/teams', (c) =>
+  c.html(
+    <AdminTeamsPage
+      user={c.get('user')}
+      leads={teamLeads().map((lead) => ({ lead, members: teamMembers(lead.id) }))}
+      promoters={listUsers().filter((u) => !u.is_admin)}
+      ok={flash(c.req.query('ok'))}
+      error={flash(c.req.query('error'))}
+    />,
+  ),
+);
+
+app.get('/admin/teams/:id', (c) => {
+  const lead = findUser(Number(c.req.param('id')));
+  if (!lead || !isTeamLead(lead)) return c.notFound();
+  return renderTeam(c, lead, `/admin/teams/${lead.id}`, (u) => `/admin/promoters/${u.id}`);
+});
+
+// Forms on Teams and on a promoter's page come back to where they were sent from.
+const teamBack = (from: unknown, userId: number) => (from === 'promoter' ? `/admin/promoters/${userId}` : '/admin/teams');
+
+app.post('/admin/teams/lead', async (c) => {
+  const body = await c.req.parseBody();
+  const promoter = findUser(Number(body.user_id));
+  if (!promoter) return c.redirect('/admin/teams?error=team_pick');
+  const back = teamBack(body.from, promoter.id);
+  const lead = body.lead === '1';
+  const result = setTeamLead(promoter, lead);
+  if (result !== 'ok') return c.redirect(`${back}?error=${result}`);
+  audit(c, lead ? 'admin.team_lead_added' : 'admin.team_lead_removed', { by: c.get('user').id, userId: promoter.id });
+  return c.redirect(`${back}?ok=${lead ? 'team_lead_on' : 'team_lead_off'}`);
+});
+
+async function saveTeam(c: Context<Env>, promoter: User, rawLead: unknown, back: string) {
+  const leadId = rawLead === '' || rawLead === undefined ? null : Number(rawLead);
+  const result = leadId !== null && !Number.isInteger(leadId) ? 'team_not_lead' : assignTeam(promoter, leadId);
+  if (result !== 'ok') return c.redirect(`${back}?error=${result}`);
+  audit(c, 'admin.team_changed', { by: c.get('user').id, userId: promoter.id, teamLeadId: leadId });
+  return c.redirect(`${back}?ok=team_saved`);
+}
+
+app.post('/admin/teams/add', async (c) => {
+  const body = await c.req.parseBody();
+  const promoter = findUser(Number(body.user_id));
+  if (!promoter) return c.redirect('/admin/teams?error=team_pick');
+  if (!body.team_lead_id) return c.redirect('/admin/teams?error=team_not_lead');
+  return saveTeam(c, promoter, body.team_lead_id, '/admin/teams');
+});
+
+app.post('/admin/promoters/:id/team', async (c) => {
+  const promoter = findUser(Number(c.req.param('id')));
+  if (!promoter) return c.notFound();
+  const body = await c.req.parseBody();
+  return saveTeam(c, promoter, body.team_lead_id, teamBack(body.from === 'teams' ? 'teams' : 'promoter', promoter.id));
 });
 
 app.get('/admin/dashboard', async (c) => {

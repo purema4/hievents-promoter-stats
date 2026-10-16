@@ -30,6 +30,16 @@ Add-on products (non-ticket items) are not counted as tickets, but they are incl
 
 Admins see any promoter's dashboard exactly as they do from the promoter's page (**Open … dashboard**).
 
+## Teams
+
+An admin can make any promoter a **team lead** and put other promoters on their team, on **Teams** in the menu or in the **Team** section of a promoter's page. A team lead can have many promoters; a promoter has at most one team lead. Only admins make team leads and change teams.
+
+- A team lead keeps their own dashboard, payouts and page, and gets **My team** in the menu: their team's tickets, full-price sales and commission for 7 / 30 / 90 days or all time, a tickets-per-day chart, and their promoters ranked. Each promoter opens to their dashboard and event pages, as an admin sees them.
+- They only see. They cannot request payouts or rewards for their promoters, change anything about them, or see any other promoter, payout details or admin page.
+- Promoters get a notification when they join a team, naming the team lead who can now see their sales. A new team lead is told too.
+- One level only: a team lead is on no one's team (a promoter who becomes one leaves their team), and admins are on no team. When a team lead steps down, is deleted or becomes an admin, their promoters are left without a team.
+- Admins see every team's sales from **Teams** (**Team sales →**).
+
 ## Levels and rewards
 
 Admins set them on **Levels & rewards**; changes apply to everyone at once, counted from all their sales so far (rewards already requested stay requested). **Back to the default levels and rewards** undoes the changes.
@@ -122,6 +132,7 @@ A bell in the header shows unread notifications; the **Notifications** page list
 | Reward given or declined | ✓ | |
 | New level, merch unlocked | ✓ | ✓ |
 | Free ticket earned for an event | ✓ | |
+| Made a team lead, or joined a team | ✓ | |
 
 **Admin alerts** (a payout or reward requested, a promoter reaching a level or unlocking merch, a new sign-in on their own account) can each be set per admin on the Notifications page: email, app notification (the bell and phone push), both, or off. Defaults: email and app for requests, app only for the rest. The extra emails (promoter milestone, new sign-in) are editable on the Emails page like the others.
 

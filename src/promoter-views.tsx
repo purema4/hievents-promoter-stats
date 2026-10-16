@@ -355,7 +355,7 @@ function EventCard(props: { event: EventSummary; href: string; freeTickets?: num
 export function DashboardPage(props: {
   viewer: User;
   promoter: User;
-  basePath: string; // '' for the promoter, '/admin/promoters/:id/view' when an admin looks
+  basePath: string; // '' for the promoter, '/admin/promoters/:id/view' when an admin looks, '/team/:id' for their team lead
   codes: string[];
   rows: CodeStats[];
   daily: DailySales[];
@@ -375,12 +375,17 @@ export function DashboardPage(props: {
 
   return (
     <Layout title="My sales" user={props.viewer}>
-      {!self && (
-        <p class="muted">
-          <a href="/admin">Promoters</a> / <a href={`/admin/promoters/${props.promoter.id}`}>{props.promoter.name}</a> /
-          Their dashboard
-        </p>
-      )}
+      {!self &&
+        (props.basePath.startsWith('/team/') ? (
+          <p class="muted">
+            <a href="/team">My team</a> / {props.promoter.name}
+          </p>
+        ) : (
+          <p class="muted">
+            <a href="/admin">Promoters</a> / <a href={`/admin/promoters/${props.promoter.id}`}>{props.promoter.name}</a> /
+            Their dashboard
+          </p>
+        ))}
       <div class="who">
         <Avatar user={props.promoter} />
         <h1>{self ? `Hi ${props.promoter.name}` : `${props.promoter.name}'s dashboard`}</h1>

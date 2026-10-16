@@ -28,12 +28,12 @@ export type Leaderboard = {
   totals: { tickets: number; fullPrice: number; commission: number; owed: number; pending: number };
 };
 
-/** Every promoter's numbers for the period, best first. Money is in the main currency (CAD-only setups). */
-export async function leaderboard(range: Range, sort: Sort): Promise<Leaderboard> {
+/** Every promoter's numbers for the period (or only these promoters'), best first. Money is in the main currency (CAD-only setups). */
+export async function leaderboard(range: Range, sort: Sort, users: User[] = listUsers()): Promise<Leaderboard> {
   const entries: Entry[] = [];
   const daily = new Map<string, { tickets: number; commission: number }>();
   let currency = 'CAD';
-  for (const user of listUsers()) {
+  for (const user of users) {
     const codes = codesFor(user.id);
     // Promoters with only sales entered by hand (events outside Hi.Events) are ranked too.
     if (codes.length === 0 && !hasAdjustments(user.id)) continue;

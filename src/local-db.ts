@@ -111,6 +111,8 @@ export type User = {
   alias?: string | null;
   page_hidden_at?: number | null;
   page_hidden_by?: number | null;
+  is_team_lead?: number;
+  team_lead_id?: number | null;
   totp_secret?: string | null;
   totp_pending?: string | null;
   totp_enabled_at?: number | null;
