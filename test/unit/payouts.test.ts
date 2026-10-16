@@ -39,7 +39,7 @@ describe('requestPayout', () => {
   });
 
   test('cashAvailable rounds down to a whole step and never goes negative', () => {
-    const b = (available: number): Balance => ({ currency: 'CAD', fromSales: 0, added: 0, earned: 0, paidOut: 0, pending: 0, available });
+    const b = (available: number): Balance => ({ currency: 'CAD', fromSales: 0, fromTeam: 0, added: 0, earned: 0, paidOut: 0, pending: 0, available });
     expect(cashAvailable(b(2850))).toBe(0);
     expect(cashAvailable(b(5000))).toBe(5000);
     expect(cashAvailable(b(9999))).toBe(5000);
@@ -51,7 +51,7 @@ describe('requestPayout', () => {
     expect(requestPayout(user, balanceOf(user.id, 2850), interac(1000))).toBe('ok');
     // Even a stale balance (as read before the first request) cannot add a second one.
     expect(requestPayout(user, balanceOf(user.id, 2850), interac(500))).toBe('already_pending');
-    const usd: Balance = { currency: 'USD', fromSales: 1000, added: 0, earned: 1000, paidOut: 0, pending: 0, available: 1000 };
+    const usd: Balance = { currency: 'USD', fromSales: 1000, fromTeam: 0, added: 0, earned: 1000, paidOut: 0, pending: 0, available: 1000 };
     expect(requestPayout(user, usd, interac(1000))).toBe('ok');
     expect(payoutsFor(user.id).map((p) => [p.currency, p.amount_cents, p.status])).toEqual([
       ['USD', 1000, 'pending'],
@@ -71,7 +71,7 @@ describe('balances', () => {
   test('earned minus paid minus pending; declined requests free the amount again', async () => {
     const user = await newUser();
     const admin = await newUser('Admin', true);
-    expect(balanceOf(user.id, 2850)).toEqual({ currency: 'CAD', fromSales: 2850, added: 0, earned: 2850, paidOut: 0, pending: 0, available: 2850 });
+    expect(balanceOf(user.id, 2850)).toEqual({ currency: 'CAD', fromSales: 2850, fromTeam: 0, added: 0, earned: 2850, paidOut: 0, pending: 0, available: 2850 });
 
     requestPayout(user, balanceOf(user.id, 2850), interac(1000));
     expect(balanceOf(user.id, 2850)).toMatchObject({ pending: 1000, available: 1850 });
@@ -101,7 +101,7 @@ describe('balances', () => {
     addAdjustment(admin, user.id, { kind: 'money', amountCents: 4000, currency: 'CAD', label: 'Bonus' });
     addAdjustment(admin, user.id, { kind: 'money', amountCents: 500, currency: 'USD', label: 'Tour' });
     const all = balances(user.id, [cad(2850)]);
-    expect(all.find((b) => b.currency === 'CAD')).toMatchObject({ fromSales: 2850, added: 4000, earned: 6850, available: 6850 });
-    expect(all.find((b) => b.currency === 'USD')).toMatchObject({ fromSales: 0, added: 500, available: 500 });
+    expect(all.find((b) => b.currency === 'CAD')).toMatchObject({ fromSales: 2850, fromTeam: 0, added: 4000, earned: 6850, available: 6850 });
+    expect(all.find((b) => b.currency === 'USD')).toMatchObject({ fromSales: 0, fromTeam: 0, added: 500, available: 500 });
   });
 });

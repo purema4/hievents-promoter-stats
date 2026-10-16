@@ -5,6 +5,7 @@ import { codesFor, commissionPercentFor, listUsers, type User } from './local-db
 import { commissionCents, toCents, totalsByCurrency } from './money';
 import { balances, countPendingPayouts } from './payouts';
 import { countPendingRewards, levelFor, type Level } from './rewards';
+import { hadTeam, teamCommission } from './teams';
 
 export type Entry = {
   user: User;
@@ -75,7 +76,8 @@ export async function leaderboard(range: Range, sort: Sort, users: User[] = list
     // Admin entries: sales outside Hi.Events and money added count too (by the day they were entered).
     tickets += range === 'all' ? outsideTickets(user.id) : outsideTickets(user.id, from, to);
     commission += range === 'all' ? [...moneyAdjustments(user.id).values()].reduce((a, b) => a + b, 0) : moneyAdjustmentsBetween(user.id, from, to);
-    const owed = balances(user.id, totals).reduce((sum, b) => sum + b.available + b.pending, 0);
+    const team = hadTeam(user.id) ? await teamCommission(user) : [];
+    const owed = balances(user.id, totals, team).reduce((sum, b) => sum + b.available + b.pending, 0);
     entries.push({
       user,
       tickets,

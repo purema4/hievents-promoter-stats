@@ -47,8 +47,9 @@ export type PayoutRequest = {
 export type Balance = {
   currency: string;
   fromSales: number; // commission on Hi.Events sales
+  fromTeam: number; // team leads: their share of their promoters' sales
   added: number; // money added (or removed) by admins
-  earned: number; // fromSales + added
+  earned: number; // fromSales + fromTeam + added
   paidOut: number;
   pending: number;
   available: number;
@@ -79,21 +80,22 @@ export function findPayout(id: number): PayoutRequest | null {
  * Earned commission minus what has been paid out or is waiting to be. Refunds after a payout
  * can make it negative; that is shown as-is and nets out of the next payout.
  */
-export function balances(userId: number, totals: Totals[]): Balance[] {
+export function balances(userId: number, totals: Totals[], team: { currency: string; commission: number }[] = []): Balance[] {
   const rows = db
     .query<{ currency: string; status: string; cents: number }, [number]>(
       "SELECT currency, status, sum(amount_cents) AS cents FROM payout_requests WHERE user_id = ? AND status <> 'rejected' GROUP BY currency, status",
     )
     .all(userId);
   const added = moneyAdjustments(userId);
-  const currencies = new Set([...totals.map((t) => t.currency), ...rows.map((r) => r.currency), ...added.keys()]);
+  const currencies = new Set([...totals.map((t) => t.currency), ...team.map((t) => t.currency), ...rows.map((r) => r.currency), ...added.keys()]);
   return [...currencies].map((currency) => {
     const fromSales = totals.find((t) => t.currency === currency)?.commission ?? 0;
+    const fromTeam = team.find((t) => t.currency === currency)?.commission ?? 0;
     const extra = added.get(currency) ?? 0;
-    const earned = fromSales + extra;
+    const earned = fromSales + fromTeam + extra;
     const paidOut = rows.find((r) => r.currency === currency && r.status === 'paid')?.cents ?? 0;
     const pending = rows.find((r) => r.currency === currency && r.status === 'pending')?.cents ?? 0;
-    return { currency, fromSales, added: extra, earned, paidOut, pending, available: earned - paidOut - pending };
+    return { currency, fromSales, fromTeam, added: extra, earned, paidOut, pending, available: earned - paidOut - pending };
   });
 }
 

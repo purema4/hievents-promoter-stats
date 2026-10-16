@@ -101,6 +101,7 @@ async function freePort(): Promise<number> {
 
 export type Server = {
   url: string;
+  dataDir: string;
   adminEmail: string;
   adminPassword: string;
   logs: () => string;
@@ -157,7 +158,7 @@ export async function startServer(extraEnv: Record<string, string> = {}): Promis
     if (proc.exitCode !== null) break;
     try {
       const res = await fetch(`${url}/healthz`, { signal: AbortSignal.timeout(1000) });
-      if (res.ok) return { url, adminEmail, adminPassword, logs: () => output, stop };
+      if (res.ok) return { url, dataDir, adminEmail, adminPassword, logs: () => output, stop };
     } catch {
       // not listening yet
     }

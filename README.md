@@ -36,11 +36,12 @@ To see every page as a promoter does (payouts, their page, account, notification
 
 An admin can make any promoter a **team lead** and put other promoters on their team, on **Teams** in the menu or in the **Team** section of a promoter's page. A team lead can have many promoters; a promoter has at most one team lead. Only admins make team leads and change teams.
 
-- A team lead keeps their own dashboard, payouts and page, and gets **My team** in the menu: their team's tickets, full-price sales and commission for 7 / 30 / 90 days or all time, a tickets-per-day chart, and their promoters ranked. Each promoter opens to their dashboard and event pages, as an admin sees them.
+- A team lead keeps their own dashboard, payouts and page, and gets **My team** in the menu: their team commission, the team's tickets and full-price sales (theirs included) for 7 / 30 / 90 days or all time, a tickets-per-day chart, and everyone on the team ranked. Each promoter opens to their dashboard and event pages, as an admin sees them.
 - They only see. They cannot request payouts or rewards for their promoters, change anything about them, or see any other promoter, payout details or admin page.
 - Promoters get a notification when they join a team, naming the team lead who can now see their sales. A new team lead is told too.
 - One level only: a team lead is on no one's team (a promoter who becomes one leaves their team), and admins are on no team. When a team lead steps down, is deleted or becomes an admin, their promoters are left without a team.
-- Admins see every team's sales from **Teams** (**Team sales →**).
+- **Team commission:** each team lead earns their own commission on their own sales, plus a team commission: a % (set per team lead by admins on **Teams** or their page; none until set) of the full-price sales of the promoters on their team, never of their own. It counts a promoter's sales from the day they join the team through the day they leave; a promoter who moves joins the new team the next day, so no sale counts twice and nothing already earned is taken back, even when a promoter leaves, is deleted or the team lead steps down. Changing the rate applies to all the team's sales so far, like promoters' own rates. Sales entered by hand (outside Hi.Events) do not count. It is part of the team lead's balance and requested like any payout.
+- Team pages and totals include the team lead's own sales (tagged **Team lead**). Admins see every team on **Dashboard** (**Teams**: promoters, tickets, sales, commission and team commission for the period) and open each one with **Team sales →** on **Teams**. The dashboard's commission and owed totals include team commissions.
 
 ## Levels and rewards
 

@@ -13,7 +13,7 @@ import { config } from './config';
 import { pageLink } from './links';
 import { pageShortLink, shortDomain } from './short-links';
 import { hiddenByTeam } from './promoter-page';
-import { isTeamLead } from './teams';
+import { isTeamLead, teamCommissionPercentFor, type TeamCommission } from './teams';
 import type { PromoCodeListing } from './hievents';
 import { commissionPercentFor, type User } from './local-db';
 import { formatMoney, formatPercent } from './money';
@@ -172,6 +172,7 @@ table.leaderboard td.rank { width: 40px; }
 .rank-2 { background: #c9ced6; color: #22262b; }
 .rank-3 { background: #d69a5c; color: #33200c; }
 table.leaderboard a.who { color: inherit; text-decoration: none; gap: 10px; }
+.lead-tag { margin-left: 6px; font-size: 11px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--accent); }
 table.activity td { vertical-align: middle; white-space: nowrap; }
 table.activity td .muted, table.activity td.muted { font-size: inherit; }
 .level-badge.tiny { font-size: 11px; padding: 0 7px; border-width: 1px; margin-left: 8px; vertical-align: 1px; }
@@ -390,6 +391,10 @@ body.impersonating .sidebar { padding-bottom: calc(96px + env(safe-area-inset-bo
 .team-members li { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 6px 0; border-top: 1px solid var(--border); }
 .team-members form { margin: 0; }
 .team-actions { display: grid; gap: 10px; margin-top: 12px; }
+.team-rate { margin: 12px 0 0; }
+.team-rate label { display: grid; gap: 6px; }
+.team-rate-row { display: flex; gap: 8px; align-items: center; }
+.team-rate-row input { width: 120px; }
 .team-actions form { margin: 0; }
 button.link.danger-link { color: var(--danger); text-align: left; }
 /* Promoters' public pages (/p/<alias>): link-in-bio style, built for phones first. */
@@ -1368,6 +1373,7 @@ export function PromoterPage(props: {
               . <a href={`/admin/teams/${p.id}`}>Team sales →</a>
             </p>
             <p class="muted">Add or remove promoters on <a href="/admin/teams">Teams</a>.</p>
+            <TeamCommissionForm lead={p} from="promoter" />
             <form method="post" action="/admin/teams/lead">
               <input type="hidden" name="user_id" value={String(p.id)} />
               <input type="hidden" name="lead" value="0" />
@@ -1458,7 +1464,10 @@ export function PromoterPage(props: {
         {props.balances.map((b) => (
           <div class="card stat highlight">
             <div class="value">{formatMoney(b.earned, b.currency)}</div>
-            <div class="label">Commission earned ({formatPercent(commissionPercentFor(p))})</div>
+            <div class="label">
+              Commission earned ({formatPercent(commissionPercentFor(p))})
+              {b.fromTeam !== 0 && <> · incl. {formatMoney(b.fromTeam, b.currency)} team commission</>}
+            </div>
           </div>
         ))}
         {props.balances.map((b) => (
@@ -2606,7 +2615,14 @@ function PromoterActivity(props: { promoters: User[] }) {
 }
 
 // Promoters ranked for the period, on the admin dashboard and on team pages.
-function BoardTable(props: { board: Leaderboard; sort: Sort; sortHref: (s: Sort) => string; href: (u: User) => string; owed?: boolean }) {
+function BoardTable(props: {
+  board: Leaderboard;
+  sort: Sort;
+  sortHref: (s: Sort) => string;
+  href: (u: User) => string;
+  owed?: boolean;
+  leadId?: number; // tagged "Team lead" on team pages
+}) {
   const { board, sort, sortHref } = props;
   const cur = board.currency;
   return (
@@ -2639,6 +2655,7 @@ function BoardTable(props: { board: Leaderboard; sort: Sort; sortHref: (s: Sort)
                   <span>
                     {e.user.name}
                     <LevelBadge level={e.level} tiny />
+                    {e.user.id === props.leadId && <span class="lead-tag">Team lead</span>}
                   </span>
                 </a>
               </td>
@@ -2655,11 +2672,14 @@ function BoardTable(props: { board: Leaderboard; sort: Sort; sortHref: (s: Sort)
   );
 }
 
-export function AdminDashboardPage(props: { user: User; board: Leaderboard; range: Range; sort: Sort; promoters: User[] }) {
+export type TeamRow = { lead: User; members: number; tickets: number; sales: number; commission: number; teamCommission: number };
+
+export function AdminDashboardPage(props: { user: User; board: Leaderboard; teams: TeamRow[]; range: Range; sort: Sort; promoters: User[] }) {
   const { board, range, sort } = props;
   const cur = board.currency;
   const sortHref = (s: Sort) => `/admin/dashboard?range=${range}&sort=${s}`;
   const rangeLabel = range === 'all' ? 'all time' : `last ${range} days`;
+  const teamTotal = props.teams.reduce((sum, t) => sum + t.teamCommission, 0);
   return (
     <Layout title="Dashboard" user={props.user}>
       <div class="dash-head">
@@ -2677,8 +2697,8 @@ export function AdminDashboardPage(props: { user: User; board: Leaderboard; rang
           <div class="label">Sales at full price</div>
         </div>
         <div class="card stat">
-          <div class="value">{formatMoney(board.totals.commission, cur)}</div>
-          <div class="label">Commission earned</div>
+          <div class="value">{formatMoney(board.totals.commission + teamTotal, cur)}</div>
+          <div class="label">Commission earned{teamTotal > 0 && <> · incl. {formatMoney(teamTotal, cur)} team commission</>}</div>
         </div>
         <div class="card stat">
           <div class="value">{formatMoney(board.totals.owed, cur)}</div>
@@ -2697,17 +2717,62 @@ export function AdminDashboardPage(props: { user: User; board: Leaderboard; rang
         <BoardTable board={board} sort={sort} sortHref={sortHref} href={(u) => `/admin/promoters/${u.id}`} owed />
       )}
 
+      {props.teams.length > 0 && (
+        <>
+          <h2>Teams</h2>
+          <p class="muted">Each team with its team lead, {rangeLabel}. Commission is what the team lead and their promoters earn on their own sales; team commission is the team lead's share of their promoters' sales.</p>
+          <div class="card table-wrap">
+            <table class="leaderboard">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Team lead</th>
+                  <th class="num">Promoters</th>
+                  <th class="num">Tickets</th>
+                  <th class="num">Sales</th>
+                  <th class="num">Commission</th>
+                  <th class="num">Team commission</th>
+                </tr>
+              </thead>
+              <tbody>
+                {props.teams.map((t, i) => (
+                  <tr>
+                    <td class="rank">{medal(i + 1)}</td>
+                    <td>
+                      <a class="who" href={`/admin/teams/${t.lead.id}?range=${range}`}>
+                        <Avatar user={t.lead} size="small" />
+                        <span>{t.lead.name}</span>
+                      </a>
+                    </td>
+                    <td class="num">{t.members}</td>
+                    <td class="num">{t.tickets}</td>
+                    <td class="num">{formatMoney(t.sales, cur)}</td>
+                    <td class="num">{formatMoney(t.commission, cur)}</td>
+                    <td class="num">
+                      {formatMoney(t.teamCommission, cur)}
+                      <div class="muted">{formatPercent(teamCommissionPercentFor(t.lead))}</div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+
       <PromoterActivity promoters={props.promoters} />
     </Layout>
   );
 }
 
-// A team's sales: for the team lead on /team, and for admins on /admin/teams/:id. Nothing to act on.
+// A team's sales, team lead included: for the team lead on /team, and for admins on /admin/teams/:id.
+// The team commission is on the promoters' sales only. Nothing to act on.
 export function TeamPage(props: {
   user: User;
   lead: User;
   members: User[];
   board: Leaderboard;
+  team: TeamCommission[];
   range: Range;
   sort: Sort;
   basePath: string;
@@ -2720,6 +2785,9 @@ export function TeamPage(props: {
   const rangeLabel = range === 'all' ? 'all time' : `last ${range} days`;
   const ranked = new Set(board.entries.map((e) => e.user.id));
   const notSelling = props.members.filter((m) => !ranked.has(m.id));
+  const percent = teamCommissionPercentFor(props.lead);
+  const team = props.team.find((t) => t.currency === cur) ?? { sales: 0, commission: 0 };
+  const name = self ? 'your' : `${props.lead.name}'s`;
   return (
     <Layout title={self ? 'My team' : `${props.lead.name}'s team`} user={props.user}>
       {!self && (
@@ -2732,48 +2800,52 @@ export function TeamPage(props: {
         <RangeLinks current={range} basePath={props.basePath} />
       </div>
       <p class="muted">
-        {self ? 'Sales by the promoters on your team' : `Sales by the promoters on ${props.lead.name}'s team`}, {rangeLabel}.
+        Sales by {self ? 'your team, you included' : `${props.lead.name}'s team, ${props.lead.name} included`}, {rangeLabel}.
         {self && ' Payouts and rewards stay with each promoter and the admins.'}
       </p>
-      {props.members.length === 0 ? (
-        <div class="card muted">{self ? 'No promoters on your team yet. An admin adds them.' : 'No promoters on this team yet.'}</div>
-      ) : (
-        <>
-          <div class="grid">
-            <div class="card stat highlight">
-              <div class="value">{board.totals.tickets}</div>
-              <div class="label">Tickets sold by the team</div>
-            </div>
-            <div class="card stat">
-              <div class="value">{formatMoney(board.totals.fullPrice, cur)}</div>
-              <div class="label">Sales at full price</div>
-            </div>
-            <div class="card stat">
-              <div class="value">{formatMoney(board.totals.commission, cur)}</div>
-              <div class="label">Commission earned</div>
-            </div>
-            <div class="card stat">
-              <div class="value">{props.members.length}</div>
-              <div class="label">{props.members.length === 1 ? 'Promoter' : 'Promoters'} on the team</div>
-            </div>
+      <div class="grid">
+        <div class="card stat highlight">
+          <div class="value">{formatMoney(team.commission, cur)}</div>
+          <div class="label">
+            Team commission ({formatPercent(percent)} of {formatMoney(team.sales, cur)})
           </div>
+        </div>
+        <div class="card stat">
+          <div class="value">{board.totals.tickets}</div>
+          <div class="label">Tickets sold by the team</div>
+        </div>
+        <div class="card stat">
+          <div class="value">{formatMoney(board.totals.fullPrice, cur)}</div>
+          <div class="label">Sales at full price</div>
+        </div>
+        <div class="card stat">
+          <div class="value">{props.members.length}</div>
+          <div class="label">{props.members.length === 1 ? 'Promoter' : 'Promoters'} on the team</div>
+        </div>
+      </div>
+      <p class="muted">
+        {percent > 0
+          ? `The team commission is ${formatPercent(percent)} of the full-price sales of ${name} promoters, from the day each joined the team, on top of what they earn. ${self ? 'Your own sales earn your usual commission.' : 'Their own sales earn their usual commission.'} It is part of ${self ? 'your' : 'their'} balance on Payouts.`
+          : `No team commission is set${self ? ' for you yet' : ''}.${self ? '' : ' Set it on Teams.'}`}
+      </p>
 
-          <SalesChart title="Tickets sold per day" daily={board.daily} percent={100} range={range} basePath={props.basePath} currency={cur} />
+      <SalesChart title="Tickets sold per day" daily={board.daily} percent={100} range={range} basePath={props.basePath} currency={cur} />
 
-          <h2>{self ? 'Your promoters' : 'Promoters'}</h2>
-          {board.entries.length > 0 && <BoardTable board={board} sort={sort} sortHref={sortHref} href={props.memberHref} />}
-          {notSelling.length > 0 && (
-            <p class="muted">
-              No codes yet:{' '}
-              {notSelling.map((m, i) => (
-                <>
-                  {i > 0 && ', '}
-                  <a href={props.memberHref(m)}>{m.name}</a>
-                </>
-              ))}
-            </p>
-          )}
-        </>
+      <h2>{self ? 'Your team' : 'The team'}</h2>
+      {props.members.length === 0 && <p class="muted">{self ? 'No promoters on your team yet. An admin adds them.' : 'No promoters on this team yet.'}</p>}
+      {board.entries.length > 0 && (
+        <BoardTable board={board} sort={sort} sortHref={sortHref} href={(u) => (u.id === props.lead.id && self ? '/' : props.memberHref(u))} leadId={props.lead.id} />
+      )}
+      {notSelling.length > 0 && (
+        <p class="muted">
+          No codes yet:{' '}
+          {notSelling.map((m, i) => (
+            <>
+              {i > 0 && ', '}
+              <a href={props.memberHref(m)}>{m.name}</a>
+            </>
+          ))}
+        </p>
       )}
     </Layout>
   );
@@ -2790,6 +2862,32 @@ function PromoterSelect(props: { name: string; promoters: User[]; label: string 
   );
 }
 
+// A team lead's share of their promoters' sales, on Teams and on the team lead's admin page.
+function TeamCommissionForm(props: { lead: User; from: 'teams' | 'promoter' }) {
+  return (
+    <form class="team-rate" method="post" action={`/admin/teams/${props.lead.id}/commission`}>
+      <input type="hidden" name="from" value={props.from} />
+      <label>
+        Team commission % on their promoters' sales
+        <span class="team-rate-row">
+          <input
+            type="number"
+            name="team_commission_percent"
+            min="0"
+            max="100"
+            step="0.01"
+            value={props.lead.team_commission_percent == null ? '' : String(props.lead.team_commission_percent)}
+            placeholder="0"
+          />
+          <button class="secondary" type="submit">
+            Save
+          </button>
+        </span>
+      </label>
+    </form>
+  );
+}
+
 // Admins make team leads and put promoters on their teams.
 export function AdminTeamsPage(props: { user: User; leads: { lead: User; members: User[] }[]; promoters: User[]; ok?: string; error?: string }) {
   const leadIds = new Set(props.leads.map((t) => t.lead.id));
@@ -2800,7 +2898,9 @@ export function AdminTeamsPage(props: { user: User; leads: { lead: User; members
       <h1>Teams</h1>
       <p class="muted">
         A team lead sees the sales of the promoters on their team, and nothing else: payouts and rewards stay with each
-        promoter and the admins. Promoters are told when they join a team.
+        promoter and the admins. Promoters are told when they join a team. A team lead's team commission is paid on
+        their promoters' full-price sales from the day each joined, on top of the promoters' own commission, and goes to
+        the team lead's balance.
       </p>
       <Flash error={props.error} ok={props.ok} />
 
@@ -2830,6 +2930,7 @@ export function AdminTeamsPage(props: { user: User; leads: { lead: User; members
               </a>
               <a href={`/admin/teams/${lead.id}`}>Team sales →</a>
             </div>
+            <TeamCommissionForm lead={lead} from="teams" />
             {members.length === 0 ? (
               <p class="muted">No promoters on this team yet.</p>
             ) : (

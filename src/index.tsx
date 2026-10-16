@@ -95,7 +95,19 @@ import { describeProblem, isCustomized as isRulesCustomized, rewardRules, saveRe
 import { kuttDomains, kuttEnabled, pageClicks, pageShortLink, prepareShortLinks, renamePageLink, saveShortDomain, shortLinkStatus } from './short-links';
 import { MyPagePage, PageMissing, PromoterPublicPage } from './page-views';
 import { hiddenByTeam, pageEvents, pageOwner, setPageHidden } from './promoter-page';
-import { assignTeam, isTeamLead, leaveTeams, setTeamLead, teamLeads, teamMember, teamMembers } from './teams';
+import {
+  assignTeam,
+  hadTeam,
+  isTeamLead,
+  keepTeamHistory,
+  leaveTeams,
+  setTeamCommission,
+  setTeamLead,
+  teamCommission,
+  teamLeads,
+  teamMember,
+  teamMembers,
+} from './teams';
 import QRCode from 'qrcode';
 import { publicAsset, publicText, serviceWorker } from './static';
 import {
@@ -211,6 +223,7 @@ const messages: Record<string, string> = {
   short_refused: 'Kutt refused that address (some words are reserved). Pick another.',
   short_unavailable: 'Kutt did not answer. Try again in a few minutes.',
   team_saved: 'Team saved.',
+  team_commission: 'Team commission saved. It applies to all their team sales so far and from now on.',
   team_lead_on: 'They are a team lead now and have been told. Add promoters to their team below.',
   team_lead_off: 'They are no longer a team lead. Their promoters have no team now.',
   team_admin: 'Admins see every team and cannot be on one.',
@@ -566,12 +579,13 @@ app.use('/admin', requireUser, requireAdmin);
 async function promoterData(promoter: User) {
   const codes = codesFor(promoter.id);
   const percent = commissionPercentFor(promoter);
-  const rows = await statsForCodes(codes);
+  const [rows, team] = await Promise.all([statsForCodes(codes), hadTeam(promoter.id) ? teamCommission(promoter) : []]);
   return {
     codes,
     percent,
     rows,
-    balances: balances(promoter.id, totalsByCurrency(rows, percent)),
+    team,
+    balances: balances(promoter.id, totalsByCurrency(rows, percent), team),
     rewards: rewardsFor(promoter.id, summarizeEvents(rows, percent)),
   };
 }
@@ -1193,6 +1207,7 @@ app.post('/admin/promoters/:id/delete', async (c) => {
   if (!promoter) return c.notFound();
   if ((await c.req.parseBody()).confirm !== '1') return c.redirect(`/admin/promoters/${promoter.id}`);
   if (promoter.is_admin && countAdmins() === 1) return c.redirect(`/admin/promoters/${promoter.id}?error=last_admin`);
+  keepTeamHistory(promoter.id);
   deleteUser(promoter.id);
   audit(c, 'admin.promoter_deleted', { by: c.get('user').id, userId: promoter.id, email: promoter.email });
   return c.redirect('/admin?ok=deleted');
@@ -1298,18 +1313,20 @@ app.post('/admin/pages/:id/visibility', async (c) => {
 
 // --- Teams ----------------------------------------------------------------------------------------------
 
-/** A team's ranking for the period: only the team's promoters, each with their own rate. */
+/** A team's ranking for the period: the team lead and their promoters, each with their own rate. */
 async function renderTeam(c: Context<Env>, lead: User, basePath: string, memberHref: (u: User) => string) {
   const range = parseRange(c.req.query('range'), '30');
   const sortParam = c.req.query('sort');
   const sort: Sort = sortParam === 'sales' || sortParam === 'commission' ? sortParam : 'tickets';
   const members = teamMembers(lead.id);
+  const [board, team] = await Promise.all([leaderboard(range, sort, [lead, ...members]), teamCommission(lead, range)]);
   return c.html(
     <TeamPage
       user={c.get('user')}
       lead={lead}
       members={members}
-      board={await leaderboard(range, sort, members)}
+      board={board}
+      team={team}
       range={range}
       sort={sort}
       basePath={basePath}
@@ -1366,6 +1383,18 @@ app.post('/admin/teams/lead', async (c) => {
   return c.redirect(`${back}?ok=${lead ? 'team_lead_on' : 'team_lead_off'}`);
 });
 
+app.post('/admin/teams/:id/commission', async (c) => {
+  const lead = findUser(Number(c.req.param('id')));
+  if (!lead || !isTeamLead(lead)) return c.notFound();
+  const body = await c.req.parseBody();
+  const back = teamBack(body.from, lead.id);
+  const percent = parseCommission(body.team_commission_percent);
+  if (percent === 'invalid') return c.redirect(`${back}?error=commission`);
+  setTeamCommission(lead.id, percent);
+  audit(c, 'admin.team_commission_changed', { by: c.get('user').id, userId: lead.id, percent });
+  return c.redirect(`${back}?ok=team_commission`);
+});
+
 async function saveTeam(c: Context<Env>, promoter: User, rawLead: unknown, back: string) {
   const leadId = rawLead === '' || rawLead === undefined ? null : Number(rawLead);
   const result = leadId !== null && !Number.isInteger(leadId) ? 'team_not_lead' : assignTeam(promoter, leadId);
@@ -1393,10 +1422,30 @@ app.get('/admin/dashboard', async (c) => {
   const range = parseRange(c.req.query('range'), '30');
   const sortParam = c.req.query('sort');
   const sort: Sort = sortParam === 'sales' || sortParam === 'commission' ? sortParam : 'tickets';
+  const board = await leaderboard(range, sort);
+  // Each team for the period: the team lead and their promoters, and the team lead's commission on them.
+  const teams = await Promise.all(
+    teamLeads().map(async (lead) => {
+      const members = teamMembers(lead.id);
+      const ids = new Set([lead.id, ...members.map((m) => m.id)]);
+      const entries = board.entries.filter((e) => ids.has(e.user.id));
+      const team = (await teamCommission(lead, range)).find((t) => t.currency === board.currency);
+      return {
+        lead,
+        members: members.length,
+        tickets: entries.reduce((sum, e) => sum + e.tickets, 0),
+        sales: entries.reduce((sum, e) => sum + e.fullPrice, 0),
+        commission: entries.reduce((sum, e) => sum + e.commission, 0),
+        teamCommission: team?.commission ?? 0,
+      };
+    }),
+  );
+  teams.sort((a, b) => b.tickets - a.tickets || b.sales - a.sales);
   return c.html(
     <AdminDashboardPage
       user={c.get('user')}
-      board={await leaderboard(range, sort)}
+      board={board}
+      teams={teams}
       range={range}
       sort={sort}
       promoters={listUsers().filter((u) => !u.is_admin)}

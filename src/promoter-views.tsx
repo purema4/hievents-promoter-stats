@@ -104,6 +104,7 @@ function SummaryCards(props: {
             <div class="label">
               Commission earned ({formatPercent(props.percent)})
               {b && b.added !== 0 && <> · incl. {b.added > 0 ? '+' : '−'}{formatMoney(Math.abs(b.added), cur)} from the team</>}
+              {b && b.fromTeam !== 0 && <> · incl. {formatMoney(b.fromTeam, cur)} team commission</>}
             </div>
           </div>
         );
@@ -785,6 +786,12 @@ export function PayoutsPage(props: {
                     <td>Commission from sales</td>
                     <td class="num">{formatMoney(b.fromSales, b.currency)}</td>
                   </tr>
+                  {b.fromTeam !== 0 && (
+                    <tr>
+                      <td>Team commission, on your team's sales</td>
+                      <td class="num">+{formatMoney(b.fromTeam, b.currency)}</td>
+                    </tr>
+                  )}
                   {b.added !== 0 && (
                     <tr>
                       <td>{b.added > 0 ? 'Added by the team' : 'Removed by the team'}</td>
