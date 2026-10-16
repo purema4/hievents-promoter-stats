@@ -1,7 +1,8 @@
 -- Minimal slice of the Hi.Events schema with sample data, for local development only.
 CREATE TABLE events (
   id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY, account_id integer NOT NULL, title varchar(255) NOT NULL,
-  start_date timestamp, timezone varchar, currency varchar(3) NOT NULL DEFAULT 'CAD', deleted_at timestamp
+  start_date timestamp, timezone varchar, currency varchar(3) NOT NULL DEFAULT 'CAD', status varchar(20) NOT NULL DEFAULT 'LIVE',
+  deleted_at timestamp
 );
 CREATE TABLE event_occurrences (
   id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY, event_id bigint NOT NULL REFERENCES events, start_date timestamp NOT NULL,
@@ -36,6 +37,8 @@ INSERT INTO events (account_id, title, timezone) VALUES
   (1, 'Winter Opening', 'America/Toronto'),
   (2, 'Someone else''s event', 'America/Toronto'),
   (1, 'Summer Rooftop', 'America/Toronto');
+-- Not published yet: kept off promoters' public pages.
+INSERT INTO events (account_id, title, timezone, status) VALUES (1, 'Secret Afterparty', 'America/Toronto', 'DRAFT');
 
 -- Hi.Events keeps dates per occurrence; Winter Opening runs two nights.
 INSERT INTO event_occurrences (event_id, start_date, end_date) VALUES
@@ -43,10 +46,13 @@ INSERT INTO event_occurrences (event_id, start_date, end_date) VALUES
   (2, date_trunc('day', now()) + interval '60 days 3 hours', date_trunc('day', now()) + interval '60 days 9 hours'),
   (2, date_trunc('day', now()) + interval '61 days 3 hours', date_trunc('day', now()) + interval '61 days 9 hours'),
   (3, date_trunc('day', now()) + interval '37 days 3 hours', NULL),
-  (4, date_trunc('day', now()) - interval '70 days' + interval '23 hours', date_trunc('day', now()) - interval '69 days' + interval '5 hours');
+  (4, date_trunc('day', now()) - interval '70 days' + interval '23 hours', date_trunc('day', now()) - interval '69 days' + interval '5 hours'),
+  (5, date_trunc('day', now()) + interval '20 days 3 hours', date_trunc('day', now()) + interval '20 days 9 hours');
 
 INSERT INTO promo_codes (code, event_id, order_usage_count) VALUES
   ('DJMAX', 1, 4), ('djmax', 2, 1), ('LUNA', 1, 1), ('DJMAX', 3, 1), ('DJMAX', 4, 2);
+-- For public pages: on an upcoming event, a past one and a draft; no sales.
+INSERT INTO promo_codes (code, event_id) VALUES ('NOVA', 1), ('NOVA', 4), ('NOVA', 5);
 
 -- total_before_additions is after discounts, before taxes and fees; total_gross adds those on top.
 -- Each $25 ticket was bought with a 10% code, so it sold for $22.50 (price_before_discount 25.00).

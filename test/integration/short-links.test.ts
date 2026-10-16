@@ -137,10 +137,27 @@ describeIntegration('short links through Kutt', () => {
     const before = kutt.created().length;
     await promoter.client.page('/events/1');
     const dashboard = await promoter.client.page('/');
-    expect(kutt.created().length).toBe(before + 2); // the other upcoming events (2 and 3), not event 1 again
+    // The other upcoming events (2 and 3) and the promoter's page, not event 1 again.
+    expect(kutt.created().length).toBe(before + 3);
     expect(dashboard).toContain('data-copy-text="https://short.test/warehouse-night-');
     // No link for the past event (4).
     expect(kutt.created().some((r) => String(r.body?.target).includes('/event/4/'))).toBe(false);
+  });
+
+  test("a promoter's page gets a short link on the alias; its event buttons use the short links", async () => {
+    const alias = (await promoter.client.page('/account')).match(/name="alias" value="([^"]+)"/)![1]!;
+    const made = kutt.created().find((r) => String(r.body?.target).endsWith(`/p/${alias}`))!;
+    expect(made.body!.target).toBe(`${server.url}/p/${alias}`);
+    expect(made.body!.customurl).toBe(alias);
+    const page = await promoter.client.page('/page');
+    expect(page).toContain(`value="https://short.test/${alias}"`);
+    expect(page).toContain(`value="${server.url}/p/${alias}"`);
+    expect(text(page)).toContain('Short link · 0 clicks');
+    expect(await promoter.client.page('/')).toContain(`value="https://short.test/${alias}"`);
+
+    const html = await new Client(server).page(`/p/${alias}`);
+    expect(html).toContain(`data-share-page="https://short.test/${alias}"`);
+    expect(html).toContain(`<a class="lp-event" href="https://short.test/warehouse-night-${alias}"`);
   });
 
   test('click counts come from Kutt', async () => {

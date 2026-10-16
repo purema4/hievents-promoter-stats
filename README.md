@@ -48,6 +48,15 @@ Promoters request rewards on **Payouts & rewards** (with a guest-list name, or t
 
 Every promoter has an **alias** (made from their name, changeable by them on Account and by admins on their page), used in their links as `aff=`. On **Event links**, admins set the Hi.Events public site address (its `FRONTEND_URL`, or `HIEVENTS_PUBLIC_URL`) and the format, by default `{event_url}?promo_code={code}&aff={alias}`, where `{event_url}` is `<site>/event/<id>/<slug>` like Hi.Events builds it. Promoters get **Copy** and **Share** buttons on event pages and upcoming event cards, and each promo code is a one-click copy button there too. The dashboard also has a **Your promo codes** card listing each code with the upcoming events it works on, for customers who type the code at checkout. For `aff=` to be tracked by Hi.Events, create an affiliate with the same code as the alias on the event.
 
+### Promoter pages
+
+Every promoter has a public page at `<APP_URL>/p/<alias>`, like a link-in-bio page: their name, photo and Instagram, then their upcoming events, each with a cover, the date and a **Get tickets** button that opens their link (promo code included). It shows no sales, commission or anything else from the dashboard. Anyone with the address can open it, without signing in.
+
+- Promoters find it on **My page** (in the menu) and in a **Your page** card on the dashboard: the link to copy or share, a QR code to download (it leads to the short link when there is one, so scans are counted too) and a button to hide the page. A hidden page answers "This page does not exist".
+- An event shows while it has one of the promoter's codes and leaves the page once it is over. Draft events are left out when the read-only role can read `events.status`; on a database set up before this, run `GRANT SELECT (status) ON events TO promoter_stats;` once (otherwise every event with a code shows, drafts included).
+- With Kutt, each page also gets a short link on the alias, like `outkzt.link/dj-max`, and the event buttons on it use the promoter's short links.
+- Pasted in a message or a post, the link shows the next event's cover and the promoter's name. Pages are marked `noindex` for search engines.
+
 ### Short links (Kutt)
 
 With `KUTT_URL` and `KUTT_API_KEY` set, promoters share short links from a [Kutt](https://github.com/thedevs-network/kutt) site instead of the long ones, like `outkzt.link/halloween-blood-rave-djmax` (the event's first words and the alias, with `-2`, `-3`… when that is taken). Use the API key of a Kutt account made just for this app: the key can change and delete every link of its account.

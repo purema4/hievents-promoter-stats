@@ -1,6 +1,6 @@
 import { config } from './config';
 import { addColumn, db, type User } from './local-db';
-import { eventLink, slugify } from './links';
+import { eventLink, pageLink, slugify } from './links';
 
 /*
  * Short links through Kutt (KUTT_URL and KUTT_API_KEY). Each promoter link (promoter, event, promo
@@ -202,32 +202,57 @@ function save(userId: number, eventId: number, code: string, target: string, dom
   ).run(userId, eventId, code, target, link.id, link.link, link.clicks, domain);
 }
 
-async function sync(user: User, event: EventRef, code: string, target: string) {
+/** One short link to keep: which row it is, where it leads, and the readable address to ask Kutt for. */
+type Spec = { eventId: number; code: string; target: string; address: (attempt: number) => string; description: string };
+
+const PAGE = { eventId: 0, code: '' };
+
+function eventSpec(user: User, event: EventRef, code: string, target: string): Spec {
+  return {
+    eventId: event.id,
+    code,
+    target,
+    address: (attempt) => shortAddress(event.title, user.alias ?? '', attempt),
+    description: `${user.alias ?? ''} · ${event.title} · ${code}`.slice(0, 200),
+  };
+}
+
+function pageSpec(user: User, target: string): Spec {
+  return { ...PAGE, target, address: (attempt) => pageAddress(user.alias ?? '', attempt), description: `${user.alias ?? ''} · page` };
+}
+
+/** The address of a promoter's page: their alias, like "dj-max". */
+export function pageAddress(alias: string, attempt = 1): string {
+  const who = alias.toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 30) || 'promoter';
+  return attempt > 1 ? `${who}-${attempt}` : who;
+}
+
+async function sync(user: User, spec: Spec) {
+  const { eventId, code, target } = spec;
   const domain = shortDomain();
-  const row = find(user.id, event.id, code);
+  const row = find(user.id, eventId, code);
   if (upToDate(row, target)) return;
   // A link on another domain cannot be moved (Kutt does not change a link's domain): a new one is made.
   if (row && row.domain === domain) {
     try {
-      save(user.id, event.id, code, target, domain, parseLink(await kutt('PATCH', `/links/${row.kutt_id}`, { target })));
+      save(user.id, eventId, code, target, domain, parseLink(await kutt('PATCH', `/links/${row.kutt_id}`, { target })));
       return;
     } catch (err) {
       if (!(err instanceof KuttError && err.perLink)) throw err;
       if (/should at least update/i.test(err.message)) {
-        db.query('UPDATE short_links SET target = ? WHERE user_id = ? AND event_id = ? AND code = ?').run(target, user.id, event.id, code);
+        db.query('UPDATE short_links SET target = ? WHERE user_id = ? AND event_id = ? AND code = ?').run(target, user.id, eventId, code);
         return;
       }
       if (!/not found/i.test(err.message)) throw err;
       // Deleted in Kutt: a new one is made below.
     }
   }
-  const description = `${user.alias ?? ''} · ${event.title} · ${code}`.slice(0, 200);
   // "reuse" returns the link this account already has for the same address, if any.
   const create = (customurl?: string) =>
-    kutt('POST', '/links', { target, reuse: true, description, ...(domain ? { domain } : {}), ...(customurl ? { customurl } : {}) });
+    kutt('POST', '/links', { target, reuse: true, description: spec.description, ...(domain ? { domain } : {}), ...(customurl ? { customurl } : {}) });
   for (let attempt = 1; attempt <= 5; attempt++) {
     try {
-      save(user.id, event.id, code, target, domain, parseLink(await create(shortAddress(event.title, user.alias ?? '', attempt))), false);
+      save(user.id, eventId, code, target, domain, parseLink(await create(spec.address(attempt))), false);
       return;
     } catch (err) {
       if (!(err instanceof KuttError && err.perLink)) throw err;
@@ -239,22 +264,22 @@ async function sync(user: User, event: EventRef, code: string, target: string) {
       if (!/already in use/i.test(err.message)) break; // the address itself was refused: Kutt picks one
     }
   }
-  save(user.id, event.id, code, target, domain, parseLink(await create()), false);
+  save(user.id, eventId, code, target, domain, parseLink(await create()), false);
 }
 
 const running = new Map<string, Promise<void>>();
 const refusedUntil = new Map<string, number>();
 
-function ensure(user: User, event: EventRef, code: string, target: string): Promise<void> {
-  const key = `${user.id}:${event.id}:${code}`;
+function ensure(user: User, spec: Spec): Promise<void> {
+  const key = `${user.id}:${spec.eventId}:${spec.code}`;
   if ((refusedUntil.get(key) ?? 0) > Date.now()) return Promise.resolve();
   const existing = running.get(key);
   if (existing) return existing;
-  const job = sync(user, event, code, target)
+  const job = sync(user, spec)
     .catch((err: unknown) => {
       if (err instanceof KuttError && err.perLink) {
         refusedUntil.set(key, Date.now() + RETRY);
-        console.warn(`Kutt refused the short link for event ${event.id}, code ${code}: ${err.message}`);
+        console.warn(`Kutt refused the short link for ${spec.eventId ? `event ${spec.eventId}, code ${spec.code}` : 'a promoter page'}: ${err.message}`);
       } else if (!(err instanceof KuttError)) {
         console.error('Short link failed:', err);
       }
@@ -299,15 +324,35 @@ function refreshClicks(): Promise<void> {
  * are old. Waits at most `waitMs`, so a slow Kutt never holds a page up; the rest finish in the
  * background and show on the next visit.
  */
-export async function prepareShortLinks(user: User, links: { event: EventRef; code: string }[], waitMs = 2500) {
+export async function prepareShortLinks(user: User, links: { event: EventRef; code: string }[], options: { waitMs?: number; page?: boolean } = {}) {
   if (!kuttEnabled() || Date.now() < pausedUntil) return;
   const jobs: Promise<void>[] = [];
   for (const { event, code } of links) {
     const target = eventLink(event, code, user.alias);
-    if (target && !upToDate(find(user.id, event.id, code), target)) jobs.push(ensure(user, event, code, target));
+    if (target && !upToDate(find(user.id, event.id, code), target)) jobs.push(ensure(user, eventSpec(user, event, code, target)));
+  }
+  if (options.page) {
+    const target = pageLink(user);
+    if (target && !upToDate(find(user.id, PAGE.eventId, PAGE.code), target)) jobs.push(ensure(user, pageSpec(user, target)));
   }
   if (Date.now() - clicksAt >= config.kutt.clicksMinutes * 60 * 1000 && db.query('SELECT 1 FROM short_links LIMIT 1').get()) jobs.push(refreshClicks());
-  if (jobs.length) await Promise.race([Promise.allSettled(jobs), Bun.sleep(waitMs)]);
+  if (jobs.length) await Promise.race([Promise.allSettled(jobs), Bun.sleep(options.waitMs ?? 2500)]);
+}
+
+/** The short link to a promoter's page, or null when there is none (yet): then the page's own address is shared. */
+export function pageShortLink(user: User): string | null {
+  const long = pageLink(user);
+  if (!long || !kuttEnabled()) return null;
+  const row = find(user.id, PAGE.eventId, PAGE.code);
+  return row && upToDate(row, long) ? row.short_url : null;
+}
+
+/** Clicks on the short link to a promoter's page, as Kutt counts them. */
+export function pageClicks(user: User): number | null {
+  const long = pageLink(user);
+  if (!long || !kuttEnabled()) return null;
+  const row = find(user.id, PAGE.eventId, PAGE.code);
+  return row && upToDate(row, long) ? row.clicks : null;
 }
 
 /** The link a promoter shares: the short link when there is an up-to-date one, otherwise the long link. */

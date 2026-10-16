@@ -8,7 +8,8 @@ ALTER ROLE promoter_stats SET default_transaction_read_only = on;
 DO $$ BEGIN EXECUTE format('GRANT CONNECT ON DATABASE %I TO promoter_stats', current_database()); END $$;
 GRANT USAGE ON SCHEMA public TO promoter_stats;
 
-GRANT SELECT (id, account_id, title, start_date, timezone, currency, deleted_at) ON events TO promoter_stats;
+-- status (DRAFT, LIVE, ARCHIVED) keeps draft events off promoters' public pages.
+GRANT SELECT (id, account_id, title, start_date, timezone, currency, status, deleted_at) ON events TO promoter_stats;
 GRANT SELECT (event_id, start_date, end_date, deleted_at) ON event_occurrences TO promoter_stats;
 GRANT SELECT (id, code, event_id, order_usage_count, deleted_at) ON promo_codes TO promoter_stats;
 GRANT SELECT (id, entity_id, entity_type, type, path, deleted_at) ON images TO promoter_stats;

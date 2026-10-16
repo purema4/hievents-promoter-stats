@@ -340,6 +340,63 @@ h3 { font-size: 15px; margin: 0 0 12px; }
 .profile dt { color: var(--muted); }
 .profile dd { margin: 0; overflow-wrap: anywhere; }
 details.code-fallback summary { cursor: pointer; color: var(--muted); font-size: 14px; margin-bottom: 12px; }
+/* The promoter's page settings and the dashboard card. */
+.page-card { margin-bottom: 20px; display: grid; gap: 10px; }
+.page-card h2, .page-card p { margin: 0; }
+.my-page { grid-template-columns: minmax(0, 1fr) auto; gap: 20px; align-items: start; margin-bottom: 16px; }
+.my-page-links { display: grid; gap: 12px; min-width: 0; }
+.my-page-qr { margin: 0; display: grid; gap: 6px; justify-items: center; max-width: 200px; text-align: center; }
+.my-page-qr img { width: 180px; height: 180px; border-radius: 12px; background: #fff; padding: 8px; border: 1px solid var(--border); }
+.page-link-row { display: grid; gap: 4px; }
+.page-link-label { font-size: 13px; color: var(--muted); font-weight: 600; }
+.page-event-list { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
+.hide-page { margin: 20px 0 8px; }
+@media (max-width: 640px) {
+  .my-page { grid-template-columns: 1fr; }
+  .my-page-qr { justify-self: center; }
+}
+
+/* Promoters' public pages (/p/<alias>): link-in-bio style, built for phones first. */
+body.lp { min-height: 100vh; min-height: 100dvh; background: var(--bg); overflow-x: hidden; -webkit-font-smoothing: antialiased; }
+.lp-backdrop { position: fixed; inset: 0; z-index: 0; overflow: hidden; pointer-events: none; }
+.lp-backdrop img { width: 100%; height: 100%; object-fit: cover; filter: blur(56px) saturate(1.5); transform: scale(1.35); opacity: 0.6; }
+.lp-backdrop::after { content: ""; position: absolute; inset: 0; background: linear-gradient(180deg, color-mix(in srgb, var(--bg) 15%, transparent) 0%, color-mix(in srgb, var(--bg) 70%, transparent) 45%, var(--bg) 90%); }
+.lp-backdrop.plain { background: radial-gradient(120% 55% at 50% 0%, color-mix(in srgb, var(--accent) 38%, var(--bg)) 0%, var(--bg) 100%); }
+.lp-backdrop.plain::after { display: none; }
+.lp-wrap { position: relative; z-index: 1; max-width: 520px; margin: 0 auto; padding: calc(32px + env(safe-area-inset-top)) 16px calc(28px + env(safe-area-inset-bottom)); display: grid; gap: 22px; }
+.lp-share { position: absolute; z-index: 2; top: calc(14px + env(safe-area-inset-top)); right: 16px; width: 44px; height: 44px; padding: 0; border-radius: 50%; display: grid; place-items: center; color: var(--text); background: color-mix(in srgb, var(--surface) 72%, transparent); border: 1px solid color-mix(in srgb, var(--text) 12%, transparent); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px); }
+.lp-share.copied { background: var(--ok); color: #fff; }
+.lp-head { display: grid; justify-items: center; gap: 8px; text-align: center; padding-top: 18px; }
+.lp-avatar { width: 108px; height: 108px; border-radius: 50%; object-fit: cover; box-shadow: 0 0 0 4px var(--bg), 0 0 0 7px var(--accent), 0 16px 40px rgb(0 0 0 / 0.28); }
+.lp-initials { display: grid; place-items: center; background: var(--accent); color: var(--accent-text); font: 800 38px/1 system-ui, sans-serif; }
+.lp-name { font-size: clamp(26px, 7vw, 32px); line-height: 1.1; font-weight: 800; letter-spacing: -0.025em; margin: 12px 0 0; overflow-wrap: anywhere; }
+.lp-tagline { margin: 0; color: var(--muted); font-size: 15px; max-width: 34ch; }
+.lp-pill { display: inline-flex; align-items: center; gap: 6px; margin-top: 4px; padding: 7px 14px; border-radius: 999px; color: var(--text); text-decoration: none; font-weight: 600; font-size: 14px; background: color-mix(in srgb, var(--surface) 72%, transparent); border: 1px solid color-mix(in srgb, var(--text) 12%, transparent); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px); }
+.lp-events { display: grid; gap: 16px; }
+.lp-event { display: grid; color: var(--text); text-decoration: none; background: var(--surface); border: 1px solid color-mix(in srgb, var(--text) 10%, transparent); border-radius: 22px; overflow: hidden; box-shadow: 0 1px 2px rgb(0 0 0 / 0.06), 0 12px 32px rgb(0 0 0 / 0.12); transition: transform 0.18s ease, box-shadow 0.18s ease; -webkit-tap-highlight-color: transparent; }
+a.lp-event:hover { transform: translateY(-3px); box-shadow: 0 2px 4px rgb(0 0 0 / 0.06), 0 20px 44px rgb(0 0 0 / 0.18); }
+a.lp-event:active { transform: scale(0.985); }
+a.lp-event:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+.lp-cover { position: relative; display: block; aspect-ratio: 16 / 9; background: color-mix(in srgb, var(--accent) 22%, var(--surface)); }
+.lp-cover img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.lp-cover.blank { aspect-ratio: auto; height: 76px; background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 45%, var(--text))); }
+.lp-date { position: absolute; left: 12px; top: 12px; display: grid; justify-items: center; min-width: 52px; padding: 6px 10px 7px; border-radius: 14px; color: #fff; background: rgb(10 10 10 / 0.6); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); line-height: 1.05; }
+.lp-month { font-size: 11px; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase; opacity: 0.85; }
+.lp-day { font-size: 22px; font-weight: 800; }
+.lp-next { position: absolute; right: 12px; top: 12px; padding: 5px 10px; border-radius: 999px; font-size: 12px; font-weight: 800; letter-spacing: 0.02em; color: var(--accent-text); background: var(--accent); box-shadow: 0 4px 14px rgb(0 0 0 / 0.25); }
+.lp-body { display: grid; gap: 6px; padding: 14px 16px 16px; }
+.lp-title { font-size: 19px; font-weight: 800; line-height: 1.25; letter-spacing: -0.01em; overflow-wrap: anywhere; }
+.lp-when { font-size: 14px; color: var(--muted); }
+.lp-cta { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-top: 8px; padding: 13px 16px; border-radius: 14px; font-weight: 800; color: var(--accent-text); background: var(--accent); }
+.lp-cta-code { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; opacity: 0.9; }
+.lp-cta.muted-cta { justify-content: center; color: var(--text); background: var(--bg); border: 1px dashed var(--border); font-weight: 600; }
+.lp-empty { margin: 0; padding: 28px 20px; text-align: center; color: var(--muted); background: color-mix(in srgb, var(--surface) 80%, transparent); border: 1px solid var(--border); border-radius: 22px; }
+.lp-share-wide { justify-self: center; display: inline-flex; align-items: center; gap: 8px; padding: 12px 22px; border-radius: 999px; color: var(--text); background: color-mix(in srgb, var(--surface) 80%, transparent); border: 1px solid color-mix(in srgb, var(--text) 14%, transparent); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px); }
+.lp-share-wide.copied { background: var(--ok); color: #fff; border-color: transparent; }
+.lp-footer { display: flex; align-items: center; justify-content: center; gap: 8px; color: var(--muted); font-size: 13px; font-weight: 600; }
+.lp-footer img { height: 22px; width: auto; border-radius: 4px; }
+.lp-missing { padding-top: 22vh; }
+@media (prefers-reduced-motion: reduce) { .lp-event { transition: none; } a.lp-event:hover, a.lp-event:active { transform: none; } }
 ${chartCss}
 `;
 
@@ -588,6 +645,7 @@ function Sidebar(props: { user: User }) {
           </a>
           <a href="/">Dashboard</a>
           <a href="/payouts">Payouts &amp; rewards</a>
+          <a href="/page">My page</a>
         </NavGroup>
       )}
       {/* On computers these live in the avatar menu; the phone panel keeps them too. */}

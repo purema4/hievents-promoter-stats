@@ -46,7 +46,7 @@ import {
   verifySecondFactor,
 } from './two-factor';
 import { leaderboard, type Sort } from './leaderboard';
-import { aliasPattern, aliasTaken, ensureAliases, eventLink, linkSettings, saveLinkSettings, setAlias, suggestAlias } from './links';
+import { aliasPattern, aliasTaken, ensureAliases, eventLink, linkSettings, pageLink, saveLinkSettings, setAlias, suggestAlias } from './links';
 import { maxAvatarBytes, readAvatar, refreshAllAvatars, refreshInstagramAvatar, saveUploadedAvatar, useInstagramAvatar } from './avatars';
 import { brandCss, getBrand, isHex, maxLogoBytes, readLogo, removeLogo, saveLogo, sniffImage, updateBrand } from './brand';
 import { parseRange } from './chart';
@@ -88,7 +88,10 @@ import {
   settleReward,
 } from './rewards';
 import { describeProblem, isCustomized as isRulesCustomized, rewardRules, saveRewardRules, type LevelColor, type RewardRules, type Track } from './reward-rules';
-import { kuttDomains, kuttEnabled, prepareShortLinks, saveShortDomain, shortLinkStatus } from './short-links';
+import { kuttDomains, kuttEnabled, pageClicks, pageShortLink, prepareShortLinks, saveShortDomain, shortLinkStatus } from './short-links';
+import { MyPagePage, PageMissing, PromoterPublicPage } from './page-views';
+import { pageEvents, pageOwner, setPageHidden } from './promoter-page';
+import QRCode from 'qrcode';
 import { publicAsset, publicText, serviceWorker } from './static';
 import {
   codeOwners,
@@ -190,6 +193,8 @@ const messages: Record<string, string> = {
   missing_details: 'Tell us which item and size you would like.',
   reward_fulfilled: 'Marked as given. The promoter has been emailed.',
   reward_rejected: 'Reward request declined. The promoter has been emailed and can request it again.',
+  page_hidden: 'Your page is hidden.',
+  page_shown: 'Your page is back.',
 };
 // Own keys only: ?ok=constructor must not pick up something from Object.prototype.
 const flash = (key?: string) => (key && Object.hasOwn(messages, key) ? messages[key] : undefined);
@@ -314,6 +319,44 @@ app.get('/offline', (c) =>
     <LoginPage error="You are offline. Your numbers will show again as soon as you are back online." offline />,
   ),
 );
+
+// --- Promoters' public pages: no sign-in, and nothing about sales ----------------------------------
+
+app.get('/p/:alias', async (c) => {
+  const alias = c.req.param('alias');
+  if (alias !== alias.toLowerCase()) return c.redirect(`/p/${encodeURIComponent(alias.toLowerCase())}`, 301);
+  const owner = pageOwner(alias);
+  if (!owner) return c.html(<PageMissing />, 404);
+  const events = await pageEvents(owner);
+  // A visitor waits at most a second for Kutt; without a short link yet, the long one is used.
+  await prepareShortLinks(owner, events.map((e) => ({ event: { id: e.event_id, title: e.title }, code: e.code })), { waitMs: 1000, page: true });
+  // The same for everyone (no cookies are read or set here), so it can be kept briefly.
+  c.header('Cache-Control', 'public, max-age=60');
+  return c.html(<PromoterPublicPage owner={owner} events={events} shareUrl={pageShortLink(owner) ?? pageLink(owner)!} />);
+});
+
+app.get('/p/:alias/avatar', (c) => {
+  const owner = pageOwner(c.req.param('alias'));
+  const avatar = owner ? readAvatar(owner.id) : null;
+  if (!avatar) return c.notFound();
+  c.header('Content-Type', avatar.type);
+  c.header('Cache-Control', 'public, max-age=3600');
+  return c.body(new Uint8Array(avatar.bytes));
+});
+
+// Only the covers of the events the page lists.
+app.get('/p/:alias/cover/:eventId', async (c) => {
+  const owner = pageOwner(c.req.param('alias'));
+  const eventId = Number(c.req.param('eventId'));
+  if (!owner || !Number.isInteger(eventId) || !(await pageEvents(owner)).some((e) => e.event_id === eventId && e.has_cover)) return c.notFound();
+  const cover = await eventCover(eventId);
+  if (!cover) return c.notFound();
+  c.header('Content-Type', cover.type);
+  c.header('Cache-Control', 'public, max-age=3600');
+  return c.body(new Uint8Array(cover.bytes));
+});
+
+app.get('/page.js', (c) => publicAsset(c, 'page.js'));
 
 app.get('/login', (c) => c.html(<LoginPage withPassword={c.req.query('method') === 'password'} />));
 
@@ -477,6 +520,8 @@ app.use('/welcome', requireUser);
 app.use('/welcome/*', requireUser);
 app.use('/account/*', requireUser);
 app.use('/account', requireUser);
+app.use('/page', requireUser);
+app.use('/page/*', requireUser);
 app.use('/admin/*', requireUser, requireAdmin);
 app.use('/admin', requireUser, requireAdmin);
 
@@ -498,9 +543,10 @@ async function renderDashboard(c: Context<Env>, promoter: User, basePath: string
   const data = await promoterData(promoter);
   // Also checked on a timer; checking here makes a new milestone show up the moment they look.
   if (basePath === '') checkMilestones(promoter, data.rewards);
-  // Upcoming event cards carry a link with the first code.
+  // Upcoming event cards carry a link with the first code; the promoter's own view also shows their page.
   const upcoming = summarizeEvents(data.rows, data.percent).filter((e) => !e.end || e.end.getTime() >= Date.now());
-  await prepareShortLinks(promoter, upcoming.map((e) => ({ event: { id: e.id, title: e.title }, code: e.codes[0]! })));
+  const withPage = basePath === '' && !promoter.page_hidden_at;
+  await prepareShortLinks(promoter, upcoming.map((e) => ({ event: { id: e.id, title: e.title }, code: e.codes[0]! })), { page: withPage });
   return c.html(
     <DashboardPage
       viewer={c.get('user')}
@@ -513,6 +559,7 @@ async function renderDashboard(c: Context<Env>, promoter: User, basePath: string
       rewards={data.rewards}
       percent={data.percent}
       range={parseRange(c.req.query('range'), '30')}
+      pageLink={withPage ? (pageShortLink(promoter) ?? pageLink(promoter)) : null}
     />,
   );
 }
@@ -668,6 +715,38 @@ app.get('/event-image/:eventId', async (c) => {
   c.header('Content-Type', cover?.type ?? 'image/png');
   c.header('Cache-Control', cover ? 'private, max-age=3600' : 'private, max-age=300');
   return c.body(new Uint8Array(cover ? cover.bytes : blankPng));
+});
+
+// --- The promoter's own page settings ---------------------------------------------------------------
+
+app.get('/page', async (c) => {
+  const user = c.get('user');
+  const events = user.page_hidden_at ? [] : await pageEvents(user);
+  if (!user.page_hidden_at) {
+    await prepareShortLinks(user, events.map((e) => ({ event: { id: e.event_id, title: e.title }, code: e.code })), { page: true });
+  }
+  return c.html(
+    <MyPagePage user={user} events={events} shortLink={pageShortLink(user)} clicks={pageClicks(user)} kutt={kuttEnabled()} ok={flash(c.req.query('ok'))} />,
+  );
+});
+
+// The QR code leads to the short link when there is one, so Kutt counts the scans too.
+app.get('/page/qr.png', async (c) => {
+  const user = c.get('user');
+  const link = pageShortLink(user) ?? pageLink(user);
+  if (!link) return c.notFound();
+  const png = await QRCode.toBuffer(link, { type: 'png', width: 1024, margin: 2, errorCorrectionLevel: 'M' });
+  c.header('Content-Type', 'image/png');
+  c.header('Cache-Control', 'private, no-cache');
+  return c.body(new Uint8Array(png));
+});
+
+app.post('/page/visibility', async (c) => {
+  const user = c.get('user');
+  const hidden = (await c.req.parseBody()).hidden === '1';
+  setPageHidden(user.id, hidden);
+  audit(c, hidden ? 'page.hidden' : 'page.shown', { userId: user.id });
+  return c.redirect(`/page?ok=${hidden ? 'page_hidden' : 'page_shown'}`);
 });
 
 async function renderPayouts(c: Context<Env>, error?: string) {

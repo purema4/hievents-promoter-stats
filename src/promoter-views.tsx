@@ -247,6 +247,20 @@ export function LinkField(props: { link: string; label: string }) {
   );
 }
 
+/** On the dashboard: the link to the promoter's public page, ready to copy or share. */
+function PageCard(props: { link: string }) {
+  return (
+    <div class="card page-card">
+      <div>
+        <h2 class="first">Your page</h2>
+        <p class="muted">All your upcoming events in one link, with your code in each. Made for your Instagram bio.</p>
+      </div>
+      <LinkField link={props.link} label="My page" />
+      <a href="/page">Open it, get the QR code →</a>
+    </div>
+  );
+}
+
 /** A promo code as a button that copies it. */
 export function CodeCopy(props: { code: string }) {
   return (
@@ -349,6 +363,7 @@ export function DashboardPage(props: {
   rewards: Rewards;
   percent: number;
   range: Range;
+  pageLink?: string | null; // the promoter's public page (short link when there is one); none when hidden
 }) {
   const events = summarizeEvents(props.rows, props.percent);
   const freeFor = (e: EventSummary) => props.rewards.tickets.find((t) => t.event.id === e.id)?.available ?? 0;
@@ -385,6 +400,7 @@ export function DashboardPage(props: {
             payoutsHref={self ? '/payouts' : undefined}
           />
           <LevelCard rewards={props.rewards} rewardsHref={self ? '/payouts#rewards' : undefined} />
+          {self && props.pageLink && <PageCard link={props.pageLink} />}
           {props.codes.length > 0 && <CodesCard codes={props.codes} rows={props.rows} upcoming={upcoming} />}
           <SalesChart
             title="Tickets sold per day"

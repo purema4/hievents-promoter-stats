@@ -62,6 +62,11 @@ export function eventLink(event: { id: number; title: string }, code: string, al
   return /^https?:\/\//i.test(link) ? link : null;
 }
 
+/** The address of a promoter's public page, which lists their upcoming events. */
+export function pageLink(user: { alias?: string | null }): string | null {
+  return user.alias ? `${config.appUrl}/p/${encodeURIComponent(user.alias)}` : null;
+}
+
 export const aliasPattern = /^[a-z0-9][a-z0-9_-]{1,29}$/;
 
 export function aliasTaken(alias: string, exceptUserId: number): boolean {

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { readLink, shortAddress } from '../../src/short-links';
+import { pageAddress, readLink, shortAddress } from '../../src/short-links';
 
 describe('shortAddress', () => {
   test("the event's first words and the alias", () => {
@@ -39,5 +39,14 @@ describe('readLink', () => {
     expect(readLink({ link: 'https://outkzt.link/a' })).toBeNull();
     expect(readLink(null)).toBeNull();
     expect(readLink({ id, link: 'https://outkzt.link/a', visit_count: -1 })?.clicks).toBeNull();
+  });
+});
+
+describe('pageAddress', () => {
+  test("a promoter's page is on their alias", () => {
+    expect(pageAddress('dj-max')).toBe('dj-max');
+    expect(pageAddress('dj-max', 2)).toBe('dj-max-2');
+    expect(pageAddress('')).toBe('promoter');
+    expect(pageAddress('a/b?c')).toBe('abc');
   });
 });

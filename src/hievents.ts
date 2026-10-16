@@ -178,3 +178,58 @@ export async function allPromoCodes(): Promise<PromoCodeListing[]> {
     LIMIT 500
   `;
 }
+
+export type PageEvent = {
+  event_id: number;
+  title: string;
+  start: Date | null;
+  end: Date | null;
+  dates: number;
+  timezone: string | null;
+  has_cover: boolean;
+  // Hi.Events spells it as entered; the first of the promoter's codes for the event, alphabetically.
+  code: string;
+};
+
+/*
+ * Hi.Events marks events DRAFT, LIVE or ARCHIVED. Reading it needs `GRANT SELECT (status) ON events`
+ * (in sql/readonly-role.sql since public pages were added); without it, every event with a code shows.
+ */
+let statusReadable: { value: boolean; at: number } | null = null;
+
+async function canReadStatus(): Promise<boolean> {
+  if (statusReadable && Date.now() - statusReadable.at < 10 * 60 * 1000) return statusReadable.value;
+  const rows = await sql<{ ok: boolean }[]>`
+    SELECT EXISTS (
+      SELECT 1 FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = 'events' AND column_name = 'status'
+    ) AND has_column_privilege('public.events', 'status', 'SELECT') AS ok
+  `.catch(() => [{ ok: false }]);
+  statusReadable = { value: !!rows[0]?.ok, at: Date.now() };
+  return statusReadable.value;
+}
+
+/** The upcoming events a promoter's public page lists: not ended, not deleted, and live when that is known. No sales figures. */
+export async function upcomingEventsForCodes(codes: string[]): Promise<PageEvent[]> {
+  if (codes.length === 0) return [];
+  const live = (await canReadStatus()) ? sql`AND e.status = 'LIVE'` : sql``;
+  return sql<PageEvent[]>`
+    SELECT DISTINCT ON (e.id)
+      e.id::int AS event_id,
+      e.title,
+      coalesce(occ.first_start, e.start_date) AT TIME ZONE 'UTC' AS "start",
+      coalesce(occ.last_end, occ.first_start, e.start_date) AT TIME ZONE 'UTC' AS "end",
+      coalesce(occ.dates, 0) AS dates,
+      e.timezone,
+      ${config.imageBaseUrl ? sql`${coverPath()} IS NOT NULL` : sql`false`} AS has_cover,
+      pc.code
+    FROM promo_codes pc
+    JOIN events e ON e.id = pc.event_id AND e.deleted_at IS NULL
+    ${eventDates()}
+    WHERE lower(pc.code) = ANY(${codes}) AND pc.deleted_at IS NULL ${accountFilter()} ${live}
+      -- Like the dashboard: an event without dates counts as upcoming.
+      AND (coalesce(occ.last_end, occ.first_start, e.start_date) IS NULL
+           OR coalesce(occ.last_end, occ.first_start, e.start_date) >= (now() AT TIME ZONE 'UTC'))
+    ORDER BY e.id, pc.code
+  `.then((rows) => rows.sort((a, b) => (a.start?.getTime() ?? Infinity) - (b.start?.getTime() ?? Infinity)));
+}
