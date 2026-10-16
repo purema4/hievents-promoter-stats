@@ -66,8 +66,14 @@ function fakeKutt() {
       if (req.method === 'PATCH' && edit) {
         const link = links.get(edit[1]!);
         if (!link) return json({ error: 'Link was not found.' }, 500);
-        if (link.target === body?.target) return json({ error: 'Should at least update one field.' }, 400);
+        const address = typeof body?.address === 'string' ? body.address : link.address;
+        if (link.target === body?.target && address === link.address) return json({ error: 'Should at least update one field.' }, 400);
+        if (address === 'login') return json({ error: "You can't use this custom URL." }, 400);
+        if (address !== link.address && [...links.values()].some((l) => l.address === address && (l.domain ?? null) === (link.domain ?? null))) {
+          return json({ error: 'Custom URL is already in use.' }, 400);
+        }
         link.target = String(body?.target);
+        link.address = address;
         return json(shown(link));
       }
       if (req.method === 'GET' && url.pathname === '/api/v2/users') {
@@ -163,6 +169,41 @@ describeIntegration('short links through Kutt', () => {
     const html = await new Client(server).page(`/p/${alias}`);
     expect(html).toContain(`data-share-page="https://short.test/${alias}"`);
     expect(html).toContain(`<a class="lp-event" href="https://short.test/warehouse-night-${alias}"`);
+  });
+
+  test("an admin renames a promoter's page link in Kutt; the new address sticks", async () => {
+    const alias = (await promoter.client.page('/account')).match(/name="alias" value="([^"]+)"/)![1]!;
+    const link = [...kutt.links.values()].find((l) => l.address === alias)!;
+    link.visit_count = 7;
+    const list = await admin.page('/admin/pages');
+    expect(text(list)).toContain('Change the Kutt link');
+    expect(list).toContain(`value="${alias}"`);
+
+    const name = `the-${alias}`;
+    expect(location(await admin.post(`/admin/pages/${promoter.id}/short-link`, { address: name.toUpperCase() }))).toBe('/admin/pages?ok=short_renamed');
+    // The same Kutt link, renamed: no new link, clicks kept.
+    expect(kutt.links.get(link.id)!.address).toBe(name);
+    const page = await promoter.client.page('/page');
+    expect(page).toContain(`value="https://short.test/${name}"`);
+    expect(text(page)).toContain('7 clicks');
+    expect(await new Client(server).page(`/p/${alias}`)).toContain(`data-share-page="https://short.test/${name}"`);
+
+    // Taken, reserved, or not an address: nothing changes.
+    kutt.links.set(crypto.randomUUID(), { id: crypto.randomUUID(), address: 'taken-one', target: 'https://elsewhere.test', visit_count: 0 });
+    for (const [address, error] of [['taken-one', 'short_taken'], ['login', 'short_refused'], ['no spaces', 'short_invalid'], ['-x', 'short_invalid'], ['', 'short_invalid']]) {
+      expect(location(await admin.post(`/admin/pages/${promoter.id}/short-link`, { address: address! }))).toBe(`/admin/pages?error=${error}`);
+    }
+    expect(kutt.links.get(link.id)!.address).toBe(name);
+
+    // Deleted in Kutt, then the long link changes: made again under the chosen address.
+    kutt.links.delete(link.id);
+    expect(location(await promoter.client.post('/account/profile', { alias: `${alias}-b` }))).toBe('/account?ok=saved');
+    expect(await promoter.client.page('/page')).toContain(`value="https://short.test/${name}"`);
+    expect([...kutt.links.values()].find((l) => l.address === name)!.target).toBe(`${server.url}/p/${alias}-b`);
+    // Only admins can rename.
+    expect(location(await promoter.client.post(`/admin/pages/${promoter.id}/short-link`, { address: 'mine' })) ?? '').not.toContain('ok=');
+    // Back to the alias the other tests expect.
+    expect(location(await promoter.client.post('/account/profile', { alias }))).toBe('/account?ok=saved');
   });
 
   test('click counts come from Kutt', async () => {

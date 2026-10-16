@@ -88,7 +88,7 @@ import {
   settleReward,
 } from './rewards';
 import { describeProblem, isCustomized as isRulesCustomized, rewardRules, saveRewardRules, type LevelColor, type RewardRules, type Track } from './reward-rules';
-import { kuttDomains, kuttEnabled, pageClicks, pageShortLink, prepareShortLinks, saveShortDomain, shortLinkStatus } from './short-links';
+import { kuttDomains, kuttEnabled, pageClicks, pageShortLink, prepareShortLinks, renamePageLink, saveShortDomain, shortLinkStatus } from './short-links';
 import { MyPagePage, PageMissing, PromoterPublicPage } from './page-views';
 import { hiddenByTeam, pageEvents, pageOwner, setPageHidden } from './promoter-page';
 import QRCode from 'qrcode';
@@ -197,6 +197,11 @@ const messages: Record<string, string> = {
   page_hidden: 'Your page is hidden.',
   page_shown: 'Your page is back.',
   page_saved: 'Saved. The page shows or hides right away.',
+  short_renamed: 'Kutt link changed. The old address no longer works.',
+  short_taken: 'That address is already used in Kutt. Pick another.',
+  short_invalid: 'Use letters, numbers, - or _ (64 at most), starting with a letter or number.',
+  short_refused: 'Kutt refused that address (some words are reserved). Pick another.',
+  short_unavailable: 'Kutt did not answer. Try again in a few minutes.',
 };
 // Own keys only: ?ok=constructor must not pick up something from Object.prototype.
 const flash = (key?: string) => (key && Object.hasOwn(messages, key) ? messages[key] : undefined);
@@ -1188,6 +1193,7 @@ app.get('/admin/pages', async (c) => {
       clicks={new Map(promoters.map((u) => [u.id, pageClicks(u)]))}
       kutt={kuttEnabled()}
       ok={flash(c.req.query('ok'))}
+      error={flash(c.req.query('error'))}
     />,
   );
 });
@@ -1215,6 +1221,16 @@ app.get('/admin/pages.csv', async (c) => {
   c.header('Content-Type', 'text/csv; charset=utf-8');
   c.header('Content-Disposition', 'attachment; filename="promoter-pages.csv"');
   return c.body(`\ufeff${rows.map((r) => r.map(csvCell).join(',')).join('\r\n')}\r\n`);
+});
+
+app.post('/admin/pages/:id/short-link', async (c) => {
+  const promoter = findUser(Number(c.req.param('id')));
+  if (!promoter) return c.notFound();
+  const address = String((await c.req.parseBody()).address ?? '').trim().toLowerCase();
+  const result = await renamePageLink(promoter, address);
+  if (result !== 'ok') return c.redirect(`/admin/pages?error=short_${result}`);
+  audit(c, 'admin.page_short_link_renamed', { userId: promoter.id, address });
+  return c.redirect('/admin/pages?ok=short_renamed');
 });
 
 app.post('/admin/pages/:id/visibility', async (c) => {

@@ -11,7 +11,7 @@ import type { Rewards } from './rewards';
 import { describeTrack, LIMITS, levelColors, rewardRules, trackOn, type Level, type LevelColor, type RewardRules, type Track } from './reward-rules';
 import { config } from './config';
 import { pageLink } from './links';
-import { pageShortLink } from './short-links';
+import { pageShortLink, shortDomain } from './short-links';
 import { hiddenByTeam } from './promoter-page';
 import type { PromoCodeListing } from './hievents';
 import { commissionPercentFor, type User } from './local-db';
@@ -364,6 +364,12 @@ details.code-fallback summary { cursor: pointer; color: var(--muted); font-size:
 .page-link a { overflow-wrap: anywhere; }
 .hidden-page .page-link a { color: var(--muted); text-decoration: line-through; }
 table.page-table td { vertical-align: top; }
+.rename-short { margin-top: 6px; font-size: 14px; }
+.rename-short summary { cursor: pointer; color: var(--accent); }
+.rename-form { display: flex; align-items: flex-end; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+.rename-field { display: flex; align-items: center; gap: 4px; }
+.rename-field input { width: 180px; }
+.rename-short p { margin: 6px 0 0; }
 table.page-table a.who { color: inherit; text-decoration: none; gap: 10px; }
 .page-link-kind { font-size: 11px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); min-width: 34px; }
 @media (min-width: 700px) { table.page-table a.who { white-space: nowrap; } }
@@ -1115,7 +1121,44 @@ function PageLink(props: { href: string; kind?: string; children?: Child }) {
   );
 }
 
-export function AdminPagesPage(props: { user: User; promoters: User[]; clicks: Map<number, number | null>; kutt: boolean; ok?: string }) {
+/** Renames a promoter's page short link in Kutt. */
+function RenameShortLink(props: { promoter: User }) {
+  const short = pageShortLink(props.promoter);
+  let host = shortDomain();
+  let current = '';
+  if (short) {
+    const url = new URL(short);
+    host = url.host;
+    current = decodeURIComponent(url.pathname.slice(1));
+  }
+  return (
+    <details class="rename-short">
+      <summary>{short ? 'Change the Kutt link' : 'Pick the Kutt link'}</summary>
+      <form method="post" action={`/admin/pages/${props.promoter.id}/short-link`} class="rename-form">
+        <label>
+          New address
+          <span class="rename-field">
+            {host && <span class="muted">{host}/</span>}
+            <input name="address" value={current} maxlength={64} pattern="[a-zA-Z0-9][a-zA-Z0-9_\-]*" required autocomplete="off" />
+          </span>
+        </label>
+        <button type="submit" class="small">
+          Save
+        </button>
+      </form>
+      {short && <p class="muted">The link is renamed in Kutt and keeps its clicks. The old address stops working.</p>}
+    </details>
+  );
+}
+
+export function AdminPagesPage(props: {
+  user: User;
+  promoters: User[];
+  clicks: Map<number, number | null>;
+  kutt: boolean;
+  ok?: string;
+  error?: string;
+}) {
   return (
     <Layout title="Promoter pages" user={props.user}>
       <h1>Promoter pages</h1>
@@ -1123,7 +1166,7 @@ export function AdminPagesPage(props: { user: User; promoters: User[]; clicks: M
         Each promoter's public page lists their upcoming events, with their code in each link.{' '}
         {props.kutt ? 'The second link is the Kutt short link.' : 'Short links show here once Kutt is set up (KUTT_URL and KUTT_API_KEY).'}
       </p>
-      <Flash ok={props.ok} />
+      <Flash ok={props.ok} error={props.error} />
       <p>
         <a class="button secondary" href="/admin/pages.csv" download="promoter-pages.csv">
           Download as CSV
@@ -1152,6 +1195,7 @@ export function AdminPagesPage(props: { user: User; promoters: User[]; clicks: M
                   </td>
                   <td>
                     <PageLinks promoter={p} clicks={props.clicks.get(p.id)} />
+                    {props.kutt && p.alias && !p.page_hidden_at && <RenameShortLink promoter={p} />}
                   </td>
                   <td>
                     {p.alias && (

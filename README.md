@@ -55,7 +55,7 @@ Every promoter has a public page at `<APP_URL>/p/<alias>`, like a link-in-bio pa
 - Promoters find it on **My page** (in the menu) and in a **Your page** card on the dashboard: the link to copy or share, a QR code to download (it leads to the short link when there is one, so scans are counted too) and a button to hide the page. A hidden page answers "This page does not exist".
 - Admins see every promoter's page links (full and Kutt, with clicks) on **Promoter pages** in the menu, can download them as a CSV, and can hide or show a page. A page an admin hid stays hidden until an admin shows it again. Each promoter's admin page shows their links too.
 - An event shows while it has one of the promoter's codes and leaves the page once it is over. Draft events are left out when the read-only role can read `events.status`; on a database set up before this, run `GRANT SELECT (status) ON events TO promoter_stats;` once (otherwise every event with a code shows, drafts included).
-- With Kutt, each page also gets a short link on the alias, like `outkzt.link/dj-max`, and the event buttons on it use the promoter's short links.
+- With Kutt, each page also gets a short link on the alias, like `outkzt.link/dj-max`, and the event buttons on it use the promoter's short links. Admins can give a page's short link another address on **Promoter pages** (**Change the Kutt link**): it is renamed in Kutt and keeps its clicks, the old address stops working, and the new one is kept when the link is updated or made again (another domain, or deleted in Kutt).
 - Pasted in a message or a post, the link shows the next event's cover and the promoter's name. Pages are marked `noindex` for search engines.
 
 ### Short links (Kutt)

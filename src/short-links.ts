@@ -24,8 +24,10 @@ db.exec(`
 `);
 // The Kutt domain the short link is on; '' for Kutt's own domain.
 addColumn('short_links', 'domain', "TEXT NOT NULL DEFAULT ''");
+// An address an admin picked for the link (like "maya"); '' for the one made from the alias.
+addColumn('short_links', 'custom', "TEXT NOT NULL DEFAULT ''");
 
-type Row = { target: string; kutt_id: string; short_url: string; clicks: number | null; domain: string };
+type Row = { target: string; kutt_id: string; short_url: string; clicks: number | null; domain: string; custom: string };
 type EventRef = { id: number; title: string };
 
 const REQUEST_TIMEOUT = 5000;
@@ -186,7 +188,7 @@ export function shortAddress(eventTitle: string, alias: string, attempt = 1): st
 
 function find(userId: number, eventId: number, code: string): Row | null {
   return db
-    .query<Row, [number, number, string]>('SELECT target, kutt_id, short_url, clicks, domain FROM short_links WHERE user_id = ? AND event_id = ? AND code = ?')
+    .query<Row, [number, number, string]>('SELECT target, kutt_id, short_url, clicks, domain, custom FROM short_links WHERE user_id = ? AND event_id = ? AND code = ?')
     .get(userId, eventId, code);
 }
 
@@ -218,7 +220,65 @@ function eventSpec(user: User, event: EventRef, code: string, target: string): S
 }
 
 function pageSpec(user: User, target: string): Spec {
-  return { ...PAGE, target, address: (attempt) => pageAddress(user.alias ?? '', attempt), description: `${user.alias ?? ''} · page` };
+  // An address an admin picked is asked for first (on a new domain, or after the link was deleted in Kutt).
+  const custom = find(user.id, PAGE.eventId, PAGE.code)?.custom ?? '';
+  return {
+    ...PAGE,
+    target,
+    address: (attempt) => (custom ? (attempt === 1 ? custom : `${custom}-${attempt}`) : pageAddress(user.alias ?? '', attempt)),
+    description: `${user.alias ?? ''} · page`,
+  };
+}
+
+/** What Kutt accepts as an address: letters, digits, "-" and "_", 64 at most. Kept lowercase here. */
+export const customAddressPattern = /^[a-z0-9][a-z0-9_-]{0,63}$/;
+
+export type RenameResult = 'ok' | 'invalid' | 'taken' | 'refused' | 'unavailable';
+
+/**
+ * Gives a promoter's page short link the address an admin picked, like "maya" for go.test/maya. The
+ * link is renamed in Kutt, so its clicks are kept; when it is gone from Kutt (or on another domain),
+ * a new one is made with that address. The address is kept for later updates of the link.
+ */
+export async function renamePageLink(user: User, address: string): Promise<RenameResult> {
+  const target = pageLink(user);
+  if (!kuttEnabled() || !target) return 'unavailable';
+  if (!customAddressPattern.test(address)) return 'invalid';
+  const domain = shortDomain();
+  const row = find(user.id, PAGE.eventId, PAGE.code);
+  const remember = () =>
+    db.query('UPDATE short_links SET custom = ? WHERE user_id = ? AND event_id = ? AND code = ?').run(address, user.id, PAGE.eventId, PAGE.code);
+  const refused = (err: unknown): RenameResult | null => {
+    if (!(err instanceof KuttError)) throw err;
+    if (!err.perLink) return 'unavailable';
+    if (/already in use/i.test(err.message)) return 'taken';
+    return /not found/i.test(err.message) ? null : 'refused';
+  };
+  try {
+    if (row && row.domain === domain) {
+      try {
+        save(user.id, PAGE.eventId, PAGE.code, target, domain, parseLink(await kutt('PATCH', `/links/${row.kutt_id}`, { target, address })));
+        remember();
+        return 'ok';
+      } catch (err) {
+        // Nothing to change: it already has this address and target.
+        if (err instanceof KuttError && /should at least update/i.test(err.message)) {
+          remember();
+          return 'ok';
+        }
+        const result = refused(err);
+        if (result) return result;
+        // Deleted in Kutt: made again below.
+      }
+    }
+    // No "reuse" here: it would hand back an existing link under its old address.
+    const body = { target, customurl: address, description: `${user.alias ?? ''} · page`, ...(domain ? { domain } : {}) };
+    save(user.id, PAGE.eventId, PAGE.code, target, domain, parseLink(await kutt('POST', '/links', body)), false);
+    remember();
+    return 'ok';
+  } catch (err) {
+    return refused(err) ?? 'refused';
+  }
 }
 
 /** The address of a promoter's page: their alias, like "dj-max". */
