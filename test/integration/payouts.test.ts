@@ -60,7 +60,7 @@ describeIntegration('payouts, rewards and changes by hand', () => {
       expect(location(res)).toContain('ok=adjusted');
       const html = await p.client.page('/');
       expect(stats(html).get('Tickets sold, 6 orders · incl. 15 outside Hi.Events · 1 awaiting payment')).toBe('25');
-      expect(html).toContain('level-silver'); // 25 tickets
+      expect(html).toContain('level-c-silver">Silver'); // 25 tickets
       expect(available(await p.client.page('/payouts'))).toBe('$58.50');
     });
 

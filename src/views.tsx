@@ -8,6 +8,7 @@ import { hasTwoFactor } from './two-factor';
 import { describeAdjustment, type Adjustment } from './adjustments';
 import { alerts, type Prefs } from './alert-prefs';
 import type { Rewards } from './rewards';
+import { describeTrack, LIMITS, levelColors, rewardRules, trackOn, type Level, type LevelColor, type RewardRules, type Track } from './reward-rules';
 import { config } from './config';
 import type { PromoCodeListing } from './hievents';
 import { commissionPercentFor, type User } from './local-db';
@@ -62,6 +63,8 @@ header { padding-top: env(safe-area-inset-top); position: sticky; top: 0; z-inde
 .sidebar a[aria-current] { background: color-mix(in srgb, var(--accent) 12%, var(--surface)); color: var(--accent); font-weight: 600; }
 .nav-group { display: grid; gap: 2px; }
 .nav-title { font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); padding: 0 10px 4px; }
+.sidebar a.nav-cta { justify-content: center; margin: 2px 0 8px; background: var(--accent); color: var(--accent-text); font-weight: 700; }
+.sidebar a.nav-cta:hover { background: color-mix(in srgb, var(--accent) 85%, var(--text)); }
 .nav-count { min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px; background: var(--danger); color: #fff; font: 700 11px/20px system-ui; text-align: center; }
 .nav-signout { margin-top: auto; padding: 0 10px; }
 .nav-close { display: none !important; }
@@ -232,6 +235,14 @@ input, textarea, select { font: inherit; color: var(--text); background: var(--s
 input[type=checkbox], input[type=radio] { width: auto; }
 textarea { min-height: 80px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
 button { font: inherit; font-weight: 600; background: var(--accent); color: var(--accent-text); border: 0; border-radius: 8px; padding: 9px 16px; cursor: pointer; justify-self: start; }
+a.button.big { font-size: 17px; padding: 13px 22px; border-radius: 10px; }
+a.button.secondary { background: var(--bg); color: var(--text); border: 1px solid var(--border); }
+.payout-callout { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 20px; }
+.payout-callout.ready { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--surface)); }
+.payout-callout-label { font-weight: 600; }
+.payout-callout-amount { font-size: 34px; font-weight: 800; letter-spacing: -0.02em; line-height: 1.1; }
+.payout-callout-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+.payout-request { scroll-margin-top: 80px; }
 a.button { display: inline-block; font-weight: 600; background: var(--accent); color: var(--accent-text); border-radius: 8px; padding: 9px 16px; text-decoration: none; }
 button.link { background: none; color: var(--accent); padding: 0; font-weight: 400; }
 button.danger { background: var(--danger); }
@@ -283,13 +294,31 @@ h3 { font-size: 15px; margin: 0 0 12px; }
 .level-card { margin-bottom: 20px; }
 .level-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .level-badge { font-weight: 700; font-size: 14px; padding: 2px 12px; border-radius: 999px; border: 2px solid var(--level, var(--border)); background: color-mix(in srgb, var(--level, var(--border)) 14%, var(--surface)); }
-.level-rookie { --level: #8a8a84; }
-.level-bronze { --level: #b06d2c; }
-.level-silver { --level: #8f97a3; }
-.level-gold { --level: #c9971a; }
-.level-platinum { --level: #4f8f9e; }
-.level-diamond { --level: var(--accent); }
+.level-c-gray { --level: #8a8a84; }
+.level-c-bronze { --level: #b06d2c; }
+.level-c-silver { --level: #8f97a3; }
+.level-c-gold { --level: #c9971a; }
+.level-c-teal { --level: #4f8f9e; }
+.level-c-blue { --level: var(--accent); }
+.level-c-purple { --level: #8a5cd6; }
+.level-c-pink { --level: #d0559b; }
+.level-c-red { --level: var(--danger); }
+.level-c-green { --level: var(--ok); }
 .level-next { margin: 0 0 8px; }
+.level-preview { display: flex; flex-wrap: wrap; gap: 10px 16px; margin: 0; }
+.rules-table { width: auto; }
+.rules-table td { padding: 6px 8px 6px 0; border: 0; }
+.rules-table input:not([type]) { min-width: 170px; }
+.rules-table input[type=number] { min-width: 90px; }
+.rules-table select { min-width: 130px; }
+.rules-now p { margin: 0; }
+.rules-form { margin-top: 16px; }
+.rules-table th { padding: 0 6px 4px 0; border: 0; }
+.rules-table input[type=number] { max-width: 130px; }
+.repeat-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.repeat-row input[type=number] { width: 100px; }
+.repeat-row input:not([type]) { width: 160px; }
+.reset-rules { margin-top: 16px; }
 .unlocks { list-style: none; padding: 0; margin: 0 0 10px; display: grid; gap: 4px; font-size: 14px; color: var(--muted); }
 .unlocks li::before { content: '○'; display: inline-block; width: 1.4em; }
 .unlocks li.ready { color: var(--text); font-weight: 600; }
@@ -549,10 +578,14 @@ function Sidebar(props: { user: User }) {
             <a href="/admin/branding">Branding</a>
             <a href="/admin/emails">Emails</a>
             <a href="/admin/links">Event links</a>
+            <a href="/admin/rewards">Levels &amp; rewards</a>
           </NavGroup>
         </>
       ) : (
         <NavGroup title="My sales">
+          <a class="nav-cta" href="/payouts#request">
+            Request payout
+          </a>
           <a href="/">Dashboard</a>
           <a href="/payouts">Payouts &amp; rewards</a>
         </NavGroup>
@@ -1758,12 +1791,12 @@ export function WelcomePage(props: {
   step: number;
   codes: string[];
   percent: number;
-  rewardEvery: number;
-  merchEvery: number;
   pushKey: string;
 }) {
   const u = props.user;
   const brand = getBrand();
+  const rules = rewardRules();
+  const levels = rules.levels;
   const first = u.first_name || u.name.split(' ')[0];
   return (
     <Layout title="Welcome" user={u} hideInstallBanner>
@@ -1803,8 +1836,9 @@ export function WelcomePage(props: {
                 <div>
                   <strong>Unlock rewards and levels</strong>
                   <div class="muted">
-                    Your first sale for an event gets you a free ticket to it, plus 1 more every {props.rewardEvery} sales.
-                    Every {props.merchEvery} tickets sold unlocks merch. Climb from Rookie to Diamond.
+                    {trackOn(rules.tickets) && <>Free tickets for each event: {describeTrack(rules.tickets, 'ticket').replace(/^./, (c) => c.toLowerCase())} </>}
+                    {trackOn(rules.merch) && <>Merch: {describeTrack(rules.merch, 'merch').replace(/^./, (c) => c.toLowerCase())} </>}
+                    {levels.length > 1 && <>Climb from {levels[0]!.name} to {levels.at(-1)!.name}.</>}
                   </div>
                 </div>
               </div>
@@ -1996,6 +2030,179 @@ export function AdminLinksPage(props: {
   );
 }
 
+const BLANK_ROWS = 3;
+const numberValue = (n: number) => (Number.isFinite(n) ? String(n) : '');
+const colorNames: Record<LevelColor, string> = {
+  gray: 'Gray',
+  bronze: 'Bronze',
+  silver: 'Silver',
+  gold: 'Gold',
+  teal: 'Teal',
+  blue: 'Blue (accent)',
+  purple: 'Purple',
+  pink: 'Pink',
+  red: 'Red',
+  green: 'Green',
+};
+
+function MilestoneRows(props: { prefix: 'ticket' | 'merch'; track: Track; unit: string }) {
+  const rows = [...props.track.milestones, ...Array.from({ length: BLANK_ROWS }, () => ({ at: NaN, count: NaN, label: '' }))];
+  return (
+    <div class="table-wrap">
+      <table class="rules-table">
+        <thead>
+          <tr>
+            <th>At ({props.unit})</th>
+            <th>Gives (1 if empty)</th>
+            {props.prefix === 'merch' && <th>What (optional)</th>}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((m, i) => (
+            <tr>
+              <td>
+                <input type="number" name={`${props.prefix}_at`} value={numberValue(m.at)} min={1} max={LIMITS.tickets} aria-label={`Milestone ${i + 1}: ${props.unit}`} />
+              </td>
+              <td>
+                <input type="number" name={`${props.prefix}_count`} value={numberValue(m.count)} min={1} max={LIMITS.count} aria-label={`Milestone ${i + 1}: how many (1 if empty)`} />
+              </td>
+              {props.prefix === 'merch' && (
+                <td>
+                  <input name="merch_label" value={m.label} maxlength={LIMITS.label} placeholder={i === 0 ? 'Like: Hoodie' : undefined} aria-label={`Milestone ${i + 1}: what`} />
+                </td>
+              )}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function RepeatRow(props: { prefix: 'ticket' | 'merch'; track: Track; unit: string }) {
+  return (
+    <div class="repeat-row">
+      <span>Then</span>
+      <input type="number" name={`${props.prefix}_every_count`} value={numberValue(props.track.count)} min={1} max={LIMITS.count} aria-label="How many each time" />
+      {props.prefix === 'merch' && (
+        <input name="merch_every_label" value={props.track.label} maxlength={LIMITS.label} placeholder="merch item" aria-label="What each time (optional)" />
+      )}
+      <span>every</span>
+      <input type="number" name={`${props.prefix}_every`} value={numberValue(props.track.every)} min={0} max={LIMITS.tickets} aria-label={`Every how many ${props.unit}`} />
+      <span>more {props.unit} (0 for none)</span>
+    </div>
+  );
+}
+
+export function AdminRewardsPage(props: { user: User; rules: RewardRules; saved: RewardRules; customized: boolean; ok?: string; error?: string }) {
+  const { rules, saved } = props;
+  const levelRows = [...rules.levels, ...Array.from({ length: BLANK_ROWS }, () => ({ name: '', at: NaN, color: '' as LevelColor }))];
+  return (
+    <Layout title="Levels & rewards" user={props.user}>
+      <h1>Levels &amp; rewards</h1>
+      <p class="muted">
+        Promoters climb levels and earn free tickets and merch as they sell. Changes apply to everyone right away, counted
+        from all their sales so far; rewards already requested stay requested.
+      </p>
+      <Flash ok={props.ok} error={props.error} />
+
+      <div class="card stack-card rules-now">
+        <h2 class="first">What promoters see now</h2>
+        <p class="level-preview">
+          {saved.levels.map((l) => (
+            <span>
+              <LevelBadge level={l} /> <span class="muted">{l.at}+</span>
+            </span>
+          ))}
+        </p>
+        <p>
+          <strong>Free tickets for each event:</strong> {describeTrack(saved.tickets, 'ticket')}
+        </p>
+        <p>
+          <strong>Merch:</strong> {describeTrack(saved.merch, 'merch')}
+        </p>
+      </div>
+
+      <form method="post" action="/admin/rewards" class="stack-card rules-form">
+        <div class="card stack-card">
+          <h2 class="first">Levels</h2>
+          <p class="muted">
+            By tickets sold in total (with sales entered by hand). The first level starts at 0. To remove a level, clear its
+            name.
+          </p>
+          <div class="table-wrap">
+            <table class="rules-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>From (tickets)</th>
+                  <th>Color</th>
+                </tr>
+              </thead>
+              <tbody>
+                {levelRows.map((l, i) => (
+                  <tr>
+                    <td>
+                      <input name="level_name" value={l.name} maxlength={LIMITS.name} aria-label={`Level ${i + 1}: name`} />
+                    </td>
+                    <td>
+                      <input type="number" name="level_at" value={numberValue(l.at)} min={0} max={LIMITS.tickets} aria-label={`Level ${i + 1}: from how many tickets`} />
+                    </td>
+                    <td>
+                      <select name="level_color" aria-label={`Level ${i + 1}: color`}>
+                        {levelColors.map((c) => (
+                          <option value={c} selected={c === (l.color || levelColors[i % levelColors.length])}>
+                            {colorNames[c]}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="card stack-card">
+          <h2 class="first">Free tickets</h2>
+          <p class="muted">
+            Counted per event, from the promoter's sales for that event. Only upcoming events offer them. Clear a row to remove
+            it; leave every row empty and "every" at 0 to turn free tickets off.
+          </p>
+          <MilestoneRows prefix="ticket" track={rules.tickets} unit="sales" />
+          <RepeatRow prefix="ticket" track={rules.tickets} unit="sales" />
+        </div>
+
+        <div class="card stack-card">
+          <h2 class="first">Merch</h2>
+          <p class="muted">
+            Counted from all tickets sold. Name what each milestone gives (like Hoodie) or leave it empty for "a merch item";
+            the promoter tells you the size when they request it. Clear a row to remove it; leave every row empty and "every" at
+            0 to turn merch off.
+          </p>
+          <MilestoneRows prefix="merch" track={rules.merch} unit="tickets" />
+          <RepeatRow prefix="merch" track={rules.merch} unit="tickets" />
+        </div>
+
+        <button type="submit">Save levels and rewards</button>
+      </form>
+
+      {props.customized && (
+        <form method="post" action="/admin/rewards/reset" class="reset-rules">
+          <button type="submit" class="secondary">
+            Back to the default levels and rewards
+          </button>
+        </form>
+      )}
+    </Layout>
+  );
+}
+
+export function LevelBadge(props: { level: Level; tiny?: boolean }) {
+  return <span class={`level-badge level-c-${props.level.color}${props.tiny ? ' tiny' : ''}`}>{props.level.name}</span>;
+}
+
 // Drawn with CSS rather than emoji, which some phones and fonts show as empty boxes.
 const medal = (rank: number) => <span class={`rank-badge${rank <= 3 ? ` rank-${rank}` : ''}`}>{rank}</span>;
 
@@ -2134,7 +2341,7 @@ export function AdminDashboardPage(props: { user: User; board: Leaderboard; rang
                       <Avatar user={e.user} size="small" />
                       <span>
                         {e.user.name}
-                        <span class={`level-badge level-${e.level.toLowerCase()} tiny`}>{e.level}</span>
+                        <LevelBadge level={e.level} tiny />
                       </span>
                     </a>
                   </td>

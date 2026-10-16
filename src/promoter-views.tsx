@@ -4,9 +4,10 @@ import type { CodeStats, DailySales } from './hievents';
 import type { User } from './local-db';
 import { commissionCents, formatMoney, formatPercent, toCents, totalsByCurrency, type Totals } from './money';
 import { cashAvailable, type Balance, type PayoutRequest } from './payouts';
-import { describeReward, levelFor, levels, type RewardRequest, type Rewards } from './rewards';
+import { describeReward, levelFor, type RewardRequest, type Rewards } from './rewards';
+import { describeTrack, rewardRules, trackOn } from './reward-rules';
 import { describeAdjustment, type Adjustment } from './adjustments';
-import { Avatar, Flash, formatDate, Layout } from './views';
+import { Avatar, Flash, formatDate, Layout, LevelBadge } from './views';
 import { eventLink } from './links';
 import { linkClicks, shareLink } from './short-links';
 
@@ -141,6 +142,52 @@ function SummaryCards(props: {
   );
 }
 
+const lowerFirst = (text: string) => text[0]!.toLowerCase() + text.slice(1);
+
+/** The promoter's money and rewards waiting to be requested, with big buttons to do it. */
+function PayoutCallout(props: { balances: Balance[]; rewards: Rewards }) {
+  const ready = props.balances.filter((b) => b.available > 0);
+  const waiting = props.balances.filter((b) => b.pending > 0);
+  const rewardsReady = props.rewards.tickets.reduce((sum, t) => sum + t.available, 0) + props.rewards.merch.available;
+  if (ready.length === 0 && waiting.length === 0 && rewardsReady === 0) return null;
+  return (
+    <div class={`card payout-callout${ready.length ? ' ready' : ''}`}>
+      <div class="payout-callout-text">
+        {ready.length > 0 ? (
+          <>
+            <div class="payout-callout-label">Ready to request</div>
+            <div class="payout-callout-amount">{ready.map((b) => formatMoney(b.available, b.currency)).join(' + ')}</div>
+          </>
+        ) : waiting.length === 0 ? (
+          <div class="payout-callout-label">{plural(rewardsReady, 'reward')} ready to request</div>
+        ) : null}
+        {waiting.length > 0 && (
+          <div class={ready.length ? 'muted' : 'payout-callout-label'}>
+            {waiting.map((b) => formatMoney(b.pending, b.currency)).join(' + ')} requested, waiting for the team
+          </div>
+        )}
+      </div>
+      <div class="payout-callout-actions">
+        {ready.length > 0 && (
+          <a class="button big" href="/payouts#request">
+            Request my payout
+          </a>
+        )}
+        {rewardsReady > 0 && (
+          <a class={`button big${ready.length ? ' secondary' : ''}`} href="/payouts#rewards">
+            Claim {plural(rewardsReady, 'reward')}
+          </a>
+        )}
+        {ready.length === 0 && rewardsReady === 0 && (
+          <a class="button secondary" href="/payouts">
+            See my payouts
+          </a>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function Progress(props: { percent: number; label: string }) {
   const pct = Math.max(0, Math.min(100, Math.round(props.percent)));
   return (
@@ -152,27 +199,32 @@ function Progress(props: { percent: number; label: string }) {
 
 function LevelCard(props: { rewards: Rewards; rewardsHref?: string }) {
   const { totalSold, merch } = props.rewards;
+  const rules = rewardRules();
   const { level, next, progress } = levelFor(totalSold);
   const freeTickets = props.rewards.tickets.reduce((sum, t) => sum + t.available, 0);
   return (
     <div class="card level-card">
       <div class="level-head">
-        <span class={`level-badge level-${level.name.toLowerCase()}`}>{level.name}</span>
+        <LevelBadge level={level} />
         <span class="muted">{plural(totalSold, 'ticket')} sold in total</span>
       </div>
       <Progress percent={progress} label={next ? `Progress to ${next.name}` : 'Top level reached'} />
-      <p class="muted level-next">
-        {next ? `${next.at - totalSold} more to reach ${next.name}` : `Top level: ${levels.at(-1)!.name}. Legendary.`}
-      </p>
+      <p class="muted level-next">{next ? `${next.at - totalSold} more to reach ${next.name}` : `Top level: ${level.name}. Legendary.`}</p>
       <ul class="unlocks">
-        <li class={freeTickets > 0 ? 'ready' : ''}>
-          {freeTickets > 0 ? `${plural(freeTickets, 'free ticket')} ready to request` : 'Sell 1 ticket for an event to earn a free ticket to it'}
-        </li>
-        <li class={merch.available > 0 ? 'ready' : ''}>
-          {merch.available > 0
-            ? 'Merch unlocked: request it now'
-            : `Merch unlocks in ${plural(merch.nextIn, 'more ticket')}`}
-        </li>
+        {(trackOn(rules.tickets) || freeTickets > 0) && (
+          <li class={freeTickets > 0 ? 'ready' : ''}>
+            {freeTickets > 0 ? `${plural(freeTickets, 'free ticket')} ready to request` : `Free tickets for each event: ${lowerFirst(describeTrack(rules.tickets, 'ticket'))}`}
+          </li>
+        )}
+        {(trackOn(rules.merch) || merch.available > 0) && (
+          <li class={merch.available > 0 ? 'ready' : ''}>
+            {merch.available > 0
+              ? `${merch.readyLabel || 'Merch'} unlocked: request it now`
+              : merch.nextIn !== null
+                ? `${merch.nextLabel || 'Merch'} unlocks in ${plural(merch.nextIn, 'more ticket')}`
+                : 'All merch unlocked'}
+          </li>
+        )}
       </ul>
       {props.rewardsHref && (freeTickets > 0 || merch.available > 0) && (
         <a href={props.rewardsHref}>Request your rewards →</a>
@@ -324,6 +376,7 @@ export function DashboardPage(props: {
         <div class="card muted">No promo codes are assigned to this account yet.</div>
       ) : (
         <>
+          {self && <PayoutCallout balances={props.balances} rewards={props.rewards} />}
           <SummaryCards
             totals={totals}
             balances={props.balances}
@@ -475,13 +528,10 @@ export function EventPage(props: {
               {reward.available > 0 ? `${plural(reward.available, 'free ticket')} ready for this event` : 'Free tickets for this event'}
             </strong>
             <div class="muted">
-              {plural(reward.earned, 'free ticket')} earned{reward.used > 0 ? `, ${reward.used} requested` : ''} ·{' '}
-              {plural(reward.nextIn, 'more sale')} for the next one
+              {plural(reward.earned, 'free ticket')} earned{reward.used > 0 ? `, ${reward.used} requested` : ''}
+              {reward.nextIn !== null ? ` · ${plural(reward.nextIn, 'more sale')} for the next one` : ''}
             </div>
-            <Progress
-              percent={((config.rewardTicketEvery - reward.nextIn) / config.rewardTicketEvery) * 100}
-              label="Progress to the next free ticket"
-            />
+            {reward.nextIn !== null && <Progress percent={reward.progress} label="Progress to the next free ticket" />}
           </div>
           {self && reward.available > 0 && <a href="/payouts#rewards">Request →</a>}
         </div>
@@ -606,70 +656,80 @@ function RewardHistory(props: { requests: RewardRequest[] }) {
 
 function RewardsSection(props: { rewards: Rewards }) {
   const { tickets, merch } = props.rewards;
+  const rules = rewardRules();
+  const showTickets = trackOn(rules.tickets) || tickets.some((t) => t.earned > 0);
+  const showMerch = trackOn(rules.merch) || merch.earned > 0;
+  if (!showTickets && !showMerch) return null;
   return (
     <section id="rewards">
       <h2>Rewards</h2>
-      <p class="muted">
-        Sell 1 ticket for an event and get a free ticket to it, plus 1 more for every {config.rewardTicketEvery} more you
-        sell. Every {config.merchEvery} tickets sold in total unlocks a merch item.
-      </p>
       <div class="two-col">
-        <div class="card">
-          <h3>Free tickets</h3>
-          {tickets.length === 0 ? (
-            <p class="muted">No upcoming events with your codes.</p>
-          ) : (
-            <div class="reward-list">
-              {tickets.map((t) => (
-                <div class="reward-row">
-                  <div>
-                    <strong>{t.event.title}</strong>
-                    <div class="muted">
-                      {plural(t.event.tickets, 'sale')} · {plural(t.earned, 'free ticket')} earned
-                      {t.bonus !== 0 ? ` (${t.bonus > 0 ? '+' : ''}${t.bonus} from the team)` : ''}
-                      {t.used > 0 ? `, ${t.used} requested` : ''} · next in {t.nextIn}
+        {showTickets && (
+          <div class="card">
+            <h3>Free tickets</h3>
+            <p class="muted">For each event: {lowerFirst(describeTrack(rules.tickets, 'ticket'))}</p>
+            {tickets.length === 0 ? (
+              <p class="muted">No upcoming events with your codes.</p>
+            ) : (
+              <div class="reward-list">
+                {tickets.map((t) => (
+                  <div class="reward-row">
+                    <div>
+                      <strong>{t.event.title}</strong>
+                      <div class="muted">
+                        {plural(t.event.tickets, 'sale')} · {plural(t.earned, 'free ticket')} earned
+                        {t.bonus !== 0 ? ` (${t.bonus > 0 ? '+' : ''}${t.bonus} from the team)` : ''}
+                        {t.used > 0 ? `, ${t.used} requested` : ''}
+                        {t.nextIn !== null ? ` · next in ${plural(t.nextIn, 'sale')}` : ''}
+                      </div>
                     </div>
+                    {t.available > 0 && (
+                      <form class="reward-form" method="post" action="/rewards/ticket">
+                        <input type="hidden" name="event_id" value={String(t.event.id)} />
+                        <select name="quantity" aria-label="How many">
+                          {Array.from({ length: t.available }, (_, i) => (
+                            <option value={String(i + 1)}>{plural(i + 1, 'ticket')}</option>
+                          ))}
+                        </select>
+                        <input name="details" placeholder="Name for the guest list (optional)" maxlength={120} />
+                        <button type="submit">Request</button>
+                      </form>
+                    )}
                   </div>
-                  {t.available > 0 && (
-                    <form class="reward-form" method="post" action="/rewards/ticket">
-                      <input type="hidden" name="event_id" value={String(t.event.id)} />
-                      <select name="quantity" aria-label="How many">
-                        {Array.from({ length: t.available }, (_, i) => (
-                          <option value={String(i + 1)}>{plural(i + 1, 'ticket')}</option>
-                        ))}
-                      </select>
-                      <input name="details" placeholder="Name for the guest list (optional)" maxlength={120} />
-                      <button type="submit">Request</button>
-                    </form>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-        <div class="card">
-          <h3>Merch</h3>
-          <Progress
-            percent={((config.merchEvery - merch.nextIn) / config.merchEvery) * 100}
-            label="Progress to the next merch item"
-          />
-          <p class="muted">
-            {plural(merch.earned, 'item')} unlocked{merch.bonus !== 0 ? ` (${merch.bonus > 0 ? '+' : ''}${merch.bonus} from the team)` : ''}
-            {merch.used > 0 ? `, ${merch.used} requested` : ''} · next in{' '}
-            {plural(merch.nextIn, 'ticket')}
-          </p>
-          {merch.available > 0 ? (
-            <form class="stack" method="post" action="/rewards/merch">
-              <label>
-                What would you like? (item and size)
-                <input name="details" placeholder="T-shirt, size L" maxlength={120} required />
-              </label>
-              <button type="submit">Request merch</button>
-            </form>
-          ) : (
-            <p class="muted">Keep selling to unlock it.</p>
-          )}
-        </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+        {showMerch && (
+          <div class="card">
+            <h3>Merch</h3>
+            <p class="muted">{describeTrack(rules.merch, 'merch')}</p>
+            {merch.nextIn !== null && <Progress percent={merch.progress} label="Progress to the next merch item" />}
+            <p class="muted">
+              {plural(merch.earned, 'item')} unlocked{merch.bonus !== 0 ? ` (${merch.bonus > 0 ? '+' : ''}${merch.bonus} from the team)` : ''}
+              {merch.used > 0 ? `, ${merch.used} requested` : ''}
+              {merch.nextIn !== null ? ` · ${merch.nextLabel ? `${merch.nextLabel} in` : 'next in'} ${plural(merch.nextIn, 'ticket')}` : ''}
+            </p>
+            {merch.available > 0 ? (
+              <form class="stack" method="post" action="/rewards/merch">
+                <label>
+                  {merch.readyLabel ? `Your ${merch.readyLabel}: which size or option?` : 'What would you like? (item and size)'}
+                  <input
+                    name="details"
+                    placeholder={merch.readyLabel ? `${merch.readyLabel}, size L` : 'T-shirt, size L'}
+                    value={merch.readyLabel ? `${merch.readyLabel}, ` : undefined}
+                    maxlength={120}
+                    required
+                  />
+                </label>
+                <button type="submit">Request merch</button>
+              </form>
+            ) : (
+              <p class="muted">{merch.nextIn !== null ? 'Keep selling to unlock it.' : 'All merch unlocked.'}</p>
+            )}
+          </div>
+        )}
       </div>
     </section>
   );
@@ -728,7 +788,7 @@ export function PayoutsPage(props: {
                 </tbody>
               </table>
             </div>
-            <div class="card">
+            <div class="card payout-request" id={b === props.balances[0] ? 'request' : undefined}>
               <h2 class="first">Request a payout</h2>
               {open ? (
                 <p class="muted">You have a request waiting. You can ask again once the team has handled it.</p>

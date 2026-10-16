@@ -87,6 +87,7 @@ import {
   rewardsFor,
   settleReward,
 } from './rewards';
+import { describeProblem, isCustomized as isRulesCustomized, rewardRules, saveRewardRules, type LevelColor, type RewardRules, type Track } from './reward-rules';
 import { kuttDomains, kuttEnabled, prepareShortLinks, saveShortDomain, shortLinkStatus } from './short-links';
 import { publicAsset, publicText, serviceWorker } from './static';
 import {
@@ -117,6 +118,7 @@ import {
   AdminEmailsPage,
   AdminLinksPage,
   AdminDashboardPage,
+  AdminRewardsPage,
   AdminPayoutsPage,
   ApproveDevicePage,
   NotificationsPage,
@@ -171,6 +173,8 @@ const messages: Record<string, string> = {
   alias_invalid: 'The alias needs 2 to 30 letters, numbers, - or _, starting with a letter or number.',
   alias_taken: 'Another promoter already uses that alias.',
   bad_url: 'Enter the full address, starting with https://',
+  rewards_saved: 'Levels and rewards saved. Promoters see them right away.',
+  rewards_reset: 'Back to the default levels and rewards.',
   domain_saved: 'Short link domain saved. Promoters get links on it from their next visit.',
   bad_domain: 'Pick one of the domains of the Kutt account.',
   kutt_unreachable: 'Kutt did not answer, so the domain could not be checked. Try again in a few minutes.',
@@ -554,8 +558,6 @@ app.get('/welcome', (c) => {
       step={step}
       codes={codesFor(user.id)}
       percent={commissionPercentFor(user)}
-      rewardEvery={config.rewardTicketEvery}
-      merchEvery={config.merchEvery}
       pushKey={pushPublicKey}
     />,
   );
@@ -1096,6 +1098,73 @@ app.get('/admin/dashboard', async (c) => {
       promoters={listUsers().filter((u) => !u.is_admin)}
     />,
   );
+});
+
+app.get('/admin/rewards', (c) => {
+  const rules = rewardRules();
+  return c.html(
+    <AdminRewardsPage
+      user={c.get('user')}
+      rules={rules}
+      saved={rules}
+      customized={isRulesCustomized()}
+      ok={flash(c.req.query('ok'))}
+      error={flash(c.req.query('error'))}
+    />,
+  );
+});
+
+/** The rules from the admin form: rows sorted by tickets, empty rows left out. Numbers that are not numbers stay NaN for the check. */
+function rulesFromForm(body: Record<string, string | File | (string | File)[]>): RewardRules {
+  const list = (key: string) => {
+    const value = body[key];
+    return (Array.isArray(value) ? value : value === undefined ? [] : [value]).map((v) => (typeof v === 'string' ? v.trim() : ''));
+  };
+  const number = (text: string, fallback = NaN) => (text === '' ? fallback : /^-?\d+$/.test(text) ? Number(text) : NaN);
+  const byAt = <T extends { at: number }>(rows: T[]) => rows.sort((a, b) => a.at - b.at);
+  const names = list('level_name');
+  const ats = list('level_at');
+  const colors = list('level_color');
+  const levels = byAt(
+    names.flatMap((name, i) => (name ? [{ name, at: number(ats[i] ?? ''), color: (colors[i] ?? '') as LevelColor }] : [])),
+  );
+  const track = (prefix: 'ticket' | 'merch'): Track => {
+    const at = list(`${prefix}_at`);
+    const count = list(`${prefix}_count`);
+    const label = list(`${prefix}_label`);
+    const rows = Array.from({ length: Math.max(at.length, count.length, label.length) }, (_, i) => i);
+    return {
+      // A row with only a count or a name is kept, so the check says what is missing.
+      milestones: byAt(
+        rows.flatMap((i) => (at[i] || count[i] || label[i] ? [{ at: number(at[i] ?? ''), count: number(count[i] ?? '', 1), label: label[i] ?? '' }] : [])),
+      ),
+      every: number(list(`${prefix}_every`)[0] ?? '', 0),
+      count: number(list(`${prefix}_every_count`)[0] ?? '', 1),
+      label: list(`${prefix}_every_label`)[0] ?? '',
+    };
+  };
+  return { levels, tickets: track('ticket'), merch: track('merch') };
+}
+
+app.post('/admin/rewards', async (c) => {
+  const rules = rulesFromForm(await c.req.parseBody({ all: true }));
+  const problem = describeProblem(rules);
+  if (problem) {
+    // Shown again with what they typed, so nothing is lost.
+    return c.html(
+      <AdminRewardsPage user={c.get('user')} rules={rules} saved={rewardRules()} customized={isRulesCustomized()} error={problem} />,
+      400,
+    );
+  }
+  saveRewardRules(rules);
+  audit(c, 'admin.rewards_saved', { by: c.get('user').id, levels: rules.levels.length });
+  return c.redirect('/admin/rewards?ok=rewards_saved');
+});
+
+app.post('/admin/rewards/reset', (c) => {
+  saveRewardRules(null);
+  audit(c, 'admin.rewards_reset', { by: c.get('user').id });
+  return c.redirect('/admin/rewards?ok=rewards_reset');
 });
 
 app.get('/admin/links', async (c) => {

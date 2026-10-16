@@ -26,17 +26,21 @@ Add-on products (non-ticket items) are not counted as tickets, but they are incl
 
 - **Dashboard:** commission earned, what is available to request, full-price sales and tickets, a tickets-per-day chart (7 / 30 / 90 days / all time), then their events split into upcoming and past.
 - **Event page:** the same numbers for one event, its own chart, a breakdown per code when they have several, and previous / next links to move between events.
-- **Payouts:** their balance (earned − paid − requested), a form to request a payout with how they want to be paid, and the history of requests.
+- **Payouts:** their balance (earned − paid − requested), a form to request a payout with how they want to be paid, and the history of requests. When money or rewards are waiting, the dashboard opens with the amount and big **Request my payout** / **Claim rewards** buttons, and the menu always has a **Request payout** button.
 
 Admins see any promoter's dashboard exactly as they do from the promoter's page (**Open … dashboard**).
 
 ## Levels and rewards
 
-| Reward | Rule (settings) |
-| --- | --- |
-| Free tickets | For each upcoming event: 1 once the promoter sells 1 ticket to it, then 1 more every `REWARD_TICKET_EVERY` (default 5) tickets: 1 sold → 1, 6 → 2, 11 → 3. |
-| Merch | 1 item every `MERCH_EVERY` (default 50) tickets sold in total. |
-| Levels | By total tickets sold: Rookie 0, Bronze 10, Silver 25, Gold 50, Platinum 100, Diamond 250. Shown with a progress bar on the dashboard. |
+Admins set them on **Levels & rewards**; changes apply to everyone at once, counted from all their sales so far (rewards already requested stay requested). **Back to the default levels and rewards** undoes the changes.
+
+| Reward | What admins set | Default |
+| --- | --- | --- |
+| Levels | Any number of levels (up to 20), each with a name, the total tickets sold where it starts (the first starts at 0) and a badge color. | Rookie 0, Bronze 10, Silver 25, Gold 50, Platinum 100, Diamond 250. |
+| Free tickets | Milestones counted per upcoming event (at N sales for that event, gives M free tickets), then optionally M more every N sales. | 1 at the first sale, then 1 more every `REWARD_TICKET_EVERY` (5) sales: 1 sold → 1, 6 → 2, 11 → 3. |
+| Merch | Milestones counted on all tickets sold, each with an optional name (like Hoodie), then optionally more every N tickets. | 1 item every `MERCH_EVERY` (50) tickets sold. |
+
+Leaving every milestone empty with "every" at 0 turns free tickets or merch off. Promoters see the rules in words, a progress bar to their next level and reward, and get a notification when they reach one.
 
 Promoters request rewards on **Payouts & rewards** (with a guest-list name, or the merch item and size). Admins see them under **Requests**, then **Mark given** or **Decline** with a reason; the promoter is emailed. A declined reward can be requested again. Free tickets for past events are not offered.
 

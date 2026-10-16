@@ -6,6 +6,7 @@ import { alertAdmins } from './alert-prefs';
 import { config } from './config';
 import { summarizeEvents } from './promoter-views';
 import { levelFor, rewardsFor, type Rewards } from './rewards';
+import { labelOf, rewardRules } from './reward-rules';
 
 /*
  * Milestones come from live Hi.Events sales, so they are found by comparing each promoter's current
@@ -61,17 +62,22 @@ export function checkMilestones(promoter: User, rewards: Rewards) {
 
   const previousMerch = seen.get('merch');
   if (!firstLook && previousMerch !== undefined && rewards.merch.earned > previousMerch) {
+    const item = labelOf(rewardRules().merch, rewards.merch.earned);
     notify(promoter.id, {
-      title: 'Merch unlocked',
-      body: `You sold ${rewards.totalSold} tickets: pick your merch on Payouts & rewards.`,
+      title: item ? `${item} unlocked` : 'Merch unlocked',
+      body: `You sold ${rewards.totalSold} tickets: ${item ? 'request it' : 'pick your merch'} on Payouts & rewards.`,
       link: '/payouts#rewards',
     });
     alertAdmins(
       'promoter_merch',
-      { title: `${promoter.name} unlocked merch`, body: `${rewards.totalSold} tickets sold. They can now request a merch item.`, link: `/admin/promoters/${promoter.id}` },
+      {
+        title: `${promoter.name} unlocked ${item || 'merch'}`,
+        body: `${rewards.totalSold} tickets sold. They can now request a merch item.`,
+        link: `/admin/promoters/${promoter.id}`,
+      },
       {
         promoter: promoter.name,
-        milestone: 'unlocked merch',
+        milestone: `unlocked ${item || 'merch'}`,
         details: `${rewards.totalSold} tickets sold. They can now request a merch item.`,
         link: `${config.appUrl}/admin/promoters/${promoter.id}`,
       },
@@ -88,7 +94,7 @@ export function checkMilestones(promoter: User, rewards: Rewards) {
         title: `Free ticket earned for ${t.event.title}`,
         body:
           t.earned === 1
-            ? 'Your first sale for this event earned you a free ticket. Request it on Payouts & rewards.'
+            ? 'Your sales for this event earned you a free ticket. Request it on Payouts & rewards.'
             : `${t.earned} free tickets earned for this event so far. Request them on Payouts & rewards.`,
         link: '/payouts#rewards',
       });

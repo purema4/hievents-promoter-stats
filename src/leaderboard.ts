@@ -4,7 +4,7 @@ import { adjustmentsByDay, hasAdjustments, moneyAdjustments, moneyAdjustmentsBet
 import { codesFor, commissionPercentFor, listUsers, type User } from './local-db';
 import { commissionCents, toCents, totalsByCurrency } from './money';
 import { balances, countPendingPayouts } from './payouts';
-import { countPendingRewards, levelFor } from './rewards';
+import { countPendingRewards, levelFor, type Level } from './rewards';
 
 export type Entry = {
   user: User;
@@ -13,7 +13,7 @@ export type Entry = {
   commission: number; // cents, in the period
   owed: number; // cents, all time: earned − paid − requested
   lastSale: string | null; // YYYY-MM-DD
-  level: string;
+  level: Level;
   totalSold: number;
 };
 
@@ -83,7 +83,7 @@ export async function leaderboard(range: Range, sort: Sort): Promise<Leaderboard
       commission,
       owed,
       lastSale: days.at(-1)?.day ?? null,
-      level: levelFor(allSold).level.name,
+      level: levelFor(allSold).level,
       totalSold: allSold,
     });
   }

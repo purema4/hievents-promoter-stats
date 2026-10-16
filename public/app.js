@@ -153,7 +153,7 @@ const sidebar = document.getElementById('sidebar');
 if (sidebar) {
   const here = location.pathname;
   let best = null;
-  for (const link of sidebar.querySelectorAll('a[href^="/"]')) {
+  for (const link of sidebar.querySelectorAll('a[href^="/"]:not(.nav-cta)')) {
     const path = new URL(link.href).pathname;
     const match = path === here || (path !== '/' && path !== '/admin' && here.startsWith(path + '/')) || (path === '/admin' && here.startsWith('/admin/promoters'));
     if (match && (!best || path.length > new URL(best.href).pathname.length)) best = link;

@@ -205,7 +205,8 @@ export class Client {
   }
 
   /** A form POST, as a browser on APP_URL sends it. */
-  post(path: string, form: Record<string, string> = {}, options: RequestOptions = {}) {
+  /** A form POST; pairs can repeat a field, like a form with several rows. */
+  post(path: string, form: Record<string, string> | [string, string][] = {}, options: RequestOptions = {}) {
     return this.request(path, {
       ...options,
       method: 'POST',

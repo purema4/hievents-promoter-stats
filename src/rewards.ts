@@ -1,7 +1,7 @@
 import { freeTicketBonus, merchBonus, outsideTickets } from './adjustments';
-import { config } from './config';
 import { addColumn, db, type User } from './local-db';
 import type { EventSummary } from './promoter-views';
+import { earnedOn, labelOf, nextOn, rewardRules, type Next } from './reward-rules';
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS reward_requests (
@@ -41,44 +41,15 @@ export type RewardRequest = {
   processed_at: string | null;
 };
 
-// --- The rules -------------------------------------------------------------------------------
+// --- The rules (set by admins, see reward-rules.ts) -----------------------------------------
 
-/** 1 free ticket from the first sale, then 1 more every REWARD_TICKET_EVERY sales (1 → 1, 6 → 2, 11 → 3). */
-export function freeTicketsEarned(sold: number): number {
-  return sold <= 0 ? 0 : 1 + Math.floor((sold - 1) / config.rewardTicketEvery);
-}
+export { levelFor, type Level } from './reward-rules';
 
-export function salesToNextFreeTicket(sold: number): number {
-  return sold <= 0 ? 1 : config.rewardTicketEvery - ((sold - 1) % config.rewardTicketEvery);
-}
-
-export function merchEarned(totalSold: number): number {
-  return Math.floor(totalSold / config.merchEvery);
-}
-
-export function salesToNextMerch(totalSold: number): number {
-  return config.merchEvery - (totalSold % config.merchEvery);
-}
-
-export type Level = { name: string; at: number };
-
-// Gold lines up with the first merch unlock at the default MERCH_EVERY of 50.
-export const levels: Level[] = [
-  { name: 'Rookie', at: 0 },
-  { name: 'Bronze', at: 10 },
-  { name: 'Silver', at: 25 },
-  { name: 'Gold', at: 50 },
-  { name: 'Platinum', at: 100 },
-  { name: 'Diamond', at: 250 },
-];
-
-export function levelFor(totalSold: number): { level: Level; next: Level | null; progress: number } {
-  const index = levels.findLastIndex((l) => totalSold >= l.at);
-  const level = levels[index];
-  const next = levels[index + 1] ?? null;
-  const progress = next ? Math.floor(((totalSold - level.at) / (next.at - level.at)) * 100) : 100;
-  return { level, next, progress };
-}
+export const freeTicketsEarned = (sold: number) => earnedOn(rewardRules().tickets, sold);
+export const merchEarned = (totalSold: number) => earnedOn(rewardRules().merch, totalSold);
+/** Sales to the next free ticket for an event; null when there are no more to earn. */
+export const salesToNextFreeTicket = (sold: number) => nextOn(rewardRules().tickets, sold)?.in ?? null;
+export const salesToNextMerch = (totalSold: number) => nextOn(rewardRules().merch, totalSold)?.in ?? null;
 
 // --- What a promoter can request now ---------------------------------------------------------
 
@@ -88,14 +59,26 @@ export type TicketReward = {
   bonus: number; // the admin part of earned
   used: number; // requested or given, not declined
   available: number;
-  nextIn: number;
+  nextIn: number | null; // sales to the next one; null when the rules give no more
+  progress: number; // percent of the way to the next one
 };
 
 export type Rewards = {
   totalSold: number; // Hi.Events sales plus tickets sold outside it, entered by admins
   outsideSold: number;
   tickets: TicketReward[]; // upcoming events only: a free ticket for a past event is no use
-  merch: { earned: number; bonus: number; used: number; available: number; nextIn: number };
+  merch: {
+    earned: number;
+    bonus: number;
+    used: number;
+    available: number;
+    nextIn: number | null;
+    progress: number;
+    /** What the next merch milestone gives, like "Hoodie"; '' when it has no name. */
+    nextLabel: string;
+    /** The name of the item waiting to be requested, when the milestone has one. */
+    readyLabel: string;
+  };
 };
 
 const isUpcoming = (e: EventSummary) => !e.end || e.end.getTime() >= Date.now();
@@ -113,6 +96,8 @@ export function rewardsFor(userId: number, events: EventSummary[]): Rewards {
   const extraMerch = merchBonus(userId);
   const merch = Math.max(0, merchEarned(totalSold) + extraMerch);
   const extraTickets = freeTicketBonus(userId);
+  const rules = rewardRules();
+  const nextMerch: Next | null = nextOn(rules.merch, totalSold);
   return {
     totalSold,
     outsideSold,
@@ -120,9 +105,27 @@ export function rewardsFor(userId: number, events: EventSummary[]): Rewards {
       const bonus = extraTickets.get(event.id) ?? 0;
       const earned = Math.max(0, freeTicketsEarned(event.tickets) + bonus);
       const usedHere = usedTickets(event.id);
-      return { event, earned, bonus, used: usedHere, available: Math.max(0, earned - usedHere), nextIn: salesToNextFreeTicket(event.tickets) };
+      const next = nextOn(rules.tickets, event.tickets);
+      return {
+        event,
+        earned,
+        bonus,
+        used: usedHere,
+        available: Math.max(0, earned - usedHere),
+        nextIn: next?.in ?? null,
+        progress: next?.progress ?? 100,
+      };
     }),
-    merch: { earned: merch, bonus: extraMerch, used: merchUsed, available: Math.max(0, merch - merchUsed), nextIn: salesToNextMerch(totalSold) },
+    merch: {
+      earned: merch,
+      bonus: extraMerch,
+      used: merchUsed,
+      available: Math.max(0, merch - merchUsed),
+      nextIn: nextMerch?.in ?? null,
+      progress: nextMerch?.progress ?? 100,
+      nextLabel: nextMerch?.label ?? '',
+      readyLabel: merch > merchUsed ? labelOf(rules.merch, merchUsed + 1) : '',
+    },
   };
 }
 

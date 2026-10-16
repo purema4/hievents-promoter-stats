@@ -82,7 +82,7 @@ describe('rewardsFor and requestReward', () => {
       [1, 2, 2, 5],
       [3, 0, 0, 1],
     ]);
-    expect(rewards.merch).toEqual({ earned: 0, bonus: 0, used: 0, available: 0, nextIn: 40 });
+    expect(rewards.merch).toEqual({ earned: 0, bonus: 0, used: 0, available: 0, nextIn: 40, progress: 20, nextLabel: '', readyLabel: '' });
   });
 
   test('requested tickets are used up; declined ones become available again', async () => {
