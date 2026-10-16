@@ -96,13 +96,31 @@ export function endSession(c: Context) {
   deleteCookie(c, COOKIE, { path: '/', secure: config.cookieSecure });
 }
 
+// An admin viewing the app as a promoter: their own session points at the promoter for a while.
+// The promoter's sessions are untouched, and the admin gets their own account back when they stop.
+addColumn('sessions', 'impersonating_id', 'INTEGER');
+addColumn('sessions', 'impersonating_at', 'INTEGER');
+export const IMPERSONATION_MINUTES = 60;
+
+/** Who can be viewed as: anyone but admins (and so never the admin themselves). */
+export const canImpersonate = (target: User) => !target.is_admin;
+
+export function startImpersonating(sessionId: number, targetId: number) {
+  db.query('UPDATE sessions SET impersonating_id = ?, impersonating_at = ? WHERE rowid = ?').run(targetId, Math.floor(Date.now() / 1000), sessionId);
+}
+
+export function stopImpersonating(sessionId: number) {
+  db.query('UPDATE sessions SET impersonating_id = NULL, impersonating_at = NULL WHERE rowid = ?').run(sessionId);
+}
+
 function currentSession(c: Context): { user: User; sessionId: number } | null {
   const token = getCookie(c, COOKIE);
   if (!token) return null;
   const session = db
-    .query<{ rowid: number; user_id: number; expires_at: number; last_seen_at: number | null }, [string]>(
-      'SELECT rowid, user_id, expires_at, last_seen_at FROM sessions WHERE token_hash = ?',
-    )
+    .query<
+      { rowid: number; user_id: number; expires_at: number; last_seen_at: number | null; impersonating_id: number | null; impersonating_at: number | null },
+      [string]
+    >('SELECT rowid, user_id, expires_at, last_seen_at, impersonating_id, impersonating_at FROM sessions WHERE token_hash = ?')
     .get(hashToken(token));
   const now = Math.floor(Date.now() / 1000);
   if (!session || session.expires_at < now) return null;
@@ -112,6 +130,15 @@ function currentSession(c: Context): { user: User; sessionId: number } | null {
   if (!session.last_seen_at || now - session.last_seen_at > 300) {
     db.query('UPDATE sessions SET last_seen_at = ? WHERE rowid = ?').run(now, session.rowid);
     db.query('UPDATE users SET last_seen_at = ? WHERE id = ?').run(now, user.id);
+  }
+  if (session.impersonating_id) {
+    // Checked on every request: still an admin, still in time, and the promoter can still be viewed as.
+    const target = findUser(session.impersonating_id);
+    const fresh = now - (session.impersonating_at ?? 0) < IMPERSONATION_MINUTES * 60;
+    if (user.is_admin && fresh && target && canImpersonate(target)) {
+      return { user: { ...target, impersonator: { id: user.id, name: user.name, until: (session.impersonating_at ?? 0) + IMPERSONATION_MINUTES * 60 } }, sessionId: session.rowid };
+    }
+    stopImpersonating(session.rowid);
   }
   return { user, sessionId: session.rowid };
 }

@@ -374,6 +374,12 @@ table.page-table td { vertical-align: top; }
 table.page-table a.who { color: inherit; text-decoration: none; gap: 10px; }
 .page-link-kind { font-size: 11px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); min-width: 34px; }
 @media (min-width: 700px) { table.page-table a.who { white-space: nowrap; } }
+/* An admin viewing as a promoter: a bar fixed at the bottom of every page. */
+.impersonation-banner { position: fixed; z-index: 60; left: 0; right: 0; bottom: 0; display: flex; align-items: center; justify-content: center; gap: 12px 16px; flex-wrap: wrap; padding: 10px 16px calc(10px + env(safe-area-inset-bottom)); background: #8a4b00; color: #fff; font-size: 14px; box-shadow: 0 -4px 16px rgb(0 0 0 / 0.2); }
+.impersonation-banner form { margin: 0; }
+.impersonation-banner button { background: #fff; color: #111; padding: 6px 14px; font-size: 14px; }
+body.impersonating { padding-bottom: 96px; }
+body.impersonating .sidebar { padding-bottom: calc(96px + env(safe-area-inset-bottom)); }
 /* Teams (/admin/teams) and the team field on a promoter's admin page. */
 .inline-form { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .inline-form select { flex: 1 1 200px; width: auto; min-width: 0; }
@@ -452,6 +458,37 @@ function BrandMark(props: { brand: Brand }) {
   );
 }
 
+// Always on screen while an admin views the app as a promoter.
+function ImpersonationBanner(props: { user: User }) {
+  const until = new Intl.DateTimeFormat('en-CA', { timeStyle: 'short', timeZone: config.timezone }).format(new Date(props.user.impersonator!.until * 1000));
+  return (
+    <div class="impersonation-banner" role="status">
+      <span>
+        <strong>Viewing as {props.user.name}.</strong> You see what they see, but nothing can be changed. Ends at {until}
+      </span>
+      <form method="post" action="/impersonate/stop">
+        <button type="submit">Back to my account</button>
+      </form>
+    </div>
+  );
+}
+
+// What a change gets while viewing as a promoter.
+export function ReadOnlyPage(props: { user: User }) {
+  return (
+    <Layout title="Viewing only" user={props.user}>
+      <h1>Viewing only</h1>
+      <p>
+        You are viewing the app as {props.user.name}, so changes are turned off: nothing was sent or saved. To change
+        something for them, go back to your account and use their admin page.
+      </p>
+      <p>
+        <a href="/">Back to their dashboard</a>
+      </p>
+    </Layout>
+  );
+}
+
 export function Layout(props: { title: string; user?: User; children: Child; hideInstallBanner?: boolean }) {
   const brand = getBrand();
   return (
@@ -471,7 +508,8 @@ export function Layout(props: { title: string; user?: User; children: Child; hid
         <meta name="apple-mobile-web-app-title" content={brand.name} />
         <script src="/app.js" defer></script>
       </head>
-      <body class={props.user ? 'with-nav' : undefined}>
+      <body class={props.user ? (props.user.impersonator ? 'with-nav impersonating' : 'with-nav') : undefined}>
+        {props.user?.impersonator && <ImpersonationBanner user={props.user} />}
         {props.user && (
           <header class="topbar">
             <div class="inner">
@@ -497,7 +535,7 @@ export function Layout(props: { title: string; user?: User; children: Child; hid
             <a class="nav-overlay" href="#" aria-label="Close the menu" tabindex={-1}></a>
             <div>
               <main>
-                {!props.user.app_installed_at && !props.hideInstallBanner && <InstallBanner brand={brand} />}
+                {!props.user.app_installed_at && !props.user.impersonator && !props.hideInstallBanner && <InstallBanner brand={brand} />}
                 {props.children}
               </main>
               {brand.footer && <footer class="site-footer muted">{brand.footer}</footer>}
@@ -1434,6 +1472,14 @@ export function PromoterPage(props: {
         <a href={`/admin/promoters/${p.id}/view`}>Open {p.name}'s dashboard</a>
         <span class="muted"> · events, daily sales and commission, exactly as they see it</span>
       </p>
+      {!p.is_admin && (
+        <form class="inline-form" method="post" action={`/admin/promoters/${p.id}/impersonate`}>
+          <button class="secondary" type="submit">
+            View the app as {p.name}
+          </button>
+          <span class="muted">Every page they see, read-only, for up to an hour. A banner takes you back.</span>
+        </form>
+      )}
 
       <h2 id="adjust">Adjust by hand</h2>
       <p class="muted">

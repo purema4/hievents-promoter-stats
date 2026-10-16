@@ -113,6 +113,8 @@ export type User = {
   page_hidden_by?: number | null;
   is_team_lead?: number;
   team_lead_id?: number | null;
+  // Set only while an admin views the app as this promoter (never stored).
+  impersonator?: { id: number; name: string; until: number };
   totp_secret?: string | null;
   totp_pending?: string | null;
   totp_enabled_at?: number | null;

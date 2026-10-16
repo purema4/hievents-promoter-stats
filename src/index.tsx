@@ -22,6 +22,9 @@ import {
   requireAdmin,
   requireTeamLead,
   revokeAccess,
+  canImpersonate,
+  startImpersonating,
+  stopImpersonating,
   requireUser,
   startSession,
   verifyLogin,
@@ -126,6 +129,7 @@ import {
   AdminDashboardPage,
   AdminTeamsPage,
   TeamPage,
+  ReadOnlyPage,
   AdminRewardsPage,
   AdminPayoutsPage,
   ApproveDevicePage,
@@ -214,6 +218,7 @@ const messages: Record<string, string> = {
   team_not_lead: 'Pick one of the team leads.',
   team_self: 'A promoter cannot be on their own team.',
   team_pick: 'Choose a promoter.',
+  impersonate_admin: 'Admins cannot be viewed as.',
 };
 // Own keys only: ?ok=constructor must not pick up something from Object.prototype.
 const flash = (key?: string) => (key && Object.hasOwn(messages, key) ? messages[key] : undefined);
@@ -283,6 +288,17 @@ app.use(csrf({ origin: config.appUrl }));
 app.use(async (c, next) => {
   if (!/^(GET|HEAD|OPTIONS)$/.test(c.req.method) && c.req.header('origin') !== config.appUrl && c.req.header('sec-fetch-site') !== 'same-origin') {
     return c.text('Forbidden', 403);
+  }
+  await next();
+});
+// An admin viewing as a promoter only looks: nothing can be sent in their name (payouts, rewards,
+// profile, security, approving a device), only stopping or signing out.
+app.use(async (c, next) => {
+  if (/^(GET|HEAD|OPTIONS)$/.test(c.req.method) || c.req.path === '/impersonate/stop' || c.req.path === '/logout') return next();
+  const viewer = currentUser(c);
+  if (viewer?.impersonator) {
+    audit(c, 'admin.impersonation_blocked', { by: viewer.impersonator.id, userId: viewer.id, path: c.req.path });
+    return c.html(<ReadOnlyPage user={viewer} />, 403);
   }
   await next();
 });
@@ -674,7 +690,8 @@ app.get('/notifications', (c) => {
       error={failed ? testMessage(test) : undefined}
     />,
   );
-  markAllRead(user.id);
+  // Reading them as an admin leaves them unread for the promoter.
+  if (!user.impersonator) markAllRead(user.id);
   return page;
 });
 
@@ -866,8 +883,10 @@ app.post('/account/app-installed', (c) => {
 });
 
 async function renderSecurity(c: Context<Env>, extra: { setupSecret?: string; recoveryCodes?: string[]; error?: string } = {}) {
-  const user = findUser(c.get('user').id)!;
-  const secret = extra.setupSecret ?? (c.req.query('setup') ? user.totp_pending : null);
+  const viewer = c.get('user');
+  const user = { ...findUser(viewer.id)!, impersonator: viewer.impersonator };
+  // A two-step setup in progress is the promoter's secret: never shown to an admin viewing as them.
+  const secret = viewer.impersonator ? null : (extra.setupSecret ?? (c.req.query('setup') ? user.totp_pending : null));
   return c.html(
     <SecurityPage
       user={user}
@@ -1189,6 +1208,24 @@ app.get('/admin/promoters/:id/view/events/:eventId', async (c) => {
   const promoter = findUser(Number(c.req.param('id')));
   if (!promoter) return c.notFound();
   return renderEvent(c, promoter, `/admin/promoters/${promoter.id}/view`);
+});
+
+// Admins see the whole app as a promoter, read-only, with a banner, for up to an hour.
+app.post('/admin/promoters/:id/impersonate', (c) => {
+  const promoter = findUser(Number(c.req.param('id')));
+  if (!promoter) return c.notFound();
+  if (!canImpersonate(promoter)) return c.redirect(`/admin/promoters/${promoter.id}?error=impersonate_admin`);
+  startImpersonating(c.get('sessionId'), promoter.id);
+  audit(c, 'admin.impersonation_started', { by: c.get('user').id, userId: promoter.id });
+  return c.redirect('/');
+});
+
+app.post('/impersonate/stop', requireUser, (c) => {
+  const user = c.get('user');
+  stopImpersonating(c.get('sessionId'));
+  if (!user.impersonator) return c.redirect('/');
+  audit(c, 'admin.impersonation_stopped', { by: user.impersonator.id, userId: user.id });
+  return c.redirect(`/admin/promoters/${user.id}`);
 });
 
 // --- Promoters' public pages, for admins -------------------------------------------------------------

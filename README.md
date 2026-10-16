@@ -30,6 +30,8 @@ Add-on products (non-ticket items) are not counted as tickets, but they are incl
 
 Admins see any promoter's dashboard exactly as they do from the promoter's page (**Open … dashboard**).
 
+To see every page as a promoter does (payouts, their page, account, notifications, My team for a team lead), an admin clicks **View the app as …** on the promoter's page. It is read-only: a banner at the bottom of every page says whose account is shown, and nothing can be sent or saved in their name (payouts, rewards, profile, security, approving a device); trying shows a "Viewing only" page. Their notifications stay unread, a two-step setup they started is not shown, and admin pages are closed meanwhile. **Back to my account** in the banner ends it, and it ends by itself after an hour. Admins cannot be viewed as. Starting, stopping and every blocked change are in the audit log.
+
 ## Teams
 
 An admin can make any promoter a **team lead** and put other promoters on their team, on **Teams** in the menu or in the **Team** section of a promoter's page. A team lead can have many promoters; a promoter has at most one team lead. Only admins make team leads and change teams.
