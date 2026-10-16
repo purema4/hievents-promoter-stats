@@ -110,6 +110,7 @@ export type User = {
   last_seen_at?: number | null;
   alias?: string | null;
   page_hidden_at?: number | null;
+  page_hidden_by?: number | null;
   totp_secret?: string | null;
   totp_pending?: string | null;
   totp_enabled_at?: number | null;

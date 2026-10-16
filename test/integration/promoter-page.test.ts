@@ -122,4 +122,44 @@ describeIntegration("promoters' public pages", () => {
     expect(location(await promoter.client.post('/page/visibility', { hidden: '0' }))).toBe('/page?ok=page_shown');
     expect((await visitor.get(`/p/${alias}`)).status).toBe(200);
   });
+
+  test('admins see every page link on Promoter pages, and as a CSV', async () => {
+    const list = await admin.page('/admin/pages');
+    expect(list).toContain('<a href="/admin/pages">Promoter pages</a>');
+    expect(list).toContain(`<a href="${server.url}/p/${alias}" target="_blank" rel="noopener">`);
+    expect(list).toContain(`data-copy-text="${server.url}/p/${alias}"`);
+    expect(list).toContain('Nova &lt;b&gt;Star&lt;/b&gt;');
+    expect(text(list)).toContain('Short links show here once Kutt is set up');
+    expect(await admin.page(`/admin/promoters/${promoter.id}`)).toContain(`data-copy-text="${server.url}/p/${alias}"`);
+
+    const csv = await admin.get('/admin/pages.csv');
+    expect(csv.headers.get('content-type')).toBe('text/csv; charset=utf-8');
+    const body = await csv.text();
+    expect(body).toContain('Name,Email,Alias,Page link,Short link,Short link clicks,Visible');
+    expect(body).toContain(`Nova <b>Star</b>,${promoter.email},${alias},${server.url}/p/${alias},,,yes`);
+
+    for (const path of ['/admin/pages', '/admin/pages.csv']) expect((await promoter.client.get(path)).status).not.toBe(200);
+    expect((await visitor.get('/admin/pages.csv')).status).toBe(302);
+  });
+
+  test('a name that looks like a formula stays text in the CSV', async () => {
+    await newPromoter(server, admin, { name: '=HYPERLINK("http://evil.test","x")', codes: 'NOVA' });
+    expect(await (await admin.get('/admin/pages.csv')).text()).toContain(`"'=HYPERLINK(""http://evil.test"",""x"")"`);
+  });
+
+  test('a page an admin hides stays hidden until an admin shows it', async () => {
+    expect(location(await admin.post(`/admin/pages/${promoter.id}/visibility`, { hidden: '1' }))).toBe('/admin/pages?ok=page_saved');
+    expect((await visitor.get(`/p/${alias}`)).status).toBe(404);
+    expect(text(await admin.page('/admin/pages'))).toContain('Hidden by an admin');
+    const mine = text(await promoter.client.page('/page'));
+    expect(mine).toContain('The team hid it');
+    expect(mine).not.toContain('Show my page again');
+    expect(location(await promoter.client.post('/page/visibility', { hidden: '0' }))).toBe('/page');
+    expect((await visitor.get(`/p/${alias}`)).status).toBe(404);
+    // Only admins can.
+    expect((await promoter.client.post(`/admin/pages/${promoter.id}/visibility`, { hidden: '0' })).status).not.toBe(302);
+
+    expect(location(await admin.post(`/admin/pages/${promoter.id}/visibility`, { hidden: '0' }))).toBe('/admin/pages?ok=page_saved');
+    expect((await visitor.get(`/p/${alias}`)).status).toBe(200);
+  });
 });

@@ -155,6 +155,11 @@ describeIntegration('short links through Kutt', () => {
     expect(text(page)).toContain('Short link · 0 clicks');
     expect(await promoter.client.page('/')).toContain(`value="https://short.test/${alias}"`);
 
+    const list = await admin.page('/admin/pages');
+    expect(list).toContain(`data-copy-text="https://short.test/${alias}"`);
+    expect(list).toContain(`data-copy-text="${server.url}/p/${alias}"`);
+    expect(await (await admin.get('/admin/pages.csv')).text()).toContain(`${server.url}/p/${alias},https://short.test/${alias},0,yes`);
+
     const html = await new Client(server).page(`/p/${alias}`);
     expect(html).toContain(`data-share-page="https://short.test/${alias}"`);
     expect(html).toContain(`<a class="lp-event" href="https://short.test/warehouse-night-${alias}"`);

@@ -5,7 +5,7 @@ import { config } from './config';
 import type { PageEvent } from './hievents';
 import { eventLink, pageLink } from './links';
 import type { User } from './local-db';
-import { instagramHandle } from './promoter-page';
+import { hiddenByTeam, instagramHandle } from './promoter-page';
 import { LinkField } from './promoter-views';
 import { shareLink } from './short-links';
 import { cssVersion, Flash, Layout } from './views';
@@ -238,11 +238,16 @@ export function MyPagePage(props: {
       ) : hidden ? (
         <div class="card stack-card">
           <h2 class="first">Your page is hidden</h2>
-          <p class="muted">Anyone opening your link sees "This page does not exist". Your event links still work.</p>
-          <form method="post" action="/page/visibility">
-            <input type="hidden" name="hidden" value="0" />
-            <button type="submit">Show my page again</button>
-          </form>
+          <p class="muted">
+            {hiddenByTeam(user) ? 'The team hid it. Ask them if you would like it back. ' : ''}Anyone opening your link sees "This
+            page does not exist". Your event links still work.
+          </p>
+          {!hiddenByTeam(user) && (
+            <form method="post" action="/page/visibility">
+              <input type="hidden" name="hidden" value="0" />
+              <button type="submit">Show my page again</button>
+            </form>
+          )}
         </div>
       ) : (
         <>

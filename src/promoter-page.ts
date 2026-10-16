@@ -9,6 +9,8 @@ import { addColumn, codesFor, db, type User } from './local-db';
  * Promoters can hide it on /page.
  */
 addColumn('users', 'page_hidden_at', 'INTEGER');
+// Who hid it: a page hidden by an admin stays hidden until an admin shows it again.
+addColumn('users', 'page_hidden_by', 'INTEGER');
 
 /** The promoter whose page this is, or null when there is none or it is hidden. */
 export function pageOwner(alias: string): User | null {
@@ -17,10 +19,13 @@ export function pageOwner(alias: string): User | null {
   return user && !user.page_hidden_at ? user : null;
 }
 
-export function setPageHidden(userId: number, hidden: boolean) {
-  db.query('UPDATE users SET page_hidden_at = ? WHERE id = ?').run(hidden ? Math.floor(Date.now() / 1000) : null, userId);
+export function setPageHidden(userId: number, hidden: boolean, by: number = userId) {
+  db.query('UPDATE users SET page_hidden_at = ?, page_hidden_by = ? WHERE id = ?').run(hidden ? Math.floor(Date.now() / 1000) : null, hidden ? by : null, userId);
   cache.delete(userId);
 }
+
+/** True when someone other than the promoter (an admin) hid the page. */
+export const hiddenByTeam = (user: User) => !!user.page_hidden_at && !!user.page_hidden_by && user.page_hidden_by !== user.id;
 
 /** An Instagram handle that can be linked to, without the "@", or null. */
 export function instagramHandle(user: User): string | null {

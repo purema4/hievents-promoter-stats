@@ -90,7 +90,7 @@ import {
 import { describeProblem, isCustomized as isRulesCustomized, rewardRules, saveRewardRules, type LevelColor, type RewardRules, type Track } from './reward-rules';
 import { kuttDomains, kuttEnabled, pageClicks, pageShortLink, prepareShortLinks, saveShortDomain, shortLinkStatus } from './short-links';
 import { MyPagePage, PageMissing, PromoterPublicPage } from './page-views';
-import { pageEvents, pageOwner, setPageHidden } from './promoter-page';
+import { hiddenByTeam, pageEvents, pageOwner, setPageHidden } from './promoter-page';
 import QRCode from 'qrcode';
 import { publicAsset, publicText, serviceWorker } from './static';
 import {
@@ -116,6 +116,7 @@ import {
 import {
   AccountPage,
   AdminPage,
+  AdminPagesPage,
   AdminBrandingPage,
   AdminEmailEditPage,
   AdminEmailsPage,
@@ -195,6 +196,7 @@ const messages: Record<string, string> = {
   reward_rejected: 'Reward request declined. The promoter has been emailed and can request it again.',
   page_hidden: 'Your page is hidden.',
   page_shown: 'Your page is back.',
+  page_saved: 'Saved. The page shows or hides right away.',
 };
 // Own keys only: ?ok=constructor must not pick up something from Object.prototype.
 const flash = (key?: string) => (key && Object.hasOwn(messages, key) ? messages[key] : undefined);
@@ -744,6 +746,8 @@ app.get('/page/qr.png', async (c) => {
 app.post('/page/visibility', async (c) => {
   const user = c.get('user');
   const hidden = (await c.req.parseBody()).hidden === '1';
+  // A page the team hid stays hidden until an admin shows it again.
+  if (hiddenByTeam(user)) return c.redirect('/page');
   setPageHidden(user.id, hidden);
   audit(c, hidden ? 'page.hidden' : 'page.shown', { userId: user.id });
   return c.redirect(`/page?ok=${hidden ? 'page_hidden' : 'page_shown'}`);
@@ -1004,6 +1008,7 @@ app.get('/admin/promoters/:id', async (c) => {
   const promoter = findUser(Number(c.req.param('id')));
   if (!promoter) return c.notFound();
   const data = await promoterData(promoter);
+  if (!promoter.page_hidden_at) await prepareShortLinks(promoter, [], { page: true });
   return c.html(
     <PromoterPage
       user={c.get('user')}
@@ -1162,6 +1167,63 @@ app.get('/admin/promoters/:id/view/events/:eventId', async (c) => {
   const promoter = findUser(Number(c.req.param('id')));
   if (!promoter) return c.notFound();
   return renderEvent(c, promoter, `/admin/promoters/${promoter.id}/view`);
+});
+
+// --- Promoters' public pages, for admins -------------------------------------------------------------
+
+/** Promoters with a page (admins only when they have codes), their short links made or brought up to date. */
+async function pagePromoters() {
+  const promoters = listUsers().filter((u) => !u.is_admin || u.codes.length > 0);
+  // Every page at once: at most 2.5 s in all; the rest show on the next visit.
+  await Promise.all(promoters.filter((u) => !u.page_hidden_at).map((u) => prepareShortLinks(u, [], { page: true })));
+  return promoters;
+}
+
+app.get('/admin/pages', async (c) => {
+  const promoters = await pagePromoters();
+  return c.html(
+    <AdminPagesPage
+      user={c.get('user')}
+      promoters={promoters}
+      clicks={new Map(promoters.map((u) => [u.id, pageClicks(u)]))}
+      kutt={kuttEnabled()}
+      ok={flash(c.req.query('ok'))}
+    />,
+  );
+});
+
+// A spreadsheet cell starting with = + - @ (or a tab/return) could run as a formula: such text gets a leading '.
+const csvCell = (value: string) => {
+  const safe = /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
+  return /[",\r\n]/.test(safe) ? `"${safe.replaceAll('"', '""')}"` : safe;
+};
+
+app.get('/admin/pages.csv', async (c) => {
+  const promoters = await pagePromoters();
+  const rows = [
+    ['Name', 'Email', 'Alias', 'Page link', 'Short link', 'Short link clicks', 'Visible'],
+    ...promoters.map((u) => [
+      u.name,
+      u.email,
+      u.alias ?? '',
+      pageLink(u) ?? '',
+      pageShortLink(u) ?? '',
+      String(pageClicks(u) ?? ''),
+      u.page_hidden_at ? 'no' : 'yes',
+    ]),
+  ];
+  c.header('Content-Type', 'text/csv; charset=utf-8');
+  c.header('Content-Disposition', 'attachment; filename="promoter-pages.csv"');
+  return c.body(`\ufeff${rows.map((r) => r.map(csvCell).join(',')).join('\r\n')}\r\n`);
+});
+
+app.post('/admin/pages/:id/visibility', async (c) => {
+  const promoter = findUser(Number(c.req.param('id')));
+  if (!promoter) return c.notFound();
+  const hidden = (await c.req.parseBody()).hidden === '1';
+  setPageHidden(promoter.id, hidden, c.get('user').id);
+  audit(c, hidden ? 'admin.page_hidden' : 'admin.page_shown', { userId: promoter.id });
+  return c.redirect('/admin/pages?ok=page_saved');
 });
 
 app.get('/admin/dashboard', async (c) => {

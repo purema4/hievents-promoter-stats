@@ -10,6 +10,9 @@ import { alerts, type Prefs } from './alert-prefs';
 import type { Rewards } from './rewards';
 import { describeTrack, LIMITS, levelColors, rewardRules, trackOn, type Level, type LevelColor, type RewardRules, type Track } from './reward-rules';
 import { config } from './config';
+import { pageLink } from './links';
+import { pageShortLink } from './short-links';
+import { hiddenByTeam } from './promoter-page';
 import type { PromoCodeListing } from './hievents';
 import { commissionPercentFor, type User } from './local-db';
 import { formatMoney, formatPercent } from './money';
@@ -356,6 +359,14 @@ details.code-fallback summary { cursor: pointer; color: var(--muted); font-size:
   .my-page-qr { justify-self: center; }
 }
 
+.page-links { display: grid; gap: 6px; }
+.page-link { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.page-link a { overflow-wrap: anywhere; }
+.hidden-page .page-link a { color: var(--muted); text-decoration: line-through; }
+table.page-table td { vertical-align: top; }
+table.page-table a.who { color: inherit; text-decoration: none; gap: 10px; }
+.page-link-kind { font-size: 11px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); min-width: 34px; }
+@media (min-width: 700px) { table.page-table a.who { white-space: nowrap; } }
 /* Promoters' public pages (/p/<alias>): link-in-bio style, built for phones first. */
 body.lp { min-height: 100vh; min-height: 100dvh; background: var(--bg); overflow-x: hidden; -webkit-font-smoothing: antialiased; }
 .lp-backdrop { position: fixed; inset: 0; z-index: 0; overflow: hidden; pointer-events: none; }
@@ -630,6 +641,7 @@ function Sidebar(props: { user: User }) {
           </NavGroup>
           <NavGroup title="Promoters">
             <a href="/admin">All promoters</a>
+            <a href="/admin/pages">Promoter pages</a>
           </NavGroup>
           <NavGroup title="Settings">
             <a href="/admin/branding">Branding</a>
@@ -1069,6 +1081,98 @@ export function AdminPage(props: {
   );
 }
 
+/** A promoter's public page: the full link and the short link, each one click to copy. */
+function PageLinks(props: { promoter: User; clicks?: number | null }) {
+  const p = props.promoter;
+  const full = pageLink(p);
+  if (!full) return <span class="muted">No alias yet</span>;
+  const short = pageShortLink(p);
+  return (
+    <div class={`page-links${p.page_hidden_at ? ' hidden-page' : ''}`}>
+      <PageLink href={full} kind={short ? 'Full' : undefined} />
+      {short && (
+        <PageLink href={short} kind="Kutt">
+          {props.clicks != null && <span class="muted">{props.clicks === 1 ? '1 click' : `${props.clicks} clicks`}</span>}
+        </PageLink>
+      )}
+      {p.page_hidden_at ? <span class="muted">Hidden by {hiddenByTeam(p) ? 'an admin' : 'the promoter'}</span> : null}
+    </div>
+  );
+}
+
+function PageLink(props: { href: string; kind?: string; children?: Child }) {
+  return (
+    <span class="page-link">
+      {props.kind && <span class="page-link-kind">{props.kind}</span>}
+      <a href={props.href} target="_blank" rel="noopener">
+        {props.href.replace(/^https?:\/\//, '')}
+      </a>
+      <button type="button" class="secondary small" data-copy-text={props.href}>
+        Copy
+      </button>
+      {props.children}
+    </span>
+  );
+}
+
+export function AdminPagesPage(props: { user: User; promoters: User[]; clicks: Map<number, number | null>; kutt: boolean; ok?: string }) {
+  return (
+    <Layout title="Promoter pages" user={props.user}>
+      <h1>Promoter pages</h1>
+      <p class="muted">
+        Each promoter's public page lists their upcoming events, with their code in each link.{' '}
+        {props.kutt ? 'The second link is the Kutt short link.' : 'Short links show here once Kutt is set up (KUTT_URL and KUTT_API_KEY).'}
+      </p>
+      <Flash ok={props.ok} />
+      <p>
+        <a class="button secondary" href="/admin/pages.csv" download="promoter-pages.csv">
+          Download as CSV
+        </a>
+      </p>
+      {props.promoters.length === 0 ? (
+        <div class="card muted">No promoters yet.</div>
+      ) : (
+        <div class="card table-wrap">
+          <table class="page-table">
+            <thead>
+              <tr>
+                <th>Promoter</th>
+                <th>Links</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {props.promoters.map((p) => (
+                <tr>
+                  <td>
+                    <a class="who" href={`/admin/promoters/${p.id}`}>
+                      <Avatar user={p} size="small" />
+                      <span>{p.name}</span>
+                    </a>
+                  </td>
+                  <td>
+                    <PageLinks promoter={p} clicks={props.clicks.get(p.id)} />
+                  </td>
+                  <td>
+                    {p.alias && (
+                      <form method="post" action={`/admin/pages/${p.id}/visibility`}>
+                        <input type="hidden" name="hidden" value={p.page_hidden_at ? '0' : '1'} />
+                        <button type="submit" class="link">
+                          {p.page_hidden_at ? 'Show' : 'Hide'}
+                        </button>
+                      </form>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Layout>
+  );
+}
+
 export function PromoterPage(props: {
   user: User;
   promoter: User;
@@ -1179,6 +1283,10 @@ export function PromoterPage(props: {
           <dd>{p.city || '—'}</dd>
           <dt>Instagram</dt>
           <dd>{p.instagram || '—'}</dd>
+          <dt>Public page</dt>
+          <dd>
+            <PageLinks promoter={p} />
+          </dd>
           <dt>Payout</dt>
           <dd>
             {p.payout_method ?? '—'}
