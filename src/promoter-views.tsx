@@ -844,20 +844,22 @@ export function PayoutsPage(props: {
                       name="amount"
                       inputmode="decimal"
                       value={(
-                        (props.user.payout_method === config.cashMethod ? cashAvailable(b) : b.available) / 100
+                        (config.cashOffered && props.user.payout_method === config.cashMethod ? cashAvailable(b) : b.available) / 100
                       ).toFixed(2)}
                       data-available={(b.available / 100).toFixed(2)}
                       data-cash-available={(cashAvailable(b) / 100).toFixed(2)}
                       required
                     />
                   </label>
-                  <p class="muted">
-                    {cashAvailable(b) > 0
-                      ? `Cash is paid in steps of ${formatMoney(config.cashStepCents, b.currency)}: up to ${formatMoney(cashAvailable(b), b.currency)} in cash.`
-                      : `Cash needs at least ${formatMoney(config.cashStepCents, b.currency)} available.`}
-                  </p>
+                  {config.cashOffered && (
+                    <p class="muted">
+                      {cashAvailable(b) > 0
+                        ? `Cash is paid in steps of ${formatMoney(config.cashStepCents, b.currency)}: up to ${formatMoney(cashAvailable(b), b.currency)} in cash.`
+                        : `Cash needs at least ${formatMoney(config.cashStepCents, b.currency)} available.`}
+                    </p>
+                  )}
                   <label>
-                    Send to (your e-Transfer email; not needed for cash)
+                    Send to (your e-Transfer email{config.cashOffered ? '; not needed for cash' : ''})
                     <input name="details" value={props.user.payout_details ?? props.user.email} maxlength={200} />
                   </label>
                   <label>

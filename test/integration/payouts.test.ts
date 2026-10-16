@@ -13,7 +13,8 @@ describeIntegration('payouts, rewards and changes by hand', () => {
   let admin: Client;
 
   beforeAll(async () => {
-    server = await startServer();
+    // Cash is off by default; these tests turn it on.
+    server = await startServer({ PAYOUT_METHODS: 'Interac e-Transfer,Cash' });
     admin = await signInAdmin(server);
   }, 60_000);
   afterAll(async () => {

@@ -150,7 +150,7 @@ Milestones come from live Hi.Events sales: every `MILESTONE_CHECK_MINUTES` (defa
 
 ## Account
 
-Promoters fill in their first and last name, phone, city, Instagram and preferred payout method and email (used to prefill payout requests), and choose a theme: same as the device, light or dark. Admins see these on the promoter's page. Payout methods offered are set with `PAYOUT_METHODS` (default `Interac e-Transfer,Cash`). Cash is paid in whole steps of `CASH_STEP` dollars (default 50): $50, $100 and so on, so cash needs at least $50 available.
+Promoters fill in their first and last name, phone, city, Instagram and preferred payout method and email (used to prefill payout requests), and choose a theme: same as the device, light or dark. Admins see these on the promoter's page. Payout methods offered are set with `PAYOUT_METHODS` (default `Interac e-Transfer`; set `Interac e-Transfer,Cash` to offer cash too). Cash, when offered, is paid in whole steps of `CASH_STEP` dollars (default 50): $50, $100 and so on, so cash needs at least $50 available.
 
 ## Branding
 

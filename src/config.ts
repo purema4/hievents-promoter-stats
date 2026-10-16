@@ -52,14 +52,17 @@ export const config = {
   // REWARD_TICKET_EVERY tickets; 1 merch item every MERCH_EVERY tickets sold in total.
   rewardTicketEvery: Math.max(1, Number(process.env.REWARD_TICKET_EVERY ?? 5)),
   merchEvery: Math.max(1, Number(process.env.MERCH_EVERY ?? 50)),
-  // Choices in the payout request form, comma separated.
-  payoutMethods: (process.env.PAYOUT_METHODS || 'Interac e-Transfer,Cash')
+  // Choices in the payout request form, comma separated. Add Cash (CASH_METHOD) to offer cash payouts.
+  payoutMethods: (process.env.PAYOUT_METHODS || 'Interac e-Transfer')
     .split(',')
     .map((m) => m.trim())
     .filter(Boolean),
   // Cash is handed over in round amounts: payouts by this method must be a multiple of CASH_STEP dollars.
   cashMethod: process.env.CASH_METHOD || 'Cash',
   cashStepCents: Math.max(1, Math.round(Number(process.env.CASH_STEP ?? 50) * 100)),
+  get cashOffered() {
+    return this.payoutMethods.includes(this.cashMethod);
+  },
   loginLinkMinutes: Number(process.env.LOGIN_LINK_MINUTES ?? 30),
   // Invites sent by an admin stay valid longer than links a promoter requests themselves.
   inviteLinkDays: Number(process.env.INVITE_LINK_DAYS ?? 7),
