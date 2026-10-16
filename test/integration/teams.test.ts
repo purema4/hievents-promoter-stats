@@ -66,6 +66,10 @@ describeIntegration('teams', () => {
   });
 
   test("the team lead sees their team's sales, and only theirs", async () => {
+    // All time by default, like dashboards.
+    const plain = await lead.client.page('/team');
+    expect(plain).toContain('href="/team?range=all" aria-current="true"');
+    expect(stats(plain).get('Tickets sold by the team')).toBe('11');
     const html = await lead.client.page('/team?range=all');
     expect(stats(html).get('Tickets sold by the team')).toBe('11');
     expect(stats(html).get('Promoters on the team')).toBe('2');

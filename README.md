@@ -36,7 +36,7 @@ To see every page as a promoter does (payouts, their page, account, notification
 
 An admin can make any promoter a **team lead** and put other promoters on their team, on **Teams** in the menu or in the **Team** section of a promoter's page. A team lead can have many promoters; a promoter has at most one team lead. Only admins make team leads and change teams.
 
-- A team lead keeps their own dashboard, payouts and page, and gets **My team** in the menu: their team commission, the team's tickets and full-price sales (theirs included) for 7 / 30 / 90 days or all time, a tickets-per-day chart, and everyone on the team ranked. Each promoter opens to their dashboard and event pages, as an admin sees them.
+- A team lead keeps their own dashboard, payouts and page, and gets **My team** in the menu: their team commission, the team's tickets and full-price sales (theirs included) for all time (or 7 / 30 / 90 days), a tickets-per-day chart, and everyone on the team ranked. Each promoter opens to their dashboard and event pages, as an admin sees them.
 - They only see. They cannot request payouts or rewards for their promoters, change anything about them, or see any other promoter, payout details or admin page.
 - Promoters get a notification when they join a team, naming the team lead who can now see their sales. A new team lead is told too.
 - Promoters on a team get **My team** too: the whole team's tickets and full-price sales (their team lead's and their own included, each tagged), the chart and the ranking, for 7 / 30 / 90 days or all time. They see no one's commission, not the team commission, and no one else's dashboard.

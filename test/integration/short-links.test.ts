@@ -332,12 +332,13 @@ describeIntegration('short links when Kutt misbehaves', () => {
     expect(text(await admin.page('/admin/links'))).toContain('Kutt last failed');
   });
 
+  // Setting up a server takes a while on a busy machine: only the page itself is timed.
   test('a slow Kutt does not hold the page up', async () => {
     const { promoter } = await setup('slow');
     const started = Date.now();
     isLongLink(sharedLink(await promoter.client.page('/events/1')));
     expect(Date.now() - started).toBeLessThan(5000);
-  });
+  }, 20_000);
 
   test('a short link that is not a web address is never shown', async () => {
     const { promoter, admin } = await setup('bad-link');

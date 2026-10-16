@@ -1383,7 +1383,8 @@ app.post('/admin/pages/:id/visibility', async (c) => {
 
 /** A team's ranking for the period: the team lead and their promoters, each with their own rate. */
 async function renderTeam(c: Context<Env>, lead: User, basePath: string, memberHref: ((u: User) => string) | null) {
-  const range = parseRange(c.req.query('range'), '30');
+  // All time unless a period is picked, so the totals match everyone's dashboard.
+  const range = parseRange(c.req.query('range'), 'all');
   const sortParam = c.req.query('sort');
   // Promoters looking at their own team see no commission, so cannot sort by it either.
   const sort: Sort = sortParam === 'sales' || (sortParam === 'commission' && memberHref) ? sortParam : 'tickets';
