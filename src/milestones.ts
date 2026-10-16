@@ -1,5 +1,6 @@
 import { hasAdjustments } from './adjustments';
-import { codesFor, commissionPercentFor, db, listUsers, type User } from './local-db';
+import { codesFor, db, listUsers, type User } from './local-db';
+import { rateFor } from './commission';
 import { statsForCodes } from './hievents';
 import { notify } from './notifications';
 import { alertAdmins } from './alert-prefs';
@@ -109,7 +110,7 @@ export async function checkAllMilestones() {
     const codes = codesFor(promoter.id);
     if (codes.length === 0 && !hasAdjustments(promoter.id)) continue;
     try {
-      const percent = commissionPercentFor(promoter);
+      const percent = rateFor(promoter);
       const rows = await statsForCodes(codes);
       checkMilestones(promoter, rewardsFor(promoter.id, summarizeEvents(rows, percent)));
     } catch (err) {

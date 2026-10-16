@@ -6,6 +6,8 @@ const balanceRow = (html: string, label: string) =>
 const available = (html: string) => balanceRow(html, 'Available to request');
 const flashError = (html: string) => html.match(/<div class="flash error">([^<]*)<\/div>/)?.[1];
 
+const money = (cents: number) => `$${(cents / 100).toFixed(2)}`;
+
 describeIntegration('payouts, rewards and changes by hand', () => {
   let server: Server;
   let admin: Client;
@@ -56,12 +58,33 @@ describeIntegration('payouts, rewards and changes by hand', () => {
 
     test('sales outside Hi.Events count for tickets, levels and the balance', async () => {
       const p = await newPromoter(server, admin);
-      const res = await admin.post(`/admin/promoters/${p.id}/adjust`, { kind: 'outside_sale', quantity: '15', amount: '30', label: 'Door sales' });
+      // $300 in ticket sales: their 10% is $30.
+      const res = await admin.post(`/admin/promoters/${p.id}/adjust`, { kind: 'outside_sale', quantity: '15', sales: '300', label: 'Door sales' });
       expect(location(res)).toContain('ok=adjusted');
       const html = await p.client.page('/');
       expect(stats(html).get('Tickets sold, 6 orders · incl. 15 outside Hi.Events · 1 awaiting payment')).toBe('25');
       expect(html).toContain('level-c-silver">Silver'); // 25 tickets
       expect(available(await p.client.page('/payouts'))).toBe('$58.50');
+      const admin_ = await admin.page(`/admin/promoters/${p.id}`);
+      expect(text(admin_)).toContain('+15 tickets sold ($300.00 in sales)');
+      expect(text(admin_)).toContain('Door sales (commission)');
+
+      // Their own rate applies.
+      const q = await newPromoter(server, admin, { commission: '15' });
+      await admin.post(`/admin/promoters/${q.id}/adjust`, { kind: 'outside_sale', quantity: '2', sales: '100', label: 'Bar' });
+      expect(available(await q.client.page('/payouts'))).toBe(money(Math.round(28_50 * 1.5) + 15_00));
+
+      // Tickets only, no sales: no commission.
+      await admin.post(`/admin/promoters/${p.id}/adjust`, { kind: 'outside_sale', quantity: '1', sales: '', label: 'Guest list' });
+      expect(available(await p.client.page('/payouts'))).toBe('$58.50');
+      expect(location(await admin.post(`/admin/promoters/${p.id}/adjust`, { kind: 'outside_sale', quantity: '1', sales: 'lots', label: 'x' }))).toBe(
+        `/admin/promoters/${p.id}?error=adjust_amount#adjust`,
+      );
+
+      // Undoing the sale takes its commission back too.
+      const id = admin_.match(/adjust\/(\d+)\/undo/g)!.map((m) => Number(m.match(/\d+/)![0])).sort((a, b) => a - b)[0]!;
+      expect(location(await admin.post(`/admin/promoters/${p.id}/adjust/${id}/undo`))).toContain('ok=undone');
+      expect(available(await p.client.page('/payouts'))).toBe('$28.50');
     });
 
     test('invalid changes are refused with a reason', async () => {

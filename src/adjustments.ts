@@ -1,5 +1,5 @@
 import { config } from './config';
-import { db, type User } from './local-db';
+import { addColumn, db, type User } from './local-db';
 
 /*
  * Changes an admin makes by hand: money added or removed, sales from events outside Hi.Events,
@@ -21,6 +21,14 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS adjustments_user ON adjustments (user_id, kind);
 `);
+
+// The commission that came with a sale outside Hi.Events points at it, so undoing the sale takes it back.
+addColumn('adjustments', 'parent_id', 'INTEGER');
+db.query(
+  `UPDATE adjustments AS m SET parent_id = m.id - 1
+   WHERE m.kind = 'money' AND m.parent_id IS NULL AND EXISTS (
+     SELECT 1 FROM adjustments t WHERE t.id = m.id - 1 AND t.user_id = m.user_id AND t.kind = 'tickets_sold' AND m.label = t.label || ' (commission)')`,
+).run();
 
 // Sales outside Hi.Events entered before their full-price amount was kept: worked out from the
 // commission entered with them (the next entry) and the promoter's rate. Done once (currency is set).
@@ -59,16 +67,25 @@ export type Adjustment = {
   label: string;
   created_by: number | null;
   created_at: string;
+  parent_id: number | null;
 };
 
 export function addAdjustment(
   admin: User,
   userId: number,
-  entry: { kind: AdjustmentKind; amountCents?: number; quantity?: number; currency?: string; eventId?: number | null; label: string },
+  entry: {
+    kind: AdjustmentKind;
+    amountCents?: number;
+    quantity?: number;
+    currency?: string;
+    eventId?: number | null;
+    label: string;
+    parentId?: number;
+  },
 ): number {
   return db
-    .query<{ id: number }, [number, string, number, number, string | null, number | null, string, number]>(
-      'INSERT INTO adjustments (user_id, kind, amount_cents, quantity, currency, event_id, label, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id',
+    .query<{ id: number }, [number, string, number, number, string | null, number | null, string, number, number | null]>(
+      'INSERT INTO adjustments (user_id, kind, amount_cents, quantity, currency, event_id, label, created_by, parent_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id',
     )
     .get(
       userId,
@@ -79,6 +96,7 @@ export function addAdjustment(
       entry.eventId ?? null,
       entry.label.trim().slice(0, 200),
       admin.id,
+      entry.parentId ?? null,
     )!.id;
 }
 
@@ -94,8 +112,9 @@ export function findAdjustment(id: number): Adjustment | null {
   return db.query<Adjustment, [number]>('SELECT * FROM adjustments WHERE id = ?').get(id);
 }
 
+/** Removes an entry, and the commission that came with it when it is a sale. */
 export function removeAdjustment(id: number) {
-  db.query('DELETE FROM adjustments WHERE id = ?').run(id);
+  db.query('DELETE FROM adjustments WHERE id = ? OR parent_id = ?').run(id, id);
 }
 
 /** Money added or removed by admins, per currency, in cents. */

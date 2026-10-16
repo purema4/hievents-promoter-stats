@@ -17,7 +17,7 @@ A small standalone site where promoters sign in and see how many tickets were so
 | Orders | Completed orders that used the code. |
 | Ticket sales at full price | Each item's price before the promo code's discount (`order_items.price_before_discount`, or `price` when no discount applied) × quantity, without taxes and fees. Partial refunds are taken off proportionally, the way Hi.Events adjusts its own stats. A $10 ticket bought with a 10% code counts as $10. |
 | Paid by customers | The order total after promo codes and discounts (`total_before_additions`), minus refunds the same way. Shown on event pages for reference. |
-| Commission | Full-price sales × the promoter's rate. `COMMISSION_PERCENT` (default 10) applies unless a promoter has their own rate set in the admin. |
+| Commission | Full-price sales × the promoter's rate. `COMMISSION_PERCENT` (default 10) applies unless a promoter has their own rate set in the admin. On **Promoters → Commissions**, admins can also choose, per promoter and event, another percentage or a flat amount per ticket sold (tickets that are paid and not cancelled). |
 | Tickets sold per day | Completed orders by the day they were placed, in `APP_TIMEZONE` (default `America/Toronto`). Periods longer than 120 days switch to weekly bars. |
 
 Add-on products (non-ticket items) are not counted as tickets, but they are included in sales. Pending orders earn commission only once paid. A 100%-off code still earns commission on the full price; give comp tickets another way if that is not wanted.
@@ -39,8 +39,9 @@ An admin can make any promoter a **team lead** and put other promoters on their 
 - A team lead keeps their own dashboard, payouts and page, and gets **My team** in the menu: their team commission, the team's tickets and full-price sales (theirs included) for 7 / 30 / 90 days or all time, a tickets-per-day chart, and everyone on the team ranked. Each promoter opens to their dashboard and event pages, as an admin sees them.
 - They only see. They cannot request payouts or rewards for their promoters, change anything about them, or see any other promoter, payout details or admin page.
 - Promoters get a notification when they join a team, naming the team lead who can now see their sales. A new team lead is told too.
+- Promoters on a team get **My team** too: the whole team's tickets and full-price sales (their team lead's and their own included, each tagged), the chart and the ranking, for 7 / 30 / 90 days or all time. They see no one's commission, not the team commission, and no one else's dashboard.
 - One level only: a team lead is on no one's team (a promoter who becomes one leaves their team), and admins are on no team. When a team lead steps down, is deleted or becomes an admin, their promoters are left without a team.
-- **Team commission:** each team lead earns their own commission on their own sales, plus a team commission: a % (set per team lead by admins on **Teams** or their page; none until set) of the full-price sales of the promoters on their team, never of their own. It counts a promoter's sales from the day they join the team through the day they leave; a promoter who moves joins the new team the next day, so no sale counts twice and nothing already earned is taken back, even when a promoter leaves, is deleted or the team lead steps down. Changing the rate applies to all the team's sales so far, like promoters' own rates. Sales outside Hi.Events entered by an admin count too, by the day they were entered: their full-price amount is the **Sales at full price** given with them, or, when left empty, the commission entered divided by the promoter's rate (entries made before this field existed were worked out that way once). Money added by hand (bonuses, corrections) does not count. It is part of the team lead's balance and requested like any payout.
+- **Team commission:** each team lead earns their own commission on their own sales, plus a team commission: a % (set per team lead by admins on **Teams** or their page; none until set) of the full-price sales of the promoters on their team, never of their own. It counts a promoter's sales from the day they join the team through the day they leave; a promoter who moves joins the new team the next day, so no sale counts twice and nothing already earned is taken back, even when a promoter leaves, is deleted or the team lead steps down. Changing the rate applies to all the team's sales so far, like promoters' own rates. Sales outside Hi.Events entered by an admin count too (their sales total), by the day they were entered; entries made before sales totals were kept are worked out once from their commission and the promoter's rate. Money added by hand (bonuses, corrections) does not count. It is part of the team lead's balance and requested like any payout.
 - Team pages and totals include the team lead's own sales (tagged **Team lead**). Admins see every team on **Dashboard** (**Teams**: promoters, tickets, sales, commission and team commission for the period) and open each one with **Team sales →** on **Teams**. The dashboard's commission and owed totals include team commissions.
 
 ## Levels and rewards
@@ -81,6 +82,10 @@ With `KUTT_URL` and `KUTT_API_KEY` set, promoters share short links from a [Kutt
 - Event pages show the clicks on each link, read from Kutt at most every `KUTT_CLICKS_MINUTES` (10 by default).
 - Pages wait at most 2.5 seconds for Kutt. While it is slow, down or refusing the key, promoters see the long links, Kutt is left alone for 5 minutes, and **Event links** shows the last error.
 
+## Commission per event
+
+**Promoters → Commissions** lists every event that is not over (drafts included) with the promoters who have one of its codes. For each promoter and event, choose **Usual rate** (their own %), **% of sales** (another percentage) or **per ticket** (a flat amount for each ticket sold). Like the usual rate, a change applies to all their sales for that event, earlier ones too, and stays when the event is over. Promoters see it on the event page ("Commission ($3.00 per ticket)") and their dashboard says "10%, other rates on some events". Their balance, payouts, charts and the admin dashboard all use it. A team lead's team commission stays a percentage of their promoters' sales.
+
 ## Changes by hand
 
 For events outside Hi.Events, bonuses and corrections, an admin can change any promoter's numbers on their page (**Adjust by hand**):
@@ -88,7 +93,7 @@ For events outside Hi.Events, bonuses and corrections, an admin can change any p
 | Change | Effect |
 | --- | --- |
 | Money (+ or −) | Added to their balance, so it can be requested as a payout. |
-| Sales outside Hi.Events | Tickets that count for their levels, merch and ranking, plus optional commission for their balance, and their sales at full price (optional; worked out from the commission and their rate when empty), which count for their team lead's team commission. |
+| Sales outside Hi.Events | Tickets that count for their levels, merch and ranking, and the sales total: the promoter gets their usual commission % on it, added to their balance, and it counts for their team lead's team commission. Undoing the sale also takes back its commission. Leave the total empty for tickets only. |
 | Free tickets (+ or −) | For one of their upcoming events, on top of what their sales earned. |
 | Merch (+ or −) | Items they can request, on top of what their sales unlocked. |
 

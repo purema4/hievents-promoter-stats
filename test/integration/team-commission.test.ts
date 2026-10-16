@@ -104,16 +104,14 @@ describeIntegration('team commission', () => {
   test('sales outside Hi.Events entered after they joined count too', async () => {
     const before = Math.round((anaSales + benSales) * 0.05);
     const adjust = (body: Record<string, string>) => admin.post(`/admin/promoters/${ana.id}/adjust`, { kind: 'outside_sale', label: 'Door sales', ...body });
-    // $20 commission at Ana's 10%: $200 in sales. With the sales given: those.
-    expect(location(await adjust({ quantity: '4', amount: '20' }))).toBe(`/admin/promoters/${ana.id}?ok=adjusted#adjust`);
-    expect(location(await adjust({ quantity: '2', amount: '', sales: '100' }))).toBe(`/admin/promoters/${ana.id}?ok=adjusted#adjust`);
-    expect(location(await adjust({ quantity: '2', amount: '5', sales: 'lots' }))).toBe(`/admin/promoters/${ana.id}?error=adjust_amount#adjust`);
+    expect(location(await adjust({ quantity: '4', sales: '200' }))).toBe(`/admin/promoters/${ana.id}?ok=adjusted#adjust`);
+    expect(location(await adjust({ quantity: '2', sales: '100' }))).toBe(`/admin/promoters/${ana.id}?ok=adjusted#adjust`);
     const base = anaSales + benSales + 300_00;
     const html = await lead.client.page('/team?range=all');
     expect(stats(html).get(`Team commission (5% of ${money(base)})`)).toBe(money(before + 15_00));
     expect(text(await admin.page(`/admin/promoters/${ana.id}`))).toContain('+4 tickets sold ($200.00 in sales)');
-    // Ana's own balance gets the commission only.
-    expect(stats(await ana.client.page('/')).get('Commission earned (10%) · incl. +$20.00 from the team')).toBe(money(Math.round(anaSales * 0.1) + 20_00));
+    // Ana gets her own 10% of them.
+    expect(stats(await ana.client.page('/')).get('Commission earned (10%) · incl. +$30.00 from the team')).toBe(money(Math.round(anaSales * 0.1) + 30_00));
   });
 
   test('what was earned stays when a promoter leaves, moves or is deleted', async () => {

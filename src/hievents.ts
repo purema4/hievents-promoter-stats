@@ -133,7 +133,8 @@ export async function statsForCodes(codes: string[]): Promise<CodeStats[]> {
   `;
 }
 
-export type DailySales = { day: string; currency: string; tickets: number; full_price: string };
+// One row per day and event (an event can have its own commission rate).
+export type DailySales = { day: string; currency: string; tickets: number; full_price: string; event_id?: number };
 
 /** Completed sales per calendar day (in APP_TIMEZONE), by the day the order was placed. */
 export async function dailyForCodes(codes: string[], eventId?: number): Promise<DailySales[]> {
@@ -143,6 +144,7 @@ export async function dailyForCodes(codes: string[], eventId?: number): Promise<
     SELECT
       to_char((o.created_at AT TIME ZONE 'UTC') AT TIME ZONE ${config.timezone}, 'YYYY-MM-DD') AS day,
       e.currency,
+      e.id::int AS event_id,
       coalesce(sum(t.n), 0)::int AS tickets,
       round(coalesce(sum(v.full_price * o.kept), 0), 2)::text AS full_price
     FROM code_orders o
@@ -151,8 +153,8 @@ export async function dailyForCodes(codes: string[], eventId?: number): Promise<
     LEFT JOIN order_values v ON v.order_id = o.id
     LEFT JOIN order_tickets t ON t.order_id = o.id
     WHERE o.status = 'COMPLETED'
-    GROUP BY 1, 2
-    ORDER BY 1
+    GROUP BY 1, 2, 3
+    ORDER BY 1, 3
   `;
 }
 
@@ -210,6 +212,27 @@ async function canReadStatus(): Promise<boolean> {
 }
 
 /** The upcoming events a promoter's public page lists: not ended, not deleted, and live when that is known. No sales figures. */
+export type EventCode = { event_id: number; title: string; start: Date | null; timezone: string | null; currency: string; code: string };
+
+/** Every promo code (lower-cased) on events that are not over, drafts included, for Promoters → Commissions. */
+export async function currentEventCodes(): Promise<EventCode[]> {
+  return sql<EventCode[]>`
+    SELECT DISTINCT
+      e.id::int AS event_id,
+      e.title,
+      coalesce(occ.first_start, e.start_date) AT TIME ZONE 'UTC' AS "start",
+      e.timezone,
+      e.currency,
+      lower(pc.code) AS code
+    FROM promo_codes pc
+    JOIN events e ON e.id = pc.event_id AND e.deleted_at IS NULL
+    ${eventDates()}
+    WHERE pc.deleted_at IS NULL ${accountFilter()}
+      AND (coalesce(occ.last_end, occ.first_start, e.start_date) IS NULL
+           OR coalesce(occ.last_end, occ.first_start, e.start_date) >= (now() AT TIME ZONE 'UTC'))
+  `.then((rows) => rows.sort((a, b) => (a.start?.getTime() ?? Infinity) - (b.start?.getTime() ?? Infinity) || a.event_id - b.event_id));
+}
+
 export async function upcomingEventsForCodes(codes: string[]): Promise<PageEvent[]> {
   if (codes.length === 0) return [];
   const live = (await canReadStatus()) ? sql`AND e.status = 'LIVE'` : sql``;

@@ -1,8 +1,9 @@
 import { rangeBounds, today, type Range } from './chart';
 import { dailyForCodes, statsForCodes, type DailySales } from './hievents';
 import { adjustmentsByDay, hasAdjustments, moneyAdjustments, moneyAdjustmentsBetween, outsideTickets } from './adjustments';
-import { codesFor, commissionPercentFor, listUsers, type User } from './local-db';
-import { commissionCents, toCents, totalsByCurrency } from './money';
+import { codesFor, listUsers, type User } from './local-db';
+import { commissionOn, toCents, totalsByCurrency } from './money';
+import { rateFor } from './commission';
 import { balances, countPendingPayouts } from './payouts';
 import { countPendingRewards, levelFor, type Level } from './rewards';
 import { hadTeam, teamCommission } from './teams';
@@ -38,7 +39,7 @@ export async function leaderboard(range: Range, sort: Sort, users: User[] = list
     const codes = codesFor(user.id);
     // Promoters with only sales entered by hand (events outside Hi.Events) are ranked too.
     if (codes.length === 0 && !hasAdjustments(user.id)) continue;
-    const percent = commissionPercentFor(user);
+    const percent = rateFor(user);
     const [rows, days] = await Promise.all([statsForCodes(codes), dailyForCodes(codes)]);
     const totals = totalsByCurrency(rows, percent);
     currency = totals[0]?.currency ?? currency;
@@ -50,7 +51,7 @@ export async function leaderboard(range: Range, sort: Sort, users: User[] = list
     let fullPrice = 0;
     let commission = 0;
     for (const d of inRange) {
-      const c = commissionCents(d.full_price, percent);
+      const c = commissionOn(percent, d.event_id, d.full_price, d.tickets);
       tickets += d.tickets;
       fullPrice += toCents(d.full_price);
       commission += c;

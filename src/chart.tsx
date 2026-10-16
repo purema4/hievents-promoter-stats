@@ -1,6 +1,6 @@
 import { config } from './config';
 import type { DailySales } from './hievents';
-import { commissionCents, formatMoney } from './money';
+import { commissionOn, formatMoney, type Rate } from './money';
 
 // The CSP allows no inline styles, so bar heights and label positions use these precomputed classes.
 export const chartCss = `
@@ -58,7 +58,7 @@ export function today(): string {
 }
 
 /** Fills in empty days and switches to weekly bars when a period is too long to show day by day. */
-function buildBuckets(daily: DailySales[], percent: number, from: string, to: string): Bucket[] {
+function buildBuckets(daily: DailySales[], rate: Rate | number, from: string, to: string): Bucket[] {
   const spanDays = Math.round((parseDay(to).getTime() - parseDay(from).getTime()) / dayMs) + 1;
   const step = spanDays > 120 ? 7 : 1;
   const buckets: Bucket[] = [];
@@ -70,7 +70,7 @@ function buildBuckets(daily: DailySales[], percent: number, from: string, to: st
     const b = buckets.find((x) => d.day >= x.start && d.day <= x.end);
     if (!b) continue;
     b.tickets += d.tickets;
-    b.commission.set(d.currency, (b.commission.get(d.currency) ?? 0) + commissionCents(d.full_price, percent));
+    b.commission.set(d.currency, (b.commission.get(d.currency) ?? 0) + commissionOn(rate, d.event_id, d.full_price, d.tickets));
   }
   return buckets;
 }
@@ -117,11 +117,12 @@ export function RangeLinks(props: { current: Range; basePath: string }) {
 export function SalesChart(props: {
   title: string;
   daily: DailySales[];
-  percent: number;
+  percent: Rate | number;
   range: Range;
   basePath: string;
   currency: string;
   end?: string;
+  ticketsOnly?: boolean; // no money shown (a promoter looking at their team)
 }) {
   const { from, to } = rangeBounds(props.range, props.daily, props.end);
   const buckets = buildBuckets(props.daily, props.percent, from, to);
@@ -168,7 +169,8 @@ export function SalesChart(props: {
                     <strong>
                       {b.tickets} {b.tickets === 1 ? 'ticket' : 'tickets'}
                     </strong>
-                    {bucketLabel(b)} · {money(b.commission, props.currency)} commission
+                    {bucketLabel(b)}
+                    {!props.ticketsOnly && ` · ${money(b.commission, props.currency)} commission`}
                   </div>
                 </div>
               ))}
@@ -187,7 +189,7 @@ export function SalesChart(props: {
                   <tr>
                     <th>{weekly ? 'Week' : 'Day'}</th>
                     <th class="num">Tickets</th>
-                    <th class="num">Commission</th>
+                    {!props.ticketsOnly && <th class="num">Commission</th>}
                   </tr>
                 </thead>
                 <tbody>
@@ -197,7 +199,7 @@ export function SalesChart(props: {
                       <tr>
                         <td>{bucketLabel(b)}</td>
                         <td class="num">{b.tickets}</td>
-                        <td class="num">{money(b.commission, props.currency)}</td>
+                        {!props.ticketsOnly && <td class="num">{money(b.commission, props.currency)}</td>}
                       </tr>
                     ))}
                 </tbody>

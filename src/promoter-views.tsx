@@ -2,7 +2,7 @@ import { parseRange, SalesChart, type Range } from './chart';
 import { config } from './config';
 import type { CodeStats, DailySales } from './hievents';
 import type { User } from './local-db';
-import { commissionCents, formatMoney, formatPercent, toCents, totalsByCurrency, type Totals } from './money';
+import { commissionOn, describeEventRate, describeRate, formatMoney, formatPercent, toCents, totalsByCurrency, type Rate, type Totals } from './money';
 import { cashAvailable, type Balance, type PayoutRequest } from './payouts';
 import { describeReward, levelFor, type RewardRequest, type Rewards } from './rewards';
 import { describeTrack, rewardRules, trackOn } from './reward-rules';
@@ -31,7 +31,7 @@ export type EventSummary = {
 };
 
 // The stats query returns one row per code and event; pages work per event.
-export function summarizeEvents(rows: CodeStats[], percent: number): EventSummary[] {
+export function summarizeEvents(rows: CodeStats[], rate: Rate | number): EventSummary[] {
   const events = new Map<number, EventSummary>();
   for (const r of rows) {
     const e = events.get(r.event_id) ?? {
@@ -59,7 +59,7 @@ export function summarizeEvents(rows: CodeStats[], percent: number): EventSummar
     e.orders += r.orders;
     e.fullPrice += toCents(r.full_price);
     e.paid += toCents(r.paid);
-    e.commission += commissionCents(r.full_price, percent);
+    e.commission += commissionOn(rate, r.event_id, r.full_price, r.tickets_sold);
     events.set(r.event_id, e);
   }
   // Chronological, oldest first; pages re-sort as they need.
@@ -79,8 +79,9 @@ function plural(n: number, one: string, many = `${one}s`): string {
 function Footnote() {
   return (
     <p class="muted">
-      Commission is based on the full ticket price, before your promo code's discount, without taxes and fees, minus
-      refunds. Tickets awaiting payment count once they are paid. Refunded and cancelled tickets are not counted.
+      Commission is a percentage of the full ticket price, before your promo code's discount, without taxes and fees,
+      minus refunds, or a set amount per ticket on events where the team chose one. Tickets awaiting payment count once
+      they are paid. Refunded and cancelled tickets are not counted.
     </p>
   );
 }
@@ -89,7 +90,8 @@ function SummaryCards(props: {
   totals: Totals[];
   balances: Balance[];
   outsideSold: number;
-  percent: number;
+  percent: Rate | number;
+  eventIds?: number[]; // their events, to say when some have their own rate
   payoutsHref?: string;
 }) {
   // One set of cards per currency; a promoter can also have only hand-entered sales and money.
@@ -102,7 +104,7 @@ function SummaryCards(props: {
           <div class="card stat highlight">
             <div class="value">{formatMoney(b?.earned ?? 0, cur)}</div>
             <div class="label">
-              Commission earned ({formatPercent(props.percent)})
+              Commission earned ({describeRate(props.percent, props.eventIds)})
               {b && b.added !== 0 && <> · incl. {b.added > 0 ? '+' : '−'}{formatMoney(Math.abs(b.added), cur)} from the team</>}
               {b && b.fromTeam !== 0 && <> · incl. {formatMoney(b.fromTeam, cur)} team commission</>}
             </div>
@@ -362,7 +364,7 @@ export function DashboardPage(props: {
   daily: DailySales[];
   balances: Balance[];
   rewards: Rewards;
-  percent: number;
+  percent: Rate | number;
   range: Range;
   pageLink?: string | null; // the promoter's public page (short link when there is one); none when hidden
 }) {
@@ -403,6 +405,7 @@ export function DashboardPage(props: {
             balances={props.balances}
             outsideSold={props.rewards.outsideSold}
             percent={props.percent}
+            eventIds={events.map((e) => e.id)}
             payoutsHref={self ? '/payouts' : undefined}
           />
           <LevelCard rewards={props.rewards} rewardsHref={self ? '/payouts#rewards' : undefined} />
@@ -460,7 +463,7 @@ export function EventPage(props: {
   eventId: number;
   daily: DailySales[];
   rewards: Rewards;
-  percent: number;
+  percent: Rate | number;
   range: Range;
 }) {
   const events = summarizeEvents(props.rows, props.percent);
@@ -493,7 +496,7 @@ export function EventPage(props: {
       <div class="grid">
         <div class="card stat highlight">
           <div class="value">{formatMoney(e.commission, e.currency)}</div>
-          <div class="label">Commission ({formatPercent(props.percent)})</div>
+          <div class="label">Commission ({describeEventRate(props.percent, e.id, e.currency)})</div>
         </div>
         <div class="card stat">
           <div class="value">{e.tickets}</div>
@@ -590,7 +593,7 @@ export function EventPage(props: {
                     </td>
                     <td class="num">{r.tickets_sold}</td>
                     <td class="num">{formatMoney(toCents(r.full_price), r.currency)}</td>
-                    <td class="num">{formatMoney(commissionCents(r.full_price, props.percent), r.currency)}</td>
+                    <td class="num">{formatMoney(commissionOn(props.percent, r.event_id, r.full_price, r.tickets_sold), r.currency)}</td>
                   </tr>
                 ))}
               </tbody>

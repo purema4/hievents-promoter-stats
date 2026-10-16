@@ -69,10 +69,10 @@ import {
   sendTestNotification,
 } from './notifications';
 import { blankPng, eventCover } from './covers';
-import { allPromoCodes, dailyForCodes, sql, statsForCodes } from './hievents';
+import { allPromoCodes, currentEventCodes, dailyForCodes, sql, statsForCodes } from './hievents';
 import { recentEmails, sendEmail, purgeEmailLog } from './mail';
 import { emailTypes, getTemplate, renderEmail, resetTemplate, sampleVars, saveReplyTo, saveTemplate, type EmailType } from './email-templates';
-import { formatMoney, totalsByCurrency } from './money';
+import { formatMoney, formatPercent, totalsByCurrency, type EventRule } from './money';
 import {
   balances,
   findPayout,
@@ -95,15 +95,18 @@ import { describeProblem, isCustomized as isRulesCustomized, rewardRules, saveRe
 import { kuttDomains, kuttEnabled, pageClicks, pageShortLink, prepareShortLinks, renamePageLink, saveShortDomain, shortLinkStatus } from './short-links';
 import { MyPagePage, PageMissing, PromoterPublicPage } from './page-views';
 import { hiddenByTeam, pageEvents, pageOwner, setPageHidden } from './promoter-page';
+import { allEventRules, rateFor, setEventRule } from './commission';
 import {
   assignTeam,
   hadTeam,
   isTeamLead,
   keepTeamHistory,
   leaveTeams,
+  sameTeam,
   setTeamCommission,
   setTeamLead,
   teamCommission,
+  teamLeadOf,
   teamLeads,
   teamMember,
   teamMembers,
@@ -140,6 +143,7 @@ import {
   AdminLinksPage,
   AdminDashboardPage,
   AdminTeamsPage,
+  AdminCommissionsPage,
   TeamPage,
   ReadOnlyPage,
   AdminRewardsPage,
@@ -232,6 +236,10 @@ const messages: Record<string, string> = {
   team_self: 'A promoter cannot be on their own team.',
   team_pick: 'Choose a promoter.',
   impersonate_admin: 'Admins cannot be viewed as.',
+  rate_saved: 'Commission saved. It applies to all their sales for this event, earlier ones too.',
+  rate_event: 'Pick one of the promoters on an event that is not over.',
+  rate_percent: 'The percentage must be a number between 0 and 100.',
+  rate_flat: 'The amount per ticket must be like 2 or 2.50.',
 };
 // Own keys only: ?ok=constructor must not pick up something from Object.prototype.
 const flash = (key?: string) => (key && Object.hasOwn(messages, key) ? messages[key] : undefined);
@@ -570,15 +578,16 @@ app.use('/account/*', requireUser);
 app.use('/account', requireUser);
 app.use('/page', requireUser);
 app.use('/page/*', requireUser);
-app.use('/team', requireUser, requireTeamLead);
-app.use('/team/*', requireUser, requireTeamLead);
+// /team itself is for team leads and the promoters on their teams (checked in the route); the pages
+// below it are for team leads alone. Hono's /team/* also matches /team.
+app.use('/team/*', requireUser, (c, next) => (c.req.path === '/team' ? next() : requireTeamLead(c, next)));
 app.use('/admin/*', requireUser, requireAdmin);
 app.use('/admin', requireUser, requireAdmin);
 
 // Everything a promoter's pages need; admins load the same data to see exactly what a promoter sees.
 async function promoterData(promoter: User) {
   const codes = codesFor(promoter.id);
-  const percent = commissionPercentFor(promoter);
+  const percent = rateFor(promoter);
   const [rows, team] = await Promise.all([statsForCodes(codes), hadTeam(promoter.id) ? teamCommission(promoter) : []]);
   return {
     codes,
@@ -963,11 +972,11 @@ app.post('/account/security/2fa/:action{off|new-codes}', async (c) => {
   return renderSecurity(c, { recoveryCodes: newRecoveryCodes(user.id) });
 });
 
-// Promoters see their own photo, team leads their team's; admins see everyone's.
+// Promoters see their own photo and their team's; admins see everyone's.
 app.get('/avatar/:userId', (c) => {
   const viewer = c.get('user');
   const userId = Number(c.req.param('userId'));
-  if (viewer.id !== userId && !viewer.is_admin && !teamMember(viewer, userId)) return c.notFound();
+  if (viewer.id !== userId && !viewer.is_admin && !teamMember(viewer, userId) && !sameTeam(viewer, userId)) return c.notFound();
   const avatar = readAvatar(userId);
   if (!avatar) return c.notFound();
   c.header('Content-Type', avatar.type);
@@ -1148,19 +1157,19 @@ app.post('/admin/promoters/:id/adjust', async (c) => {
       body: label,
     };
   } else if (kind === 'outside_sale') {
-    if (!wholeNumber || !Number.isFinite(amountCents) || Math.abs(amountCents) > 10_000_00) return c.redirect(`${back}?error=adjust_amount#adjust`);
-    // Their sales at full price, for their team lead's team commission: as entered, or worked out from
-    // the commission and their rate.
+    // The admin gives the ticket sales; the promoter gets their usual commission on them.
     const rawSales = String(body.sales ?? '').trim().replace(',', '.');
+    const salesCents = rawSales === '' ? 0 : /^-?[0-9]+(\.[0-9]{1,2})?$/.test(rawSales) ? Math.round(Number(rawSales) * 100) : NaN;
+    if (!wholeNumber || !Number.isFinite(salesCents) || Math.abs(salesCents) > 1_000_000_00) return c.redirect(`${back}?error=adjust_amount#adjust`);
     const percent = commissionPercentFor(promoter);
-    const salesCents =
-      rawSales === '' ? (percent > 0 ? Math.round((amountCents * 100) / percent) : 0) : /^-?[0-9]+(\.[0-9]{1,2})?$/.test(rawSales) ? Math.round(Number(rawSales) * 100) : NaN;
-    if (!Number.isFinite(salesCents) || Math.abs(salesCents) > 1_000_000_00) return c.redirect(`${back}?error=adjust_amount#adjust`);
-    addAdjustment(admin, promoter.id, { kind: 'tickets_sold', quantity, amountCents: salesCents, currency, label });
-    if (amountCents !== 0) addAdjustment(admin, promoter.id, { kind: 'money', amountCents, currency, label: `${label} (commission)` });
+    const commission = Math.round((salesCents * percent) / 100);
+    const saleId = addAdjustment(admin, promoter.id, { kind: 'tickets_sold', quantity, amountCents: salesCents, currency, label });
+    if (commission !== 0) addAdjustment(admin, promoter.id, { kind: 'money', amountCents: commission, currency, label: `${label} (commission)`, parentId: saleId });
     message = {
       title: `${quantity} ${Math.abs(quantity) === 1 ? 'ticket' : 'tickets'} added: ${label}`,
-      body: amountCents ? `${formatMoney(amountCents, currency)} commission added to your balance.` : 'They count for your levels and rewards.',
+      body: commission
+        ? `${formatMoney(salesCents, currency)} in sales: ${formatMoney(commission, currency)} commission (${formatPercent(percent)}) added to your balance.`
+        : 'They count for your levels and rewards.',
     };
   } else if (kind === 'free_tickets') {
     const eventId = Number(body.event_id);
@@ -1190,6 +1199,7 @@ app.post('/admin/promoters/:id/adjust/:adjustmentId/undo', (c) => {
   const promoterId = Number(c.req.param('id'));
   const entry = findAdjustment(Number(c.req.param('adjustmentId')));
   if (!entry || entry.user_id !== promoterId) return c.notFound();
+  // Undoing a sale also takes back the commission that came with it.
   removeAdjustment(entry.id);
   audit(c, 'admin.adjustment_undone', { by: c.get('user').id, userId: promoterId, entry: describeAdjustment(entry, formatMoney), label: entry.label });
   return c.redirect(`/admin/promoters/${promoterId}?ok=undone#adjust`);
@@ -1248,6 +1258,57 @@ app.post('/impersonate/stop', requireUser, (c) => {
   if (!user.impersonator) return c.redirect('/');
   audit(c, 'admin.impersonation_stopped', { by: user.impersonator.id, userId: user.id });
   return c.redirect(`/admin/promoters/${user.id}`);
+});
+
+// --- Commission per event ---------------------------------------------------------------------------
+
+/** Events that are not over, each with the promoters who have one of its codes. */
+async function commissionEvents() {
+  const codes = await currentEventCodes();
+  const promoters = listUsers().filter((u) => u.codes.length > 0);
+  const events = new Map<number, { id: number; title: string; start: Date | null; timezone: string | null; currency: string; promoters: User[] }>();
+  for (const row of codes) {
+    const event = events.get(row.event_id) ?? { id: row.event_id, title: row.title, start: row.start, timezone: row.timezone, currency: row.currency, promoters: [] };
+    for (const p of promoters) if (p.codes.includes(row.code) && !event.promoters.includes(p)) event.promoters.push(p);
+    events.set(row.event_id, event);
+  }
+  return [...events.values()].filter((e) => e.promoters.length > 0);
+}
+
+app.get('/admin/commissions', async (c) =>
+  c.html(
+    <AdminCommissionsPage
+      user={c.get('user')}
+      events={await commissionEvents()}
+      rules={allEventRules()}
+      ok={flash(c.req.query('ok'))}
+      error={flash(c.req.query('error'))}
+    />,
+  ),
+);
+
+app.post('/admin/commissions', async (c) => {
+  const body = await c.req.parseBody();
+  const userId = Number(body.user_id);
+  const eventId = Number(body.event_id);
+  const hash = `#event-${eventId}`;
+  // Only for a promoter with a code on an event that is not over.
+  const event = (await commissionEvents()).find((e) => e.id === eventId);
+  if (!event || !event.promoters.some((p) => p.id === userId)) return c.redirect('/admin/commissions?error=rate_event');
+  const kind = String(body.kind ?? '');
+  const raw = String(body.value ?? '').trim().replace(',', '.');
+  const value = /^[0-9]+(\.[0-9]{1,2})?$/.test(raw) ? Number(raw) : NaN;
+  let rule: EventRule | null = null;
+  if (kind === 'percent') {
+    if (!(value >= 0 && value <= 100)) return c.redirect(`/admin/commissions?error=rate_percent${hash}`);
+    rule = { kind, value };
+  } else if (kind === 'flat') {
+    if (!(value >= 0 && value <= 10_000)) return c.redirect(`/admin/commissions?error=rate_flat${hash}`);
+    rule = { kind, value: Math.round(value * 100) };
+  } else if (kind !== 'usual') return c.redirect('/admin/commissions?error=rate_event');
+  setEventRule(userId, eventId, rule);
+  audit(c, 'admin.event_commission_changed', { by: c.get('user').id, userId, eventId, rule });
+  return c.redirect(`/admin/commissions?ok=rate_saved${hash}`);
 });
 
 // --- Promoters' public pages, for admins -------------------------------------------------------------
@@ -1321,10 +1382,11 @@ app.post('/admin/pages/:id/visibility', async (c) => {
 // --- Teams ----------------------------------------------------------------------------------------------
 
 /** A team's ranking for the period: the team lead and their promoters, each with their own rate. */
-async function renderTeam(c: Context<Env>, lead: User, basePath: string, memberHref: (u: User) => string) {
+async function renderTeam(c: Context<Env>, lead: User, basePath: string, memberHref: ((u: User) => string) | null) {
   const range = parseRange(c.req.query('range'), '30');
   const sortParam = c.req.query('sort');
-  const sort: Sort = sortParam === 'sales' || sortParam === 'commission' ? sortParam : 'tickets';
+  // Promoters looking at their own team see no commission, so cannot sort by it either.
+  const sort: Sort = sortParam === 'sales' || (sortParam === 'commission' && memberHref) ? sortParam : 'tickets';
   const members = teamMembers(lead.id);
   const [board, team] = await Promise.all([leaderboard(range, sort, [lead, ...members]), teamCommission(lead, range)]);
   return c.html(
@@ -1343,7 +1405,15 @@ async function renderTeam(c: Context<Env>, lead: User, basePath: string, memberH
 }
 
 // Team leads: their team's sales, and each promoter's dashboard as an admin sees it. Nothing to act on.
-app.get('/team', (c) => renderTeam(c, c.get('user'), '/team', (u) => `/team/${u.id}`));
+// A promoter on a team sees the team's tickets and sales, their team lead's included, but no
+// one's commission and no one else's dashboard.
+app.get('/team', (c) => {
+  const user = c.get('user');
+  if (isTeamLead(user)) return renderTeam(c, user, '/team', (u) => `/team/${u.id}`);
+  const lead = teamLeadOf(user);
+  if (!lead) return c.text('Forbidden', 403);
+  return renderTeam(c, lead, '/team', null);
+});
 
 app.get('/team/:id', (c) => {
   const member = teamMember(c.get('user'), Number(c.req.param('id')));
