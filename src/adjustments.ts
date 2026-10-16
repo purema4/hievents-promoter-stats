@@ -1,3 +1,4 @@
+import { config } from './config';
 import { db, type User } from './local-db';
 
 /*
@@ -10,7 +11,7 @@ db.exec(`
     id           INTEGER PRIMARY KEY,
     user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     kind         TEXT NOT NULL CHECK (kind IN ('money', 'tickets_sold', 'free_tickets', 'merch')),
-    amount_cents INTEGER NOT NULL DEFAULT 0,  -- money
+    amount_cents INTEGER NOT NULL DEFAULT 0,  -- money; for tickets sold, their sales at full price
     quantity     INTEGER NOT NULL DEFAULT 0,  -- tickets sold, free tickets or merch items (negative takes back)
     currency     TEXT,
     event_id     INTEGER,                     -- the Hi.Events event, for free tickets
@@ -20,6 +21,30 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS adjustments_user ON adjustments (user_id, kind);
 `);
+
+// Sales outside Hi.Events entered before their full-price amount was kept: worked out from the
+// commission entered with them (the next entry) and the promoter's rate. Done once (currency is set).
+db.query(
+  `UPDATE adjustments AS t SET
+    currency = coalesce((SELECT m.currency FROM adjustments m WHERE m.id = t.id + 1 AND m.user_id = t.user_id AND m.kind = 'money' AND m.label = t.label || ' (commission)'), 'CAD'),
+    amount_cents = coalesce((
+      SELECT CAST(round(m.amount_cents * 100.0 / coalesce(u.commission_percent, ?1)) AS INTEGER)
+      FROM adjustments m JOIN users u ON u.id = t.user_id
+      WHERE m.id = t.id + 1 AND m.user_id = t.user_id AND m.kind = 'money' AND m.label = t.label || ' (commission)'
+        AND coalesce(u.commission_percent, ?1) > 0), 0)
+  WHERE t.kind = 'tickets_sold' AND t.currency IS NULL`,
+).run(config.commissionPercent);
+
+/** Sales outside Hi.Events at full price, per entry, with the day it was entered (in APP_TIMEZONE). */
+export function outsideSales(userId: number): { day: string; currency: string; cents: number }[] {
+  const day = new Intl.DateTimeFormat('en-CA', { timeZone: config.timezone });
+  return db
+    .query<{ created_at: string; currency: string | null; amount_cents: number }, [number]>(
+      "SELECT created_at, currency, amount_cents FROM adjustments WHERE user_id = ? AND kind = 'tickets_sold' AND amount_cents <> 0",
+    )
+    .all(userId)
+    .map((r) => ({ day: day.format(new Date(`${r.created_at.replace(' ', 'T')}Z`)), currency: r.currency ?? 'CAD', cents: r.amount_cents }));
+}
 
 export type AdjustmentKind = 'money' | 'tickets_sold' | 'free_tickets' | 'merch';
 
@@ -134,7 +159,7 @@ export function describeAdjustment(a: Adjustment, money: (cents: number, currenc
     case 'money':
       return `${a.amount_cents >= 0 ? '+' : '−'}${money(Math.abs(a.amount_cents), a.currency ?? 'CAD')}`;
     case 'tickets_sold':
-      return `${signed(a.quantity, 'ticket')} sold`;
+      return `${signed(a.quantity, 'ticket')} sold${a.amount_cents ? ` (${a.amount_cents < 0 ? '−' : ''}${money(Math.abs(a.amount_cents), a.currency ?? 'CAD')} in sales)` : ''}`;
     case 'free_tickets':
       return signed(a.quantity, 'free ticket');
     case 'merch':

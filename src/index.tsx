@@ -1149,7 +1149,14 @@ app.post('/admin/promoters/:id/adjust', async (c) => {
     };
   } else if (kind === 'outside_sale') {
     if (!wholeNumber || !Number.isFinite(amountCents) || Math.abs(amountCents) > 10_000_00) return c.redirect(`${back}?error=adjust_amount#adjust`);
-    addAdjustment(admin, promoter.id, { kind: 'tickets_sold', quantity, label });
+    // Their sales at full price, for their team lead's team commission: as entered, or worked out from
+    // the commission and their rate.
+    const rawSales = String(body.sales ?? '').trim().replace(',', '.');
+    const percent = commissionPercentFor(promoter);
+    const salesCents =
+      rawSales === '' ? (percent > 0 ? Math.round((amountCents * 100) / percent) : 0) : /^-?[0-9]+(\.[0-9]{1,2})?$/.test(rawSales) ? Math.round(Number(rawSales) * 100) : NaN;
+    if (!Number.isFinite(salesCents) || Math.abs(salesCents) > 1_000_000_00) return c.redirect(`${back}?error=adjust_amount#adjust`);
+    addAdjustment(admin, promoter.id, { kind: 'tickets_sold', quantity, amountCents: salesCents, currency, label });
     if (amountCents !== 0) addAdjustment(admin, promoter.id, { kind: 'money', amountCents, currency, label: `${label} (commission)` });
     message = {
       title: `${quantity} ${Math.abs(quantity) === 1 ? 'ticket' : 'tickets'} added: ${label}`,

@@ -1527,7 +1527,14 @@ export function PromoterPage(props: {
               <input name="amount" inputmode="decimal" placeholder="30.00" />
             </label>
           </div>
-          <p class="muted">The tickets count for their levels, merch and ranking; the commission goes to their balance.</p>
+          <label>
+            Sales at full price ({currency}, optional)
+            <input name="sales" inputmode="decimal" placeholder="Worked out from the commission" />
+          </label>
+          <p class="muted">
+            The tickets count for their levels, merch and ranking; the commission goes to their balance. The sales count
+            for their team lead's team commission.
+          </p>
           <NotifyBox />
           <button type="submit">Add sales</button>
         </form>

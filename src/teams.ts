@@ -1,5 +1,6 @@
 import { rangeBounds, today, type Range } from './chart';
 import { dailyForCodes } from './hievents';
+import { outsideSales } from './adjustments';
 import { addColumn, codesFor, db, findUser, type User } from './local-db';
 import { toCents } from './money';
 import { notify } from './notifications';
@@ -34,6 +35,8 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS team_memberships_lead ON team_memberships (lead_id);
   CREATE INDEX IF NOT EXISTS team_memberships_member ON team_memberships (member_id);
 `);
+// A deleted promoter's sales outside Hi.Events, kept like their codes.
+addColumn('team_memberships', 'outside', 'TEXT');
 // Teams set up before memberships were kept: counted from today.
 db.query(
   `INSERT INTO team_memberships (lead_id, member_id, from_day)
@@ -55,7 +58,11 @@ function closeMemberships(where: 'member_id' | 'lead_id', userId: number) {
 
 /** Before a promoter is deleted: their team lead keeps what they earned on them. */
 export function keepTeamHistory(userId: number) {
-  db.query('UPDATE team_memberships SET codes = ? WHERE member_id = ?').run(JSON.stringify(codesFor(userId)), userId);
+  db.query('UPDATE team_memberships SET codes = ?, outside = ? WHERE member_id = ?').run(
+    JSON.stringify(codesFor(userId)),
+    JSON.stringify(outsideSales(userId)),
+    userId,
+  );
   closeMemberships('member_id', userId);
 }
 
@@ -73,17 +80,22 @@ export type TeamCommission = { currency: string; sales: number; commission: numb
  */
 export async function teamCommission(lead: User, range: Range = 'all'): Promise<TeamCommission[]> {
   const rows = db
-    .query<{ member_id: number | null; codes: string | null; from_day: string; to_day: string | null }, [number]>(
-      'SELECT member_id, codes, from_day, to_day FROM team_memberships WHERE lead_id = ?',
+    .query<{ member_id: number | null; codes: string | null; outside: string | null; from_day: string; to_day: string | null }, [number]>(
+      'SELECT member_id, codes, outside, from_day, to_day FROM team_memberships WHERE lead_id = ?',
     )
     .all(lead.id);
   const from = range === 'all' ? '' : rangeBounds(range, []).from;
   const sales = new Map<string, number>();
   for (const row of rows) {
+    const counts = (day: string) => day >= row.from_day && (!row.to_day || day <= row.to_day) && day >= from;
     const codes: string[] = row.codes ? JSON.parse(row.codes) : row.member_id ? codesFor(row.member_id) : [];
     for (const d of await dailyForCodes(codes)) {
-      if (d.day < row.from_day || (row.to_day && d.day > row.to_day) || d.day < from) continue;
-      sales.set(d.currency, (sales.get(d.currency) ?? 0) + toCents(d.full_price));
+      if (counts(d.day)) sales.set(d.currency, (sales.get(d.currency) ?? 0) + toCents(d.full_price));
+    }
+    // Sales outside Hi.Events count by the day an admin entered them.
+    const outside: { day: string; currency: string; cents: number }[] = row.outside ? JSON.parse(row.outside) : row.member_id ? outsideSales(row.member_id) : [];
+    for (const o of outside) {
+      if (counts(o.day)) sales.set(o.currency, (sales.get(o.currency) ?? 0) + o.cents);
     }
   }
   const percent = teamCommissionPercentFor(lead);

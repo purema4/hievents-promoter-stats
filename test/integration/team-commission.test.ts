@@ -101,12 +101,27 @@ describeIntegration('team commission', () => {
     expect(stats(await admin.page(`/admin/teams/${lead.id}?range=all`)).get(`Team commission (5% of ${money(anaSales + benSales)})`)).toBe(money(expected));
   });
 
+  test('sales outside Hi.Events entered after they joined count too', async () => {
+    const before = Math.round((anaSales + benSales) * 0.05);
+    const adjust = (body: Record<string, string>) => admin.post(`/admin/promoters/${ana.id}/adjust`, { kind: 'outside_sale', label: 'Door sales', ...body });
+    // $20 commission at Ana's 10%: $200 in sales. With the sales given: those.
+    expect(location(await adjust({ quantity: '4', amount: '20' }))).toBe(`/admin/promoters/${ana.id}?ok=adjusted#adjust`);
+    expect(location(await adjust({ quantity: '2', amount: '', sales: '100' }))).toBe(`/admin/promoters/${ana.id}?ok=adjusted#adjust`);
+    expect(location(await adjust({ quantity: '2', amount: '5', sales: 'lots' }))).toBe(`/admin/promoters/${ana.id}?error=adjust_amount#adjust`);
+    const base = anaSales + benSales + 300_00;
+    const html = await lead.client.page('/team?range=all');
+    expect(stats(html).get(`Team commission (5% of ${money(base)})`)).toBe(money(before + 15_00));
+    expect(text(await admin.page(`/admin/promoters/${ana.id}`))).toContain('+4 tickets sold ($200.00 in sales)');
+    // Ana's own balance gets the commission only.
+    expect(stats(await ana.client.page('/')).get('Commission earned (10%) · incl. +$20.00 from the team')).toBe(money(Math.round(anaSales * 0.1) + 20_00));
+  });
+
   test('what was earned stays when a promoter leaves, moves or is deleted', async () => {
-    const expected = Math.round((anaSales + benSales) * 0.05);
     const teamCommission = async () => {
       const html = await lead.client.page('/team?range=all');
       return [...stats(html)].find(([label]) => label.startsWith('Team commission'))![1];
     };
+    const expected = cents(await teamCommission());
     // Ana moves to another team: her sales up to today stay with Lea.
     const other = await newPromoter(server, admin, { name: `Max ${uid()}` });
     await admin.post('/admin/teams/lead', { user_id: String(other.id), lead: '1' });
@@ -118,6 +133,10 @@ describeIntegration('team commission', () => {
 
     // Ben is deleted: what Lea earned on him stays.
     await admin.post(`/admin/promoters/${ben.id}/delete`, { confirm: '1' });
+    expect(await teamCommission()).toBe(money(expected));
+
+    // Ana is deleted too: her sales outside Hi.Events while on Lea's team stay counted.
+    await admin.post(`/admin/promoters/${ana.id}/delete`, { confirm: '1' });
     expect(await teamCommission()).toBe(money(expected));
 
     // Lea steps down: still earned, still in her balance.
