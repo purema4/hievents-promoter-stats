@@ -1,6 +1,6 @@
 // Version is filled in by the server so a new release replaces the cached files.
 const CACHE = 'promoter-stats-__VERSION__';
-const STATIC = ['/offline', '/app.css?v=__CSS_VERSION__', '/app.js', '/icon.svg', '/icon-192.png'];
+const STATIC = ['/offline', '/app.css?v=__CSS_VERSION__', '/app.js', '/icon.svg?v=__ICON_VERSION__', '/icon-192.png?v=__ICON_VERSION__'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(STATIC)).then(() => self.skipWaiting()));
@@ -44,9 +44,9 @@ self.addEventListener('push', (event) => {
     Promise.all([
       self.registration.showNotification(title, {
         body: data.body || '',
-        icon: '/icon-192.png',
+        icon: '/icon-192.png?v=__ICON_VERSION__',
         // Android draws the small status-bar icon from the transparent shape only, so it needs an outline.
-        badge: '/badge-96.png',
+        badge: '/badge-96.png?v=__ICON_VERSION__',
         data: { url: data.url || '/notifications' },
       }),
       'setAppBadge' in self.navigator && data.unread ? self.navigator.setAppBadge(data.unread).catch(() => {}) : null,

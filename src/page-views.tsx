@@ -2,6 +2,7 @@ import type { Child } from 'hono/jsx';
 import { avatarOf, initials } from './avatars';
 import { brandVersion, getBrand } from './brand';
 import { config } from './config';
+import { iconUrl } from './icons';
 import type { PageEvent } from './hievents';
 import { eventLink, pageLink } from './links';
 import type { User } from './local-db';
@@ -63,8 +64,8 @@ function PublicLayout(props: { title: string; description: string; image?: strin
         <meta name="twitter:card" content={props.image ? 'summary_large_image' : 'summary'} />
         <link rel="stylesheet" href={`/app.css?v=${cssVersion}`} />
         <link rel="stylesheet" href={`/brand.css?v=${brandVersion()}`} />
-        <link rel="icon" href="/icon.svg" type="image/svg+xml" />
-        <link rel="apple-touch-icon" href="/icon-180.png" />
+        <link rel="icon" href={iconUrl('icon.svg')} type="image/svg+xml" />
+        <link rel="apple-touch-icon" href={iconUrl('icon-180.png')} />
         <meta name="theme-color" content="#f6f6f4" media="(prefers-color-scheme: light)" />
         <meta name="theme-color" content="#121211" media="(prefers-color-scheme: dark)" />
         <script src="/page.js" defer></script>

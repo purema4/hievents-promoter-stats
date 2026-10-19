@@ -1,6 +1,7 @@
 import type { Context } from 'hono';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { iconVersion } from './icons';
 import { cssVersion } from './views';
 
 const types: Record<string, string> = {
@@ -40,7 +41,8 @@ export function serviceWorker(c: Context) {
     .get('sw.js')!
     .toString()
     .replaceAll('__VERSION__', version)
-    .replaceAll('__CSS_VERSION__', cssVersion);
+    .replaceAll('__CSS_VERSION__', cssVersion)
+    .replaceAll('__ICON_VERSION__', iconVersion);
   c.header('Content-Type', types.js);
   c.header('Cache-Control', 'no-cache');
   return c.body(source);

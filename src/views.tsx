@@ -3,6 +3,7 @@ import { avatarOf, initials } from './avatars';
 import { maxUploadBytes } from './images';
 import { placesVersion, promoterMap } from './places';
 import { vendorVersion } from './vendor';
+import { iconUrl } from './icons';
 import { accentWarnings, brandVersion, getBrand, type Brand } from './brand';
 import { chartCss, RangeLinks, SalesChart, type Range } from './chart';
 import type { Leaderboard, Sort } from './leaderboard';
@@ -566,8 +567,8 @@ export function Layout(props: { title: string; user?: User; children: Child; hid
         <link rel="stylesheet" href={`/app.css?v=${cssVersion}`} />
         <link rel="stylesheet" href={`/brand.css?v=${brandVersion()}`} />
         <link rel="manifest" href="/manifest.webmanifest" />
-        <link rel="icon" href="/icon.svg" type="image/svg+xml" />
-        <link rel="apple-touch-icon" href="/icon-180.png" />
+        <link rel="icon" href={iconUrl('icon.svg')} type="image/svg+xml" />
+        <link rel="apple-touch-icon" href={iconUrl('icon-180.png')} />
         <meta name="theme-color" content={brand.accent} />
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-title" content={brand.name} />
@@ -627,7 +628,7 @@ const shareIcon = (
 function InstallBanner(props: { brand: Brand }) {
   return (
     <div class="card install-banner" data-install-banner hidden>
-      <img src="/icon-192.png" alt="" width="44" height="44" />
+      <img src={iconUrl('icon-192.png')} alt="" width="44" height="44" />
       <div class="install-text">
         <strong>Install the {props.brand.name} app</strong>
         <span class="muted">

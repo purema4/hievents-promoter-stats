@@ -220,6 +220,8 @@ Links work once. Mail scanners such as Outlook Safe Links open links before the 
 
 The site is a PWA and promoters are nudged to install it: a banner on every page offers **Install** where the browser supports it (Android, desktop Chrome and Edge) and shows the Share → **Add to Home Screen** steps on iPhone. It is hidden inside the installed app; the first time a promoter opens the installed app (or taps **I already installed it**) this is saved on their account, so the banner never shows for them again on any device. **Not now** hides it for 14 days on that device. The Account page has install steps for every device, and invite emails tell promoters to install it on their phone. The app opens on the dashboard. Pages are always loaded live and never stored on the device; without a connection the app shows an offline notice instead of old numbers.
 
+The icon is the OUTKZT monogram holding the app's ticket, white on black. All its files in `public/` (tab icon, home screen, Android's cropped and one-colour versions, the notification badge) are drawn by `dev/build-icons.ts`; change the drawing there and run `bun dev/build-icons.ts`. They are linked with a hash of their content, so a new icon reaches installed apps: Android and desktop Chrome or Edge check the app's details when it is opened (about once a day) and update the icon, sometimes after asking the user. iPhone keeps the icon from when the app was added to the Home Screen; to get a new one, remove the app and add it again.
+
 The admin from `ADMIN_EMAIL` / `ADMIN_PASSWORD` can also use **Sign in with a password**, as a way in if email stops working.
 
 Every sign-in, failed attempt and admin change is logged as a JSON line; read them with `docker compose logs promoter-stats`.

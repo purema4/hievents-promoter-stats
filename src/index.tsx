@@ -130,6 +130,7 @@ import {
 } from './teams';
 import QRCode from 'qrcode';
 import { publicAsset, publicText, serviceWorker } from './static';
+import { iconUrl } from './icons';
 import { vendorAsset } from './vendor';
 import { tidyCity } from './places';
 import {
@@ -422,7 +423,9 @@ app.get('/manifest.webmanifest', (c) => {
   const manifest = JSON.parse(publicText('manifest.webmanifest'));
   c.header('Content-Type', 'application/manifest+json');
   c.header('Cache-Control', 'no-cache');
-  return c.body(JSON.stringify({ ...manifest, name: brand.name, short_name: brand.name.slice(0, 12), theme_color: brand.accent }));
+  // Icons by their versioned address: a new icon is then seen as a change, and installed apps take it.
+  const icons = manifest.icons.map((icon: { src: string }) => ({ ...icon, src: iconUrl(icon.src.slice(1)) }));
+  return c.body(JSON.stringify({ ...manifest, icons, name: brand.name, short_name: brand.name.slice(0, 12), theme_color: brand.accent }));
 });
 app.get('/brand.css', (c) => {
   c.header('Content-Type', 'text/css; charset=utf-8');
