@@ -1,12 +1,13 @@
 /*
  * Integration test harness. The real server (`bun src/index.tsx`) runs as a subprocess with its own
  * temporary DATA_DIR and port, against the sandbox stack from docker-compose.dev.yml +
- * docker-compose.test.yml (Hi.Events Postgres with dev/seed.sql, Mailpit, the cover CDN, MinIO for S3).
+ * docker-compose.test.yml (Hi.Events Postgres with dev/seed.sql, Mailpit, the cover CDN, SeaweedFS for S3).
  * Tests talk to it over HTTP only and read its emails through the Mailpit API.
  *
  * When the stack is unreachable the integration tests are skipped, except with CI=true, where that
  * is an error.
  */
+import { S3Client } from 'bun';
 import { describe, setDefaultTimeout, test } from 'bun:test';
 import { createHmac } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -22,7 +23,7 @@ export const stack = {
   mailpitUrl: (process.env.TEST_MAILPIT_URL || 'http://127.0.0.1:18025').replace(/\/$/, ''),
   smtpPort: Number(process.env.TEST_SMTP_PORT || 11025),
   cdnUrl: (process.env.TEST_CDN_URL || 'http://127.0.0.1:18080').replace(/\/$/, ''),
-  // MinIO, for S3_BUCKET and CDN_URL.
+  // SeaweedFS, for S3_BUCKET and CDN_URL.
   s3: {
     endpoint: (process.env.TEST_S3_URL || 'http://127.0.0.1:19000').replace(/\/$/, ''),
     bucket: 'promoter-test',
@@ -69,11 +70,18 @@ async function probeStack(): Promise<string | null> {
   } catch (err) {
     return `Cover CDN not reachable at ${stack.cdnUrl} (${(err as Error).message})`;
   }
-  try {
-    const res = await fetch(`${stack.s3.endpoint}/minio/health/live`, { signal: AbortSignal.timeout(3000) });
-    if (!res.ok) return `S3 (MinIO) at ${stack.s3.endpoint} answered ${res.status}`;
-  } catch (err) {
-    return `S3 (MinIO) not reachable at ${stack.s3.endpoint} (${(err as Error).message})`;
+  // SeaweedFS answers before it can store anything: wait (up to 30 s) until a test file can be written.
+  const s3 = new URL(stack.s3.endpoint);
+  if (!(await tcpOpen(s3.hostname, Number(s3.port), 3000))) return `S3 (SeaweedFS) not reachable at ${stack.s3.endpoint}`;
+  const bucket = new S3Client({ ...stack.s3, region: 'us-east-1' });
+  for (let deadline = Date.now() + 30_000; ; await Bun.sleep(500)) {
+    try {
+      await bucket.file('.harness-check').write('ok');
+      await bucket.file('.harness-check').delete();
+      break;
+    } catch (err) {
+      if (Date.now() > deadline) return `S3 (SeaweedFS) at ${stack.s3.endpoint} cannot store files (${(err as Error).message})`;
+    }
   }
   return null;
 }

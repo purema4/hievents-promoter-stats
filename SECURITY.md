@@ -85,7 +85,7 @@ Verified as safe, with no change needed:
 - Without a CDN the app reads the object and serves it, so the bucket stays private. With a CDN, every request still goes through the app's access check first (a promoter's photo: themselves, their team and admins; the public page photo: anyone, as before); only then is the browser redirected. Someone not allowed gets a 404 and never the address. The CDN address of a photo works for anyone who has it, like any CDN file: treat it as unlisted, not secret.
 - The CSP's `img-src` adds the CDN's origin only when `CDN_URL` is in use.
 - S3 keys come from the environment only and are never logged. The app refuses to start with a bucket but no keys, and logs (without the secret) when the bucket cannot be written to.
-- Tests: `test/integration/storage.test.ts` against MinIO (bucket, CDN redirects and access checks, moving files from the volume, settings errors).
+- Tests: `test/integration/storage.test.ts` against SeaweedFS (bucket, CDN redirects and access checks, moving files from the volume, settings errors).
 
 ## Controls by category
 

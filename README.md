@@ -302,7 +302,7 @@ The code lives in the private repository `purema4/hievents-promoter-stats`. GitH
 
 | Job | What it does |
 | --- | --- |
-| Typecheck and tests | Runs `bun install --frozen-lockfile` and `bun run typecheck`, starts Postgres, Mailpit, the cover CDN and MinIO (S3) from `docker-compose.dev.yml` + `docker-compose.test.yml`, then runs `bun test` with `CI=true`. With `CI=true`, integration tests fail when the stack is missing instead of skipping. A failed run prints the container logs, and the job always removes the stack. |
+| Typecheck and tests | Runs `bun install --frozen-lockfile` and `bun run typecheck`, starts Postgres, Mailpit, the cover CDN and SeaweedFS (S3) from `docker-compose.dev.yml` + `docker-compose.test.yml`, then runs `bun test` with `CI=true`. With `CI=true`, integration tests fail when the stack is missing instead of skipping. A failed run prints the container logs, and the job always removes the stack. |
 | Dependency audit | `bun audit` fails the job if any dependency has a known vulnerability. |
 | Secret scan | gitleaks scans the whole git history. |
 | DAST (ZAP baseline) | Starts the full sandbox with `docker compose -f docker-compose.dev.yml up -d --build --wait`, waits for `/healthz`, then runs the OWASP ZAP baseline scan on http://localhost:3000 with the rule overrides in `.zap/rules.tsv`. The report is attached to the run as the `zap-baseline-report` artifact. A rule set to `FAIL` in that file fails the job. `WARN` alerts only go in the report. |
