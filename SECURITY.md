@@ -87,6 +87,13 @@ Verified as safe, with no change needed:
 - S3 keys come from the environment only and are never logged. The app refuses to start with a bucket but no keys, and logs (without the secret) when the bucket cannot be written to.
 - Tests: `test/integration/storage.test.ts` against SeaweedFS (bucket, CDN redirects and access checks, moving files from the volume, settings errors).
 
+## Locations and maps (2026-10-19)
+
+- City suggestions come from `public/places.json`, served by the app (no outside service, nothing sent anywhere while typing).
+- The maps (admin dashboard; team lead's team page, their team only, not for promoters on the team) use Leaflet and leaflet.heat served from `/vendor/` (three named files only; anything else is a 404) and `/map.js`; no inline script. The points are in a `data-` attribute escaped by JSX, and tooltips are built with `textContent`, so names and cities show as text.
+- The CSP's `img-src` allows `https://tile.openstreetmap.org` for the tiles. Tile requests carry only the app's origin as referrer (OpenStreetMap requires one; the app's own policy stays `no-referrer`). OpenStreetMap sees the viewer's IP and the map area, not who the promoters are.
+- Only cities are stored and shown, never addresses or GPS positions. Tests: `test/integration/locations.test.ts`, `test/unit/places.test.ts`.
+
 ## Controls by category
 
 | OWASP 2025 | How it is handled |

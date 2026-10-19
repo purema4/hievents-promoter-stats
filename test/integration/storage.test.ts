@@ -139,7 +139,7 @@ describeIntegration('files in an S3 bucket, delivered by a CDN', () => {
 
   test('pages allow images from the CDN', async () => {
     const csp = (await maya.client.get('/')).headers.get('content-security-policy') ?? '';
-    expect(csp).toMatch(new RegExp(`img-src 'self' data: ${new URL(cdn).origin}`));
+    expect(csp).toMatch(new RegExp(`img-src 'self' data: [^;]*${new URL(cdn).origin}`));
   });
 
   test('the logo and public page photos go through the CDN too', async () => {

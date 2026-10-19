@@ -8,6 +8,7 @@ const types: Record<string, string> = {
   svg: 'image/svg+xml',
   png: 'image/png',
   webmanifest: 'application/manifest+json',
+  json: 'application/json',
 };
 
 // The few files in public/ are read once at startup; only names found there can be served.
@@ -29,7 +30,8 @@ export function publicAsset(c: Context, name: string) {
   const file = files.get(name);
   if (!file || name === 'sw.js') return c.notFound();
   c.header('Content-Type', types[name.split('.').pop()!] ?? 'application/octet-stream');
-  c.header('Cache-Control', name.endsWith('.png') || name.endsWith('.svg') ? 'public, max-age=86400' : 'no-cache');
+  // places.json is linked with its version (?v=), so it can be kept for good.
+  c.header('Cache-Control', name === 'places.json' ? 'public, max-age=31536000, immutable' : name.endsWith('.png') || name.endsWith('.svg') ? 'public, max-age=86400' : 'no-cache');
   return c.body(file);
 }
 

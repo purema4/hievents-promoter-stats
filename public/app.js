@@ -26,6 +26,27 @@ if (waiting) {
   document.addEventListener('visibilitychange', () => document.visibilityState === 'visible' && check());
 }
 
+// City fields: suggest Canadian places as people type, from a list the app serves (no outside service).
+// Loaded on first focus; anything else can still be typed.
+document.querySelectorAll('input[data-places]').forEach((input, i) => {
+  const load = async () => {
+    input.removeEventListener('focus', load);
+    try {
+      const places = await (await fetch(input.dataset.places)).json();
+      const list = document.createElement('datalist');
+      list.id = `places-${i}`;
+      for (const [name, province] of places) {
+        const option = document.createElement('option');
+        option.value = `${name}, ${province}`;
+        list.append(option);
+      }
+      document.body.append(list);
+      input.setAttribute('list', list.id);
+    } catch {}
+  };
+  input.addEventListener('focus', load);
+});
+
 // Payout form: cash goes in round steps, so picking cash switches the amount to the most available in cash.
 const payout = document.querySelector('form[data-payout-form]');
 if (payout) {

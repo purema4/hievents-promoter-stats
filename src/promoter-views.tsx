@@ -164,6 +164,22 @@ function PhotoCallout(props: { promoter: User }) {
   );
 }
 
+// Until they have a city: it puts them on the team's map (only the team sees it).
+function CityCallout(props: { promoter: User }) {
+  if (props.promoter.city?.trim()) return null;
+  return (
+    <div class="card reward-card city-callout">
+      <div>
+        <strong>Add your city</strong>
+        <div class="muted">So the team knows where you promote. Only the team sees it.</div>
+      </div>
+      <a class="button" href="/account#city">
+        Add my city
+      </a>
+    </div>
+  );
+}
+
 function PayoutCallout(props: { balances: Balance[]; rewards: Rewards }) {
   const ready = props.balances.filter((b) => b.available > 0);
   const waiting = props.balances.filter((b) => b.pending > 0);
@@ -429,6 +445,7 @@ export function DashboardPage(props: {
       </div>
       <p class="muted">Live from the ticketing system.</p>
       {self && <PhotoCallout promoter={props.promoter} />}
+      {self && <CityCallout promoter={props.promoter} />}
 
       {props.codes.length === 0 && props.balances.length === 0 && props.rewards.outsideSold === 0 ? (
         <div class="card muted">No promo codes are assigned to this account yet.</div>

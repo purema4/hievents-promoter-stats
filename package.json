@@ -12,6 +12,8 @@
   },
   "dependencies": {
     "hono": "^4.13.13",
+    "leaflet": "1.9.4",
+    "leaflet.heat": "0.2.0",
     "nodemailer": "^10.1.1",
     "postgres": "^3.4.9",
     "qrcode": "^1.5.4",

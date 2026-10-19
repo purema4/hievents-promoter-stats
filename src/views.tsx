@@ -1,6 +1,8 @@
 import type { Child } from 'hono/jsx';
 import { avatarOf, initials } from './avatars';
 import { maxUploadBytes } from './images';
+import { placesVersion, promoterMap } from './places';
+import { vendorVersion } from './vendor';
 import { accentWarnings, brandVersion, getBrand, type Brand } from './brand';
 import { chartCss, RangeLinks, SalesChart, type Range } from './chart';
 import type { Leaderboard, Sort } from './leaderboard';
@@ -416,6 +418,31 @@ body.impersonating .sidebar { padding-bottom: calc(96px + env(safe-area-inset-bo
 .rate-fields { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .rate-fields select { width: auto; }
 .rate-fields input { width: 110px; }
+/* Promoter maps (admin dashboard, team pages) */
+.map-card { display: grid; gap: 8px; }
+.map-card p { margin: 0; }
+.promoter-map { height: 400px; border-radius: 8px; overflow: hidden; background: var(--bg); z-index: 0; }
+.map-places { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px; align-items: start; }
+.map-place { border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
+.map-place summary { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 10px 12px; min-height: 44px; cursor: pointer; font-weight: 600; list-style: none; }
+.map-place summary::-webkit-details-marker { display: none; }
+.map-place summary::after { content: '▸'; color: var(--muted); }
+.map-place[open] summary::after { content: '▾'; }
+.map-place summary span:first-child { flex: 1; }
+.map-place[open], .map-place.selected { border-color: var(--accent); }
+.map-count { font-size: 12px; font-weight: 700; padding: 1px 8px; border-radius: 999px; background: var(--bg); color: var(--muted); }
+.map-missing summary { font-weight: 500; color: var(--muted); }
+.map-note { padding: 0 12px; }
+.map-people { list-style: none; margin: 0; padding: 0 12px 10px; display: grid; gap: 2px; }
+.map-people a.who { color: inherit; text-decoration: none; gap: 10px; padding: 6px 0; min-height: 40px; }
+.map-people a.who:hover span { text-decoration: underline; }
+.map-popup strong { display: block; margin-bottom: 4px; }
+.map-popup ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; max-height: 220px; overflow-y: auto; }
+.map-popup a { display: block; padding: 6px 0; min-height: 32px; }
+@media (max-width: 640px) {
+  .promoter-map { height: 300px; }
+  .map-places { grid-template-columns: 1fr; }
+}
 .commission-field { display: grid; gap: 4px; font-size: 13px; color: var(--muted); }
 /* Promoters → Promo codes */
 .filter-bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 0 0 12px; }
@@ -988,7 +1015,7 @@ export function AccountPage(props: { user: User; error?: string; ok?: string }) 
             </label>
             <label>
               City or region
-              <input name="city" value={u.city ?? ''} autocomplete="address-level2" maxlength={80} />
+              <CityInput value={u.city} />
             </label>
             <label>
               Instagram
@@ -1125,6 +1152,7 @@ export function AdminPage(props: {
                         {p.is_admin ? <span class="muted"> (admin)</span> : null}
                         {isTeamLead(p) ? <span class="muted"> (team lead)</span> : null}
                         {!p.is_admin && !avatarOf(p) ? <span class="chip warn">No photo</span> : null}
+                        {!p.is_admin && !p.city?.trim() ? <span class="chip warn">No city</span> : null}
                         <div class="muted">
                           {p.email}
                           {p.alias ? ` · aff=${p.alias}` : ''}
@@ -2370,7 +2398,7 @@ export function WelcomePage(props: {
               </label>
               <label>
                 City or region
-                <input name="city" value={u.city ?? ''} autocomplete="address-level2" maxlength={80} />
+                <CityInput value={u.city} />
               </label>
               <label>
                 Instagram (its photo becomes your profile picture)
@@ -2877,6 +2905,110 @@ function BoardTable(props: {
 
 export type TeamRow = { lead: User; members: number; tickets: number; sales: number; commission: number; teamCommission: number };
 
+// City, with suggestions of Canadian places as they type (public/places.json, loaded by /app.js on first
+// focus; no outside service). Anything else can still be typed.
+export function CityInput(props: { value: string | null | undefined }) {
+  return (
+    <input
+      id="city"
+      name="city"
+      value={props.value ?? ''}
+      autocomplete="off"
+      maxlength={80}
+      placeholder="Montréal, QC"
+      data-places={`/places.json?v=${placesVersion}`}
+    />
+  );
+}
+
+// Where promoters are, by city, as a heat map (/map.js with Leaflet and OpenStreetMap tiles). Admins see
+// everyone; team leads their team. Cities only, never more precise. Each place opens (on the map, or in
+// the list below it, which works without the map too) to its promoters, linking to their page.
+export function PromoterMapCard(props: { title: string; users: User[]; promoterHref: (u: User) => string }) {
+  const map = promoterMap(props.users);
+  const onMap = map.points.reduce((n, p) => n + p.users.length, 0);
+  const plural = (n: number) => (n === 1 ? '1 promoter' : `${n} promoters`);
+  // What the map needs: the place, and its promoters' names and links (relative to the app).
+  const data = map.points.map((p) => ({ label: p.label, lat: p.lat, lng: p.lng, people: p.users.map((u) => ({ name: u.name, href: props.promoterHref(u) })) }));
+  const people = (users: User[]) => (
+    <ul class="map-people">
+      {users.map((u) => (
+        <li>
+          <a class="who" href={props.promoterHref(u)}>
+            <Avatar user={u} size="small" />
+            <span>{u.name}</span>
+          </a>
+        </li>
+      ))}
+    </ul>
+  );
+  return (
+    <>
+      <h2>{props.title}</h2>
+      <div class="card map-card">
+        {map.points.length > 0 ? (
+          <>
+            <link rel="stylesheet" href={`/vendor/leaflet.css?v=${vendorVersion}`} />
+            <div
+              class="promoter-map"
+              data-promoter-map={JSON.stringify(data)}
+              role="img"
+              aria-label={`Map of ${plural(onMap)} in ${map.points.length} ${map.points.length === 1 ? 'place' : 'places'}. The places are listed below.`}
+            />
+            <script src={`/vendor/leaflet.js?v=${vendorVersion}`} defer />
+            <script src={`/vendor/leaflet-heat.js?v=${vendorVersion}`} defer />
+            <script src="/map.js" defer />
+            <p class="muted">Tap a place on the map, or open one below, to see its promoters.</p>
+            <div class="map-places">
+              {map.points.map((p) => (
+                <details class="map-place" data-place={p.label}>
+                  <summary>
+                    <span>{p.label}</span>
+                    <span class="map-count">{p.users.length}</span>
+                  </summary>
+                  {people(p.users)}
+                </details>
+              ))}
+            </div>
+          </>
+        ) : (
+          <p class="muted">No promoter has a city that can be put on the map yet.</p>
+        )}
+        {map.noCity.length > 0 && (
+          <details class="map-place map-missing">
+            <summary>
+              <span>No city yet</span>
+              <span class="map-count">{map.noCity.length}</span>
+            </summary>
+            <p class="muted map-note">They are reminded on their dashboard.</p>
+            {people(map.noCity)}
+          </details>
+        )}
+        {map.unknown.length > 0 && (
+          <details class="map-place map-missing">
+            <summary>
+              <span>City not found on the map</span>
+              <span class="map-count">{map.unknown.length}</span>
+            </summary>
+            <ul class="map-people">
+              {map.unknown.map((u) => (
+                <li>
+                  <a class="who" href={props.promoterHref(u)}>
+                    <Avatar user={u} size="small" />
+                    <span>
+                      {u.name} <span class="muted">({u.city})</span>
+                    </span>
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </details>
+        )}
+      </div>
+    </>
+  );
+}
+
 export function AdminDashboardPage(props: { user: User; board: Leaderboard; teams: TeamRow[]; range: Range; sort: Sort; promoters: User[] }) {
   const { board, range, sort } = props;
   const cur = board.currency;
@@ -2962,6 +3094,8 @@ export function AdminDashboardPage(props: { user: User; board: Leaderboard; team
           </div>
         </>
       )}
+
+      <PromoterMapCard title="Where promoters are" users={props.promoters} promoterHref={(u) => `/admin/promoters/${u.id}`} />
 
       <PromoterActivity promoters={props.promoters} />
     </Layout>
@@ -3087,6 +3221,9 @@ export function TeamPage(props: {
             </>
           ))}
         </p>
+      )}
+      {mode !== 'member' && href && (
+        <PromoterMapCard title={mine ? 'Where your team is' : 'Where the team is'} users={[props.lead, ...props.members]} promoterHref={href} />
       )}
     </Layout>
   );

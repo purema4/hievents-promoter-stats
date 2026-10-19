@@ -130,6 +130,8 @@ import {
 } from './teams';
 import QRCode from 'qrcode';
 import { publicAsset, publicText, serviceWorker } from './static';
+import { vendorAsset } from './vendor';
+import { tidyCity } from './places';
 import {
   codeOwners,
   codesFor,
@@ -327,8 +329,9 @@ const strictHeaders = secureHeaders({
       workerSrc: ["'self'"],
       manifestSrc: ["'self'"],
       styleSrc: ["'self'"],
-      // Photos and the logo may come from the CDN in front of the S3 bucket (CDN_URL).
-      imgSrc: ["'self'", 'data:', ...(cdnOrigin ? [cdnOrigin] : [])],
+      // Photos and the logo may come from the CDN in front of the S3 bucket (CDN_URL); map tiles from
+      // OpenStreetMap (the promoter maps on the admin dashboard and team pages).
+      imgSrc: ["'self'", 'data:', 'https://tile.openstreetmap.org', ...(cdnOrigin ? [cdnOrigin] : [])],
       formAction: ["'self'"],
       // Only the admin email preview is framed, and only by this site.
       frameSrc: ["'self'"],
@@ -410,6 +413,9 @@ app.get('/app.css', (c) => {
 });
 
 app.get('/app.js', (c) => publicAsset(c, 'app.js'));
+app.get('/map.js', (c) => publicAsset(c, 'map.js'));
+app.get('/places.json', (c) => publicAsset(c, 'places.json'));
+app.get('/vendor/:file', (c) => vendorAsset(c, c.req.param('file')));
 // The installed app takes its name and colour from the branding.
 app.get('/manifest.webmanifest', (c) => {
   const brand = getBrand();
@@ -820,7 +826,7 @@ app.post('/welcome/profile', async (c) => {
     first_name: text('first_name', 60),
     last_name: text('last_name', 60),
     phone: text('phone', 30),
-    city: text('city', 80),
+    city: tidyCity(text('city', 80)),
     instagram: text('instagram', 60)?.replace(/^@?/, '@') ?? null,
     payout_method: config.payoutMethods.includes(method) ? method : null,
     payout_details: text('payout_details', 200),
@@ -1150,7 +1156,7 @@ app.post('/account/profile', async (c) => {
     first_name: text('first_name', 60),
     last_name: text('last_name', 60),
     phone: text('phone', 30),
-    city: text('city', 80),
+    city: tidyCity(text('city', 80)),
     instagram: text('instagram', 60)?.replace(/^@?/, '@') ?? null,
     payout_method: config.payoutMethods.includes(method) ? method : null,
     payout_details: text('payout_details', 200),

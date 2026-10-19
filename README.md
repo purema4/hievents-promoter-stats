@@ -152,6 +152,14 @@ Photos and a logo stored before shrinking was added are shrunk once, at the next
 
 Adding one is a welcome step. Until a promoter has a photo, their dashboard shows **Add your profile photo** (linking to Account), and **All promoters** flags them with **No photo** for admins.
 
+## Locations and maps
+
+Promoters give their city on Account (and in the welcome steps). As they type, the field suggests Canadian places from a list the app serves itself, `public/places.json` (2,832 places of 1,000 people or more, from [GeoNames](https://www.geonames.org), CC BY 4.0; rebuild it with `dev/build-places.ts`). No outside service is asked. Anything else can still be typed. A city that matches a place is saved the way the list writes it ("montreal" becomes "Montréal, QC").
+
+Until they give a city, their dashboard shows **Add your city**, and **All promoters** flags them with **No city**.
+
+**Dashboard** (admins) shows a heat map of where promoters are, by city. Tap or click a place on the map, or open it in the list under the map, to see its promoters with links to their pages; the list also shows who has no city yet and whose city was not found. On phones, one finger scrolls the page and two fingers move and zoom the map, so it never traps the page. A team lead's **My team** page (and an admin's view of it) shows the same map for their team only; promoters on a team do not get it. Only cities are used, never anything more precise. The map is [Leaflet](https://leafletjs.com) with its heat layer, served by the app; the map tiles come from [OpenStreetMap](https://www.openstreetmap.org) (free, no key, attribution shown on the map), so admins' and team leads' browsers load them from there.
+
 ## Promo codes
 
 **Promoters → Promo codes** lists the promo codes in Hi.Events with their event, orders and who each is assigned to, 25 per page. Search by code, event or promoter name, and filter by upcoming, past or all events and by assigned or not (upcoming events by default, soonest first). **All promoters** links to it, with the number of codes on upcoming events assigned to nobody.
