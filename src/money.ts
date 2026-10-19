@@ -22,31 +22,37 @@ export function commissionCents(fullPrice: string, percent: number): number {
 }
 
 /*
- * A promoter's commission: their usual percentage, except on events where an admin set another one,
- * either another percentage or a flat amount per ticket sold.
+ * A promoter's commission: their usual rate (a percentage, or a flat amount per ticket sold), except on
+ * events where an admin set another one.
  */
 export type EventRule = { kind: 'percent' | 'flat'; value: number }; // a percentage, or cents per ticket
-export type Rate = { percent: number; events: Map<number, EventRule> };
+export type Rate = { usual: EventRule; events: Map<number, EventRule> };
 
-export const asRate = (rate: Rate | number): Rate => (typeof rate === 'number' ? { percent: rate, events: new Map() } : rate);
+// A bare number is a percentage (tests and simple callers).
+export const asRate = (rate: Rate | number): Rate => (typeof rate === 'number' ? { usual: { kind: 'percent', value: rate }, events: new Map() } : rate);
 
-/** Commission on sales for one event (or none known): full price × the rate, or tickets × the flat amount. */
+/** Commission on sales for one event (or none known): full price × the percentage, or tickets × the flat amount. */
 export function commissionOn(rate: Rate | number, eventId: number | undefined, fullPrice: string, tickets: number): number {
   const r = asRate(rate);
-  const rule = eventId === undefined ? undefined : r.events.get(eventId);
-  if (rule?.kind === 'flat') return Math.round(rule.value) * tickets;
-  return commissionCents(fullPrice, rule?.kind === 'percent' ? rule.value : r.percent);
+  const rule = (eventId === undefined ? undefined : r.events.get(eventId)) ?? r.usual;
+  if (rule.kind === 'flat') return Math.round(rule.value) * tickets;
+  return commissionCents(fullPrice, rule.value);
 }
 
-export function describeRule(rule: EventRule, currency: string): string {
+/** Commission on sales outside Hi.Events, by the usual rate: the sales total × the percentage, or tickets × the flat amount. */
+export function usualCommissionOn(rule: EventRule, salesCents: number, tickets: number): number {
+  return rule.kind === 'flat' ? Math.round(rule.value) * tickets : Math.round((salesCents * rule.value) / 100);
+}
+
+export function describeRule(rule: EventRule, currency = 'CAD'): string {
   return rule.kind === 'flat' ? `${formatMoney(rule.value, currency)} per ticket` : formatPercent(rule.value);
 }
 
-/** "10%", or "10%, other rates on some events" for a promoter with event rates. */
+/** "10%" or "$2.00 per ticket", plus ", other rates on some events" for a promoter with event rates. */
 export function describeRate(rate: Rate | number, eventIds?: number[]): string {
   const r = asRate(rate);
   const others = eventIds ? eventIds.some((id) => r.events.has(id)) : r.events.size > 0;
-  return others ? `${formatPercent(r.percent)}, other rates on some events` : formatPercent(r.percent);
+  return `${describeRule(r.usual)}${others ? ', other rates on some events' : ''}`;
 }
 
 export type Totals = {

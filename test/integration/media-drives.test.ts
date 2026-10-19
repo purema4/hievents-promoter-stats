@@ -3,13 +3,15 @@ import { Client, describeIntegration, location, newPromoter, signInAdmin, startS
 
 /*
  * A media drive per event, from Promoters → Media drives. From dev/seed.sql: DJMAX is on Warehouse Night
- * (event 1, upcoming), Winter Opening (event 2, upcoming) and Summer Rooftop (event 4, over); LUNA only on event 1.
+ * (event 1, upcoming), Winter Opening (event 2, upcoming) and Summer Rooftop (event 4, over); LUNA only on
+ * event 1; NOVA also on Secret Afterparty (event 5, a draft).
  */
 describeIntegration('media drives', () => {
   let server: Server;
   let admin: Client;
   let maya: Awaited<ReturnType<typeof newPromoter>>;
   let luna: Awaited<ReturnType<typeof newPromoter>>;
+  let nova: Awaited<ReturnType<typeof newPromoter>>;
   const drive = 'https://drive.google.com/drive/folders/warehouse-night';
   const rooftop = 'https://www.dropbox.com/sh/summer-rooftop';
 
@@ -21,16 +23,19 @@ describeIntegration('media drives', () => {
     admin = await signInAdmin(server);
     maya = await newPromoter(server, admin, { name: `Maya ${uid()}`, codes: 'DJMAX' });
     luna = await newPromoter(server, admin, { name: `Luna ${uid()}`, codes: 'LUNA' });
+    nova = await newPromoter(server, admin, { name: `Nova ${uid()}`, codes: 'NOVA' });
   }, 60_000);
   afterAll(async () => {
     await server?.stop();
   });
 
-  test('admins see every event with promoter codes, past ones too', async () => {
+  test('admins see the drafts and upcoming events with promoter codes, not the ones that are over', async () => {
     expect(await admin.page('/admin')).toContain('<a href="/admin/media">Media drives</a>');
     const html = text(await admin.page('/admin/media'));
     expect(html).toContain('Warehouse Night');
-    expect(html).toContain('Summer Rooftop');
+    expect(html).toContain('Winter Opening');
+    expect(html).toContain('Secret Afterparty');
+    expect(html).not.toContain('Summer Rooftop');
     // Nothing set yet: no button for promoters.
     expect(await maya.client.page('/')).not.toContain('Media drive');
   });
@@ -49,11 +54,12 @@ describeIntegration('media drives', () => {
     expect(await luna.client.page('/events/1')).toContain(`href="${drive}"`);
   });
 
-  test('a drive on an event that is over', async () => {
-    expect(location(await set(4, rooftop))).toBe('/admin/media?ok=media_saved#event-4');
-    expect(await maya.client.page('/')).toContain(`href="${rooftop}"`);
-    expect(await maya.client.page('/events/4')).toContain(`href="${rooftop}"`);
-    expect(await luna.client.page('/')).not.toContain(rooftop);
+  test('a drive on a draft, but not on an event that is over', async () => {
+    expect(location(await set(5, rooftop))).toBe('/admin/media?ok=media_saved#event-5');
+    expect(await nova.client.page('/events/5')).toContain(`href="${rooftop}"`);
+    expect(await maya.client.page('/')).not.toContain(rooftop);
+    expect(await err(await set(4, rooftop))).toBe('media_event');
+    expect(await maya.client.page('/events/4')).not.toContain('Media drive');
   });
 
   test('what is refused', async () => {

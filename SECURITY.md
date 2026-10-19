@@ -65,9 +65,18 @@ Verified as safe, with no change needed:
 
 ## Re-check 2026-10-19: media drives and commission per event
 
-- **Promoters → Media drives** (`/admin/media`): admin-only, like every `/admin/*` route; a promoter gets 403, a signed-out visitor goes to the sign-in page, and a POST from another site gets 403 with nothing saved. Only `https://` links with a real host and no user name or password are saved (`javascript:`, `data:`, protocol-relative and over-long links are refused), and the event must be one with promoter codes. The server never fetches the link, so it cannot be used for SSRF. Quotes and brackets in a link are percent-encoded and shown as text. The button opens the drive with `rel="noopener noreferrer"`, and each change is in the audit log. A promoter only sees the drive of events with one of their codes. These checks are in `test/integration/media-drives.test.ts`.
+- **Promoters → Media drives** (`/admin/media`): admin-only, like every `/admin/*` route; a promoter gets 403, a signed-out visitor goes to the sign-in page, and a POST from another site gets 403 with nothing saved. Only `https://` links with a real host and no user name or password are saved (`javascript:`, `data:`, protocol-relative and over-long links are refused), and the event must be a draft or upcoming event with promoter codes. The server never fetches the link, so it cannot be used for SSRF. Quotes and brackets in a link are percent-encoded and shown as text. The button opens the drive with `rel="noopener noreferrer"`, and each change is in the audit log. A promoter only sees the drive of events with one of their codes. These checks are in `test/integration/media-drives.test.ts`.
 - Promoters' pages no longer show commission rates, only amounts.
 - `bun audit`: no vulnerabilities. gitleaks (history and the files to commit): no leaks. Trivy on the rebuilt image: 0 HIGH or CRITICAL. ZAP baseline with `.zap/rules.tsv`: 0 failures, 0 warnings (61 pass, 6 ignored with reasons). 344 tests pass.
+
+## Image uploads (2026-10-19)
+
+- Every stored image (profile photos uploaded by promoters or set by admins, the logo, Instagram photos) goes through `prepareImage` in `src/images.ts`: the type comes from the bytes (PNG, JPEG, WebP; SVG and anything else refused), the file is parsed and a truncated or disguised one is refused, its size is limited in bytes (2 MB photos, 1 MB logo) and in pixels (6000 per side, 25 megapixels, so a small file cannot expand into a huge image in an admin's browser), and metadata is removed: EXIF (GPS position, camera, dates), XMP, IPTC, comments and PNG text chunks. Only a JPEG's rotation is kept, in a new minimal EXIF block. Data after the end of the image (a second file appended to it) is dropped. Pixels are not re-encoded.
+- At most 20 image uploads per person per hour (in memory).
+- A body over the upload limit is answered without being read, with `Connection: close`, so the rest of the upload is not read as the next request on that connection.
+- Instagram: no redirects are followed, the page read stops at 2 MB and the image download stops past 2 MB instead of being loaded whole.
+- Admins setting a promoter's photo: admin-only route (403 for promoters, 403 cross-site), audited, and the promoter is notified.
+- Images are served with their own type, `nosniff` and the strict CSP. Tests: `test/unit/images.test.ts` (real PNG, JPEG, lossy and lossless WebP with fake GPS, XMP, comments and appended files) and `test/integration/profile-photo.test.ts`.
 
 ## Controls by category
 

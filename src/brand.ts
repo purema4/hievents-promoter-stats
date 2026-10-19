@@ -70,15 +70,7 @@ export function updateBrand(input: { name: string; accent: string; loginMessage:
   });
 }
 
-// Only raster formats, recognised by their first bytes: an SVG could carry scripts.
-export function sniffImage(bytes: Uint8Array): string | null {
-  const starts = (...sig: number[]) => sig.every((b, i) => bytes[i] === b);
-  if (starts(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a)) return 'image/png';
-  if (starts(0xff, 0xd8, 0xff)) return 'image/jpeg';
-  if (starts(0x52, 0x49, 0x46, 0x46) && String.fromCharCode(...bytes.slice(8, 12)) === 'WEBP') return 'image/webp';
-  return null;
-}
-
+// PNG, JPEG or WebP only (an SVG could carry scripts), checked and cleaned by src/images.ts.
 export const maxLogoBytes = 1024 * 1024;
 
 export function saveLogo(bytes: Uint8Array, type: string) {

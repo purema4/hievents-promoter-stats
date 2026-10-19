@@ -48,6 +48,8 @@ export function addColumn(table: string, column: string, type: string) {
 }
 // The 6-digit code that goes with each sign-in link.
 addColumn('login_tokens', 'code_hash', 'TEXT');
+// A promoter's usual commission as a flat amount per ticket sold, in cents; when set, it replaces commission_percent.
+addColumn('users', 'commission_flat_cents', 'INTEGER');
 // The browser or installed app that asked for the link waits for it to be opened (see auth.ts).
 addColumn('login_tokens', 'wait_hash', 'TEXT');
 addColumn('login_tokens', 'requested_from', 'TEXT');
@@ -92,6 +94,7 @@ export type User = {
   password_hash: string | null;
   is_admin: number;
   commission_percent: number | null;
+  commission_flat_cents?: number | null;
   payout_method?: string | null;
   payout_details?: string | null;
   first_name?: string | null;
@@ -101,7 +104,7 @@ export type User = {
   instagram?: string | null;
   theme?: 'system' | 'light' | 'dark' | null;
   avatar_type?: string | null;
-  avatar_source?: 'upload' | 'instagram' | null;
+  avatar_source?: 'upload' | 'admin' | 'instagram' | null;
   avatar_for?: string | null;
   avatar_checked_at?: number | null;
   app_installed_at?: number | null;
@@ -142,29 +145,35 @@ export async function createUser(input: {
   name: string;
   password?: string;
   isAdmin: boolean;
-  commissionPercent?: number | null;
+  commission?: UsualCommission;
 }): Promise<number> {
   const hash = input.password ? await Bun.password.hash(input.password) : null;
   const row = db
-    .query<{ id: number }, [string, string, string | null, number, number | null]>(
-      'INSERT INTO users (email, name, password_hash, is_admin, commission_percent) VALUES (?, ?, ?, ?, ?) RETURNING id',
+    .query<{ id: number }, [string, string, string | null, number, number | null, number | null]>(
+      'INSERT INTO users (email, name, password_hash, is_admin, commission_percent, commission_flat_cents) VALUES (?, ?, ?, ?, ?, ?) RETURNING id',
     )
-    .get(input.email.trim(), input.name.trim(), hash, input.isAdmin ? 1 : 0, input.commissionPercent ?? null);
+    .get(input.email.trim(), input.name.trim(), hash, input.isAdmin ? 1 : 0, input.commission?.percent ?? null, input.commission?.flatCents ?? null);
   return row!.id;
 }
 
-export function updateUser(id: number, input: { name: string; email: string; isAdmin: boolean; commissionPercent: number | null }) {
-  db.query('UPDATE users SET name = ?, email = ?, is_admin = ?, commission_percent = ? WHERE id = ?').run(
+/** A promoter's usual commission as set by an admin: a percentage, a flat amount per ticket (cents), or neither (the default). */
+export type UsualCommission = { percent: number | null; flatCents: number | null };
+
+export function updateUser(id: number, input: { name: string; email: string; isAdmin: boolean; commission: UsualCommission }) {
+  db.query('UPDATE users SET name = ?, email = ?, is_admin = ?, commission_percent = ?, commission_flat_cents = ? WHERE id = ?').run(
     input.name.trim(),
     input.email.trim(),
     input.isAdmin ? 1 : 0,
-    input.commissionPercent,
+    input.commission.percent,
+    input.commission.flatCents,
     id,
   );
 }
 
-export function commissionPercentFor(user: User): number {
-  return user.commission_percent ?? config.commissionPercent;
+/** A promoter's usual commission: their flat amount per ticket, their percentage, or the default COMMISSION_PERCENT. */
+export function usualRuleFor(user: User): { kind: 'percent' | 'flat'; value: number } {
+  if (user.commission_flat_cents != null) return { kind: 'flat', value: user.commission_flat_cents };
+  return { kind: 'percent', value: user.commission_percent ?? config.commissionPercent };
 }
 
 export async function setPassword(id: number, password: string) {

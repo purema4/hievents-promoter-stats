@@ -17,7 +17,7 @@ A small standalone site where promoters sign in and see how many tickets were so
 | Orders | Completed orders that used the code. |
 | Ticket sales at full price | Each item's price before the promo code's discount (`order_items.price_before_discount`, or `price` when no discount applied) × quantity, without taxes and fees. Partial refunds are taken off proportionally, the way Hi.Events adjusts its own stats. A $10 ticket bought with a 10% code counts as $10. |
 | Paid by customers | The order total after promo codes and discounts (`total_before_additions`), minus refunds the same way. Shown on event pages for reference. |
-| Commission | Full-price sales × the promoter's rate. `COMMISSION_PERCENT` (default 10) applies unless a promoter has their own rate set in the admin. On **Promoters → Commissions**, admins can also choose, per promoter and event, another percentage or a flat amount per ticket sold (tickets that are paid and not cancelled). |
+| Commission | Full-price sales × the promoter's rate, or tickets sold × a flat amount per ticket. `COMMISSION_PERCENT` (default 10) applies unless an admin gives the promoter their own usual rate when adding or editing them: another percentage, or CAD per ticket. Sales entered by hand outside Hi.Events earn the usual rate too (the sales total × the percentage, or the tickets × the flat amount). On **Promoters → Commissions**, admins can also choose, per promoter and event, another percentage or a flat amount per ticket sold (tickets that are paid and not cancelled). |
 | Tickets sold per day | Completed orders by the day they were placed, in `APP_TIMEZONE` (default `America/Toronto`). Periods longer than 120 days switch to weekly bars. |
 
 Add-on products (non-ticket items) are not counted as tickets, but they are included in sales. Pending orders earn commission only once paid. A 100%-off code still earns commission on the full price; give comp tickets another way if that is not wanted.
@@ -95,7 +95,7 @@ On **Promoters → Invite links**, admins make links to share (a group chat, a f
 
 **Promoters → Commissions** lists every event that is not over (drafts included) with the promoters who have one of its codes. For each promoter and event, choose **Usual rate** (their own %), **% of sales** (another percentage) or **per ticket** (a flat amount for each ticket sold). Like the usual rate, a change applies to all their sales for that event, earlier ones too, and stays when the event is over. Promoters see the commission amounts, never a rate, since it can differ per event; a flat amount replaces the percentage on that event, it is not added to it. Their balance, payouts, charts and the admin dashboard all use it. A team lead's team commission stays a percentage of their promoters' sales.
 
-**Promoters → Media drives** lists every event with promoter codes, newest first, past events included. Paste a link to a public folder (Google Drive, Dropbox…, `https://` only) with the event's photos, videos and flyers: the promoters with a code on the event get a **Media drive** button on their dashboard's event card and on the event page. Save an empty link to remove it.
+**Promoters → Media drives** lists the drafts and events that are not over with promoter codes, soonest first (like Commissions). Paste a link to a public folder (Google Drive, Dropbox…, `https://` only) with the event's photos, videos and flyers: the promoters with a code on the event get a **Media drive** button on their dashboard's event card and on the event page. Save an empty link to remove it.
 
 ## Changes by hand
 
@@ -112,7 +112,7 @@ Each change needs a reason, shows on the promoter's **Payouts & rewards** page u
 
 ## Admin dashboard
 
-Admins land on **Dashboard**: tickets, full-price sales and commission through promoter codes for 7 / 30 / 90 days or all time, what is still owed, a tickets-per-day chart, and the best promoters ranked by tickets, sales or commission with their level and last sale. Below that, **Promoter activity** lists every promoter with when they were last active and last signed in, whether they installed the app and whether two-step verification is on, most recently active first.
+Admins land on **Dashboard**, even an admin with promo codes of their own (their sales are on their promoter page under **All promoters**): tickets, full-price sales and commission through promoter codes for 7 / 30 / 90 days or all time, what is still owed, a tickets-per-day chart, and the best promoters ranked by tickets, sales or commission with their level and last sale. Below that, **Promoter activity** lists every promoter with when they were last active and last signed in, whether they installed the app and whether two-step verification is on, most recently active first.
 
 ## Menu
 
@@ -127,7 +127,7 @@ The app keeps a standard width (1280 px, centred) even on very wide screens. Pag
 
 ## First sign-in
 
-A promoter's first visit opens three welcome steps instead of the dashboard: how it works (their codes, commission rate and how it is counted, rewards and levels), their profile (name, phone, city, Instagram, payout method and email), then installing the app and turning on notifications. They can skip; either way it is shown once. Admins never see it.
+A promoter's first visit opens four welcome steps instead of the dashboard: how it works (their codes, how commission is counted, rewards and levels), their profile (name, phone, city, Instagram, payout method and email), their profile photo (their Instagram one is fetched for a few seconds after the profile step and shown there; they can upload another, or skip), then installing the app and turning on notifications. They can skip; either way it is shown once. Admins never see it.
 
 ## Emails
 
@@ -138,6 +138,16 @@ Sending reuses one connection to the mail server, gives up on an unreachable ser
 ## Profile photos
 
 A promoter's photo is the one they upload on Account, or else the one from their Instagram: the server reads their public profile once, keeps a copy and refreshes it weekly. Instagram has no API for this and can refuse such requests; then initials are shown. Promoters can only see their own photo; admins see everyone's.
+
+Admins can also set or remove a promoter's photo on the promoter's page (**Photo**); the promoter is notified and can replace it with their own.
+
+Every image (profile photos, the logo, Instagram photos) is checked and cleaned before it is stored (`src/images.ts`): PNG, JPEG or WebP recognised by their content, at most 2 MB for photos and 1 MB for the logo, at most 6000 pixels on a side and 25 megapixels, with metadata removed (EXIF including GPS position, XMP, comments, text chunks; a photo's rotation is kept) and anything after the end of the image dropped. Each person can upload at most 20 images an hour. Instagram photos are downloaded without following redirects and the download stops past 2 MB.
+
+Adding one is a welcome step. Until a promoter has a photo, their dashboard shows **Add your profile photo** (linking to Account), and **All promoters** flags them with **No photo** for admins.
+
+## Promo codes
+
+**Promoters → Promo codes** lists the promo codes in Hi.Events with their event, orders and who each is assigned to, 25 per page. Search by code, event or promoter name, and filter by upcoming, past or all events and by assigned or not (upcoming events by default, soonest first). **All promoters** links to it, with the number of codes on upcoming events assigned to nobody.
 
 ## Notifications
 
@@ -181,7 +191,7 @@ Balances are computed live: a refund after a payout lowers the balance and nets 
 
 ## Adding promoters and signing in
 
-1. As admin, open **Promoters**, enter the promoter's name, email and promo codes, and optionally a commission rate. Leave **Email them a sign-in link now** ticked.
+1. As admin, open **Promoters**, enter the promoter's name, email and promo codes, and optionally their commission: the default, another percentage, or CAD per ticket. Leave **Email them a sign-in link now** ticked.
 2. They get an email with a **Sign in** button (valid `INVITE_LINK_DAYS`, default 7). One click signs them in for `SESSION_DAYS` (default 30).
 3. After that, they go to the site, enter their email, and get a fresh link (valid `LOGIN_LINK_MINUTES`, default 30). Promoters never have a password.
 

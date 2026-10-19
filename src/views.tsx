@@ -16,8 +16,8 @@ import { hiddenByTeam } from './promoter-page';
 import { rateFor } from './commission';
 import { findInvite, inviteState, type InviteLink } from './invites';
 import { isTeamLead, teamCommissionPercentFor, type TeamCommission } from './teams';
-import type { PromoCodeListing } from './hievents';
-import { commissionPercentFor, type User } from './local-db';
+import { codesHref, codesPerPage, type CodeFilter, type CodePage } from './promo-code-list';
+import { usualRuleFor, type User } from './local-db';
 import { describeRate, describeRule, formatMoney, formatPercent, type EventRule } from './money';
 import { countPendingPayouts, type Balance, type PayoutRequest } from './payouts';
 import { LinkField, PayoutHistory, RewardHistory } from './promoter-views';
@@ -330,6 +330,7 @@ h3 { font-size: 15px; margin: 0 0 12px; }
 .unlocks li::before { content: '○'; display: inline-block; width: 1.4em; }
 .unlocks li.ready { color: var(--text); font-weight: 600; }
 .unlocks li.ready::before { content: '●'; color: var(--ok); }
+.chip.warn { color: var(--warn); border-color: var(--warn); margin-left: 6px; }
 .chip { display: inline-block; font-size: 12px; font-weight: 600; padding: 1px 8px; margin: 2px 0; border-radius: 999px; color: var(--ok); border: 1px solid var(--ok); }
 .reward-card { display: flex; gap: 16px; align-items: center; justify-content: space-between; margin-bottom: 20px; }
 .reward-card > div { flex: 1; }
@@ -414,6 +415,12 @@ body.impersonating .sidebar { padding-bottom: calc(96px + env(safe-area-inset-bo
 .rate-fields { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .rate-fields select { width: auto; }
 .rate-fields input { width: 110px; }
+.commission-field { display: grid; gap: 4px; font-size: 13px; color: var(--muted); }
+/* Promoters → Promo codes */
+.filter-bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 0 0 12px; }
+.filter-bar input[type='search'] { flex: 1 1 240px; width: auto; }
+.filter-bar select { width: auto; }
+.pager { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 12px; }
 /* Promoters → Media drives */
 .media-form { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 0; }
 .media-form input { flex: 1 1 280px; width: auto; }
@@ -728,6 +735,7 @@ function Sidebar(props: { user: User }) {
           </NavGroup>
           <NavGroup title="Promoters">
             <a href="/admin">All promoters</a>
+            <a href="/admin/codes">Promo codes</a>
             <a href="/admin/teams">Teams</a>
             <a href="/admin/commissions">Commissions</a>
             <a href="/admin/media">Media drives</a>
@@ -947,6 +955,8 @@ export function AccountPage(props: { user: User; error?: string; ok?: string }) 
               <div class="muted">
                 {u.avatar_source === 'upload'
                   ? 'Your uploaded photo.'
+                  : u.avatar_source === 'admin'
+                    ? 'A photo the team chose for you. Upload your own to replace it.'
                   : u.avatar_source === 'instagram'
                     ? `Your Instagram photo (${u.avatar_for ? `@${u.avatar_for}` : ''}), refreshed weekly.`
                     : 'Add your Instagram below to use its photo, or upload one.'}
@@ -956,7 +966,7 @@ export function AccountPage(props: { user: User; error?: string; ok?: string }) 
               Upload a photo instead (PNG, JPEG or WebP, up to {Math.round(maxAvatarBytes / 1024 / 1024)} MB)
               <input type="file" name="photo" accept="image/png,image/jpeg,image/webp" />
             </label>
-            {u.avatar_source === 'upload' && (
+            {(u.avatar_source === 'upload' || u.avatar_source === 'admin') && (
               <label class="check">
                 <input type="checkbox" name="use_instagram_photo" value="1" /> Remove my photo and use my Instagram one
               </label>
@@ -1046,28 +1056,38 @@ function PasswordForm() {
   );
 }
 
-function CommissionField(props: { value: number | null }) {
+// A promoter's usual commission: the default percentage, their own percentage, or a flat amount per
+// ticket sold. Per event, admins can set another one on Commissions.
+function CommissionField(props: { user?: User }) {
+  const u = props.user;
+  const kind = u?.commission_flat_cents != null ? 'flat' : u?.commission_percent != null ? 'percent' : 'default';
+  const value = kind === 'flat' ? (u!.commission_flat_cents! / 100).toFixed(2) : kind === 'percent' ? String(u!.commission_percent) : '';
   return (
-    <label>
-      Commission % (leave empty for the default, {formatPercent(config.commissionPercent)})
-      <input
-        type="number"
-        name="commission_percent"
-        min="0"
-        max="100"
-        step="0.01"
-        value={props.value === null ? '' : String(props.value)}
-        placeholder={String(config.commissionPercent)}
-      />
-    </label>
+    <div class="commission-field">
+      <span>Commission</span>
+      <span class="rate-fields">
+        <select name="commission_kind" aria-label="How they are paid">
+          <option value="default" selected={kind === 'default'}>
+            Default ({formatPercent(config.commissionPercent)} of sales)
+          </option>
+          <option value="percent" selected={kind === 'percent'}>
+            % of sales
+          </option>
+          <option value="flat" selected={kind === 'flat'}>
+            CAD per ticket
+          </option>
+        </select>
+        <input name="commission_value" inputmode="decimal" aria-label="Percentage or amount per ticket" placeholder="10 or 2.50" value={value} />
+      </span>
+      <span class="muted">Their usual rate. For one event, set another on Commissions.</span>
+    </div>
   );
 }
 
 export function AdminPage(props: {
   user: User;
   promoters: (User & { codes: string[] })[];
-  promoCodes: PromoCodeListing[];
-  owners: Map<string, string[]>;
+  unassigned: number; // promo codes on events that are not over, assigned to nobody
   error?: string;
   ok?: string;
 }) {
@@ -1077,8 +1097,9 @@ export function AdminPage(props: {
     <Layout title="Promoters" user={props.user}>
       <h1>Promoters</h1>
       <p class="muted">
-        Each promoter sees the sales of the promo codes assigned to them, across all events, and their commission. The
-        default commission is {formatPercent(config.commissionPercent)}.
+        Each promoter sees the sales of the promo codes assigned to them, across all events, and their commission: a
+        percentage of the full-price sales (by default {formatPercent(config.commissionPercent)}) or a flat amount per
+        ticket sold.
       </p>
       <Flash error={props.error} ok={props.ok} />
 
@@ -1102,6 +1123,7 @@ export function AdminPage(props: {
                         <a href={`/admin/promoters/${p.id}`}>{p.name}</a>
                         {p.is_admin ? <span class="muted"> (admin)</span> : null}
                         {isTeamLead(p) ? <span class="muted"> (team lead)</span> : null}
+                        {!p.is_admin && !avatarOf(p) ? <span class="chip warn">No photo</span> : null}
                         <div class="muted">
                           {p.email}
                           {p.alias ? ` · aff=${p.alias}` : ''}
@@ -1111,7 +1133,7 @@ export function AdminPage(props: {
                     </div>
                   </td>
                   <td>{p.codes.length ? p.codes.map((c) => <span class="code">{c}</span>) : <span class="muted">None</span>}</td>
-                  <td class="num">{formatPercent(commissionPercentFor(p))}</td>
+                  <td class="num">{describeRule(usualRuleFor(p))}</td>
                 </tr>
               ))}
             </tbody>
@@ -1133,7 +1155,7 @@ export function AdminPage(props: {
               Promo codes (comma or space separated, case does not matter)
               <textarea name="codes" />
             </label>
-            <CommissionField value={null} />
+            <CommissionField />
             <label class="check">
               <input type="checkbox" name="invite" value="1" checked /> Email them a sign-in link now
             </label>
@@ -1145,34 +1167,100 @@ export function AdminPage(props: {
         </div>
       </div>
 
-      <h2>Promo codes in Hi.Events</h2>
-      <div class="card table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Code</th>
-              <th>Event</th>
-              <th class="num">Orders</th>
-              <th>Assigned to</th>
-            </tr>
-          </thead>
-          <tbody>
-            {props.promoCodes.map((pc) => (
+      <p class="muted">
+        <a href="/admin/codes">Promo codes in Hi.Events →</a>
+        {props.unassigned > 0 && (
+          <>
+            {' '}
+            <a href="/admin/codes?show=unassigned">
+              {props.unassigned} on upcoming events {props.unassigned === 1 ? 'is' : 'are'} assigned to nobody
+            </a>
+          </>
+        )}
+      </p>
+    </Layout>
+  );
+}
+
+// Promoters → Promo codes: every code in Hi.Events, searched, filtered and paged on the server.
+export function AdminCodesPage(props: { user: User; filter: CodeFilter; result: CodePage }) {
+  const f = props.filter;
+  const r = props.result;
+  const first = (r.page - 1) * codesPerPage + 1;
+  return (
+    <Layout title="Promo codes" user={props.user}>
+      <h1>Promo codes</h1>
+      <p class="muted">The promo codes in Hi.Events and who each one is assigned to. Assign codes on a promoter's page.</p>
+      <form class="card filter-bar" method="get" action="/admin/codes">
+        <input type="search" name="q" value={f.q} placeholder="Code, event or promoter" aria-label="Search" maxlength={100} />
+        <select name="when" aria-label="Events">
+          <option value="upcoming" selected={f.when === 'upcoming'}>
+            Upcoming events
+          </option>
+          <option value="past" selected={f.when === 'past'}>
+            Past events
+          </option>
+          <option value="all" selected={f.when === 'all'}>
+            All events
+          </option>
+        </select>
+        <select name="show" aria-label="Assigned">
+          <option value="all" selected={f.show === 'all'}>
+            Assigned or not
+          </option>
+          <option value="assigned" selected={f.show === 'assigned'}>
+            Assigned
+          </option>
+          <option value="unassigned" selected={f.show === 'unassigned'}>
+            Assigned to nobody
+          </option>
+        </select>
+        <button type="submit">Search</button>
+        {(f.q || f.show !== 'all' || f.when !== 'upcoming') && <a href="/admin/codes">Clear</a>}
+      </form>
+      <p class="muted">
+        {r.total === 0
+          ? 'No promo codes match.'
+          : `${r.total === 1 ? '1 promo code' : `${r.total} promo codes`}${r.pages > 1 ? `, ${first} to ${first + r.rows.length - 1} shown` : ''}.`}
+      </p>
+      {r.rows.length > 0 && (
+        <div class="card table-wrap">
+          <table>
+            <thead>
               <tr>
-                <td>
-                  <span class="code">{pc.code}</span>
-                </td>
-                <td>
-                  {pc.event_title}
-                  <div class="muted">{formatDate(pc.event_start, pc.event_timezone)}</div>
-                </td>
-                <td class="num">{pc.order_usage_count}</td>
-                <td>{props.owners.get(pc.code.toLowerCase())?.join(', ') ?? <span class="muted">Nobody</span>}</td>
+                <th>Code</th>
+                <th>Event</th>
+                <th class="num">Orders</th>
+                <th>Assigned to</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody>
+              {r.rows.map((pc) => (
+                <tr>
+                  <td>
+                    <span class="code">{pc.code}</span>
+                  </td>
+                  <td>
+                    {pc.event_title}
+                    <div class="muted">{formatDate(pc.event_start, pc.event_timezone)}</div>
+                  </td>
+                  <td class="num">{pc.order_usage_count}</td>
+                  <td>{pc.owners.length ? pc.owners.join(', ') : <span class="muted">Nobody</span>}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {r.pages > 1 && (
+        <nav class="pager" aria-label="Pages">
+          {r.page > 1 ? <a href={codesHref(f, { page: r.page - 1 })}>← Previous</a> : <span />}
+          <span class="muted">
+            Page {r.page} of {r.pages}
+          </span>
+          {r.page < r.pages ? <a href={codesHref(f, { page: r.page + 1 })}>Next →</a> : <span />}
+        </nav>
+      )}
     </Layout>
   );
 }
@@ -1354,7 +1442,7 @@ export function PromoterPage(props: {
               Alias (in their links as aff=…; they can change it too)
               <input name="alias" value={p.alias ?? ''} pattern="[a-zA-Z0-9][a-zA-Z0-9_-]{1,29}" maxlength={30} required />
             </label>
-            <CommissionField value={p.commission_percent} />
+            <CommissionField user={p} />
             <label class="check">
               <input type="checkbox" name="is_admin" value="1" checked={!!p.is_admin} /> Admin
             </label>
@@ -1493,6 +1581,37 @@ export function PromoterPage(props: {
         <p class="muted">Filled in by the promoter on their Account page.</p>
       </div>
 
+      <h2 id="photo">Photo</h2>
+      <div class="card stack-card">
+        <div class="photo-row">
+          <Avatar user={p} size="large" />
+          <div class="muted">
+            {p.avatar_source === 'upload'
+              ? 'Uploaded by them.'
+              : p.avatar_source === 'admin'
+                ? 'Set by the team. They can replace it on Account.'
+                : p.avatar_source === 'instagram'
+                  ? `From their Instagram${p.avatar_for ? ` (@${p.avatar_for})` : ''}, refreshed weekly.`
+                  : 'No photo yet: their initials show instead.'}
+          </div>
+        </div>
+        <form class="stack" method="post" action={`/admin/promoters/${p.id}/photo`} enctype="multipart/form-data">
+          <label>
+            Set their photo (PNG, JPEG or WebP, up to {Math.round(maxAvatarBytes / 1024 / 1024)} MB). They are told.
+            <input type="file" name="photo" accept="image/png,image/jpeg,image/webp" required />
+          </label>
+          <button type="submit">Save photo</button>
+        </form>
+        {(p.avatar_source === 'upload' || p.avatar_source === 'admin') && (
+          <form method="post" action={`/admin/promoters/${p.id}/photo/remove`}>
+            <button class="secondary" type="submit">
+              Remove this photo{p.instagram ? ' and use their Instagram one' : ''}
+            </button>
+          </form>
+        )}
+        <p class="muted">Location and other details stored in photos are removed when they are saved.</p>
+      </div>
+
       <h2>Sales and commission</h2>
       <div class="grid">
         {props.balances.map((b) => (
@@ -1562,8 +1681,8 @@ export function PromoterPage(props: {
             </label>
           </div>
           <p class="muted">
-            {p.name} gets their commission ({formatPercent(commissionPercentFor(p))}) on the ticket sales, added to their
-            balance. The tickets count for their levels, merch and ranking.
+            {p.name} gets their usual commission ({usualRuleFor(p).kind === 'flat' ? `${describeRule(usualRuleFor(p), currency)} sold` : `${describeRule(usualRuleFor(p))} of the sales total`}),
+            added to their balance. The tickets count for their levels, merch and ranking.
           </p>
           <NotifyBox />
           <button type="submit">Add sales</button>
@@ -2141,7 +2260,7 @@ export function AdminEmailEditPage(props: { user: User; type: EmailType; version
   );
 }
 
-const WELCOME_STEPS = 3;
+const WELCOME_STEPS = 4;
 
 function Steps(props: { at: number }) {
   return (
@@ -2168,8 +2287,10 @@ export function WelcomePage(props: {
   step: number;
   codes: string[];
   pushKey: string;
+  error?: string;
 }) {
   const u = props.user;
+  const hasPhoto = !!avatarOf(u);
   const brand = getBrand();
   const rules = rewardRules();
   const levels = rules.levels;
@@ -2277,6 +2398,34 @@ export function WelcomePage(props: {
         )}
         {props.step === 3 && (
           <>
+            <h1>Your photo</h1>
+            <p class="muted">It shows on your public page and to the team. A clear photo of your face works best.</p>
+            <Flash error={props.error} />
+            <form class="card stack-card" method="post" action="/welcome/photo" enctype="multipart/form-data">
+              <div class="photo-row">
+                <Avatar user={u} size="large" />
+                <div class="muted">
+                  {!hasPhoto
+                    ? 'No photo yet.'
+                    : u.avatar_source === 'instagram'
+                      ? 'This is your Instagram photo. Upload another one if you prefer.'
+                      : 'Looking good. Upload another one to change it.'}
+                </div>
+              </div>
+              <label>
+                {hasPhoto ? 'Upload another photo' : 'Upload a photo'} (PNG, JPEG or WebP, up to {Math.round(maxAvatarBytes / 1024 / 1024)} MB)
+                <input type="file" name="photo" accept="image/png,image/jpeg,image/webp" required={!hasPhoto} />
+              </label>
+              <div class="welcome-actions">
+                <a href="/welcome?step=2">Back</a>
+                {!hasPhoto && <a href="/welcome?step=4">Skip for now</a>}
+                <button type="submit">{hasPhoto ? 'Next' : 'Save my photo'}</button>
+              </div>
+            </form>
+          </>
+        )}
+        {props.step === 4 && (
+          <>
             <h1>Get the app</h1>
             <p class="muted">Install it on your phone and turn on notifications to hear about every payout, reward and milestone.</p>
             <InstallSteps />
@@ -2294,7 +2443,7 @@ export function WelcomePage(props: {
               </div>
             </div>
             <form class="welcome-actions" method="post" action="/welcome/done">
-              <a href="/welcome?step=2">Back</a>
+              <a href="/welcome?step=3">Back</a>
               <button type="submit">Go to my dashboard</button>
             </form>
           </>
@@ -3159,7 +3308,7 @@ export function AdminCommissionsPage(props: {
           <div class="rate-rows">
             {e.promoters.map((p) => {
               const rule = props.rules.get(`${p.id}:${e.id}`);
-              const usual = formatPercent(commissionPercentFor(p));
+              const usual = describeRule(usualRuleFor(p), e.currency);
               return (
                 <form class="rate-row" method="post" action="/admin/commissions">
                   <input type="hidden" name="user_id" value={String(p.id)} />
@@ -3218,10 +3367,10 @@ export function AdminMediaPage(props: {
       <p class="muted">
         Add a link to a shared folder (Google Drive, Dropbox…) with the photos, videos and flyers for an event. The
         promoters with a code on the event get a Media drive button on their dashboard and on the event page. Share
-        the folder so anyone with the link can open it.
+        the folder so anyone with the link can open it. Only drafts and events that are not over are listed.
       </p>
       <Flash error={props.error} ok={props.ok} />
-      {props.events.length === 0 && <p class="muted">No events with promoter codes.</p>}
+      {props.events.length === 0 && <p class="muted">No upcoming events with promoter codes.</p>}
       {props.events.map((e) => {
         const url = props.drives.get(e.id);
         return (

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import type { CodeStats } from '../../src/hievents';
-import { commissionCents, formatMoney, formatPercent, toCents, totalsByCurrency } from '../../src/money';
+import { commissionCents, commissionOn, describeRate, formatMoney, formatPercent, toCents, totalsByCurrency, usualCommissionOn, type Rate } from '../../src/money';
 
 function row(overrides: Partial<CodeStats>): CodeStats {
   return {
@@ -99,5 +99,37 @@ describe('formatting', () => {
     expect(toCents('28.50')).toBe(2850);
     expect(toCents(9)).toBe(900);
     expect(toCents('0.07')).toBe(7);
+  });
+});
+
+describe('usual rate: a percentage or a flat amount per ticket', () => {
+  const flat: Rate = { usual: { kind: 'flat', value: 200 }, events: new Map() };
+
+  test('a flat usual rate pays per ticket, never a percentage on top', () => {
+    expect(commissionOn(flat, 1, '100.00', 4)).toBe(800);
+    expect(commissionOn(flat, undefined, '100.00', 4)).toBe(800);
+    expect(totalsByCurrency([row({ event_id: 1, tickets_sold: 4, full_price: '100.00' })], flat)[0]!.commission).toBe(800);
+  });
+
+  test('an event rate replaces the usual one, either way round', () => {
+    const mixed: Rate = { usual: { kind: 'flat', value: 200 }, events: new Map([[1, { kind: 'percent', value: 10 }]]) };
+    expect(commissionOn(mixed, 1, '100.00', 4)).toBe(1000);
+    expect(commissionOn(mixed, 2, '100.00', 4)).toBe(800);
+    const percent: Rate = { usual: { kind: 'percent', value: 10 }, events: new Map([[1, { kind: 'flat', value: 300 }]]) };
+    expect(commissionOn(percent, 1, '100.00', 4)).toBe(1200);
+    expect(commissionOn(percent, 2, '100.00', 4)).toBe(1000);
+  });
+
+  test('sales outside Hi.Events: tickets × the flat amount, or the sales total × the percentage', () => {
+    expect(usualCommissionOn({ kind: 'flat', value: 250 }, 30_000, 12)).toBe(3000);
+    expect(usualCommissionOn({ kind: 'percent', value: 10 }, 30_000, 12)).toBe(3000);
+    // Taken back.
+    expect(usualCommissionOn({ kind: 'flat', value: 250 }, -10_000, -2)).toBe(-500);
+  });
+
+  test('described for admins', () => {
+    expect(describeRate(flat)).toBe('$2.00 per ticket');
+    expect(describeRate(10)).toBe('10%');
+    expect(describeRate({ ...flat, events: new Map([[1, { kind: 'percent', value: 5 }]]) })).toBe('$2.00 per ticket, other rates on some events');
   });
 });

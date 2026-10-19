@@ -294,7 +294,8 @@ export async function createPromoter(admin: Client, options: { name?: string; co
     name,
     email,
     codes: options.codes ?? 'DJMAX',
-    commission_percent: options.commission ?? '',
+    commission_kind: options.commission ? 'percent' : 'default',
+    commission_value: options.commission ?? '',
     invite: '0',
   });
   const id = Number(location(res)?.match(/^\/admin\/promoters\/(\d+)\?ok=created$/)?.[1]);

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { accentWarnings, brandCss, contrast, darkAccent, getBrand, isHex, sniffImage, textOn, updateBrand } from '../../src/brand';
+import { accentWarnings, brandCss, contrast, darkAccent, getBrand, isHex, textOn, updateBrand } from '../../src/brand';
 
 describe('contrast (WCAG)', () => {
   test('black on white is 21:1, and the order does not matter', () => {
@@ -41,25 +41,6 @@ describe('accentWarnings', () => {
   });
 });
 
-describe('sniffImage', () => {
-  const bytes = (...values: (number | string)[]) =>
-    new Uint8Array(values.flatMap((v) => (typeof v === 'string' ? [...Buffer.from(v)] : [v])));
-
-  test('recognises PNG, JPEG and WebP by their first bytes', () => {
-    expect(sniffImage(bytes(0x89, 'PNG', 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13))).toBe('image/png');
-    expect(sniffImage(bytes(0xff, 0xd8, 0xff, 0xe0, 0, 16, 'JFIF'))).toBe('image/jpeg');
-    expect(sniffImage(bytes('RIFF', 0x24, 0, 0, 0, 'WEBPVP8 '))).toBe('image/webp');
-  });
-
-  test('refuses SVG and everything else, whatever the name or type claimed', () => {
-    expect(sniffImage(bytes('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>'))).toBeNull();
-    expect(sniffImage(bytes('<?xml version="1.0"?><svg/>'))).toBeNull();
-    expect(sniffImage(bytes('GIF89a'))).toBeNull();
-    expect(sniffImage(bytes('RIFF', 0x24, 0, 0, 0, 'WAVEfmt '))).toBeNull();
-    expect(sniffImage(bytes(0x89, 'PNG'))).toBeNull(); // truncated signature
-    expect(sniffImage(new Uint8Array())).toBeNull();
-  });
-});
 
 describe('branding settings', () => {
   test('isHex', () => {

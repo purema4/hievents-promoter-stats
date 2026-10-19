@@ -8,6 +8,7 @@ import { describeReward, levelFor, type RewardRequest, type Rewards } from './re
 import { describeTrack, rewardRules, trackOn } from './reward-rules';
 import { describeAdjustment, type Adjustment } from './adjustments';
 import { Avatar, Flash, formatDate, Layout, LevelBadge } from './views';
+import { avatarOf } from './avatars';
 import { eventLink } from './links';
 import { linkClicks, shareLink } from './short-links';
 
@@ -146,6 +147,23 @@ function SummaryCards(props: {
 const lowerFirst = (text: string) => text[0]!.toLowerCase() + text.slice(1);
 
 /** The promoter's money and rewards waiting to be requested, with big buttons to do it. */
+// Until they have a profile photo (uploaded, or from their Instagram).
+function PhotoCallout(props: { promoter: User }) {
+  if (avatarOf(props.promoter)) return null;
+  return (
+    <div class="card reward-card photo-callout">
+      <Avatar user={props.promoter} />
+      <div>
+        <strong>Add your profile photo</strong>
+        <div class="muted">It shows on your public page and to the team. Upload one, or add your Instagram to use its photo.</div>
+      </div>
+      <a class="button" href="/account">
+        Add my photo
+      </a>
+    </div>
+  );
+}
+
 function PayoutCallout(props: { balances: Balance[]; rewards: Rewards }) {
   const ready = props.balances.filter((b) => b.available > 0);
   const waiting = props.balances.filter((b) => b.pending > 0);
@@ -410,6 +428,7 @@ export function DashboardPage(props: {
         <h1>{self ? `Hi ${props.promoter.name}` : `${props.promoter.name}'s dashboard`}</h1>
       </div>
       <p class="muted">Live from the ticketing system.</p>
+      {self && <PhotoCallout promoter={props.promoter} />}
 
       {props.codes.length === 0 && props.balances.length === 0 && props.rewards.outsideSold === 0 ? (
         <div class="card muted">No promo codes are assigned to this account yet.</div>

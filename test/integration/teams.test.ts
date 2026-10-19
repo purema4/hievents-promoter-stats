@@ -186,7 +186,8 @@ describeIntegration('teams', () => {
     await admin.post(`/admin/promoters/${ben.id}/delete`, { confirm: '1' });
     expect(text(await admin.page('/admin'))).not.toContain(`${ben.name}'s team`);
     expect(await admin.page(`/admin/promoters/${outsider.id}`)).toContain('<option value="">No team</option>');
-    expect(await admin.page(`/admin/promoters/${outsider.id}`)).not.toContain('selected=""');
+    const teamPicker = (await admin.page(`/admin/promoters/${outsider.id}`)).match(/<select name="team_lead_id"[\s\S]*?<\/select>/)![0];
+    expect(teamPicker).not.toContain('selected=""');
   });
 
   test('a team lead who steps down loses the team page, and their promoters their team', async () => {

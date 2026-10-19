@@ -51,8 +51,9 @@ import {
 } from './two-factor';
 import { leaderboard, type Sort } from './leaderboard';
 import { aliasPattern, aliasTaken, ensureAliases, eventLink, linkSettings, pageLink, saveLinkSettings, setAlias, suggestAlias } from './links';
-import { maxAvatarBytes, readAvatar, refreshAllAvatars, refreshInstagramAvatar, saveUploadedAvatar, useInstagramAvatar } from './avatars';
-import { brandCss, getBrand, isHex, maxLogoBytes, readLogo, removeLogo, saveLogo, sniffImage, updateBrand } from './brand';
+import { avatarOf, maxAvatarBytes, readAvatar, refreshAllAvatars, refreshInstagramAvatar, saveUploadedAvatar, useInstagramAvatar } from './avatars';
+import { brandCss, getBrand, isHex, maxLogoBytes, readLogo, removeLogo, saveLogo, updateBrand } from './brand';
+import { allowImageUpload, maxImageSide, prepareImage, purgeUploadCounts, type ImageProblem } from './images';
 import { parseRange } from './chart';
 import { checkAllMilestones, checkMilestones } from './milestones';
 import {
@@ -72,7 +73,7 @@ import { blankPng, eventCover } from './covers';
 import { allPromoCodes, currentEventCodes, dailyForCodes, sql, statsForCodes } from './hievents';
 import { recentEmails, sendEmail, purgeEmailLog } from './mail';
 import { emailTypes, getTemplate, renderEmail, resetTemplate, sampleVars, saveReplyTo, saveTemplate, type EmailType } from './email-templates';
-import { formatMoney, totalsByCurrency, type EventRule } from './money';
+import { formatMoney, totalsByCurrency, usualCommissionOn, type EventRule } from './money';
 import {
   balances,
   findPayout,
@@ -97,6 +98,7 @@ import { MyPagePage, PageMissing, PromoterPublicPage } from './page-views';
 import { hiddenByTeam, pageEvents, pageOwner, setPageHidden } from './promoter-page';
 import { allEventRules, rateFor, setEventRule } from './commission';
 import { allMediaDrives, parseMediaUrl, setMediaDrive } from './media-drives';
+import { filterCodes, parseCodeFilter } from './promo-code-list';
 import {
   allowSignup,
   canManageInvite,
@@ -130,7 +132,8 @@ import { publicAsset, publicText, serviceWorker } from './static';
 import {
   codeOwners,
   codesFor,
-  commissionPercentFor,
+  usualRuleFor,
+  type UsualCommission,
   countAdmins,
   createUser,
   deleteUser,
@@ -157,6 +160,7 @@ import {
   AdminLinksPage,
   AdminDashboardPage,
   AdminTeamsPage,
+  AdminCodesPage,
   AdminCommissionsPage,
   AdminMediaPage,
   InvitesPage,
@@ -185,7 +189,7 @@ const messages: Record<string, string> = {
   invited: 'Promoter created and a sign-in link was emailed to them.',
   link_sent: 'Sign-in link emailed.',
   mail_failed: 'Saved, but the email could not be sent. Check the SMTP settings and the container log.',
-  commission: 'Commission must be a number between 0 and 100, or empty for the default.',
+  commission: 'Commission must be a percentage from 0 to 100, or an amount per ticket like 2 or 2.50.',
   saved: 'Saved.',
   password: 'Password updated.',
   deleted: 'Promoter deleted.',
@@ -228,8 +232,14 @@ const messages: Record<string, string> = {
   test_failed: 'Saved, but the test could not be sent. The list of recent emails shows why.',
   photo_size: `The photo must be ${Math.round(maxAvatarBytes / 1024 / 1024)} MB or less.`,
   photo_type: 'The photo must be a PNG, JPEG or WebP image.',
+  photo_missing: 'Choose a photo, or skip this step for now.',
   logo_size: `The logo must be ${Math.round(maxLogoBytes / 1024)} KB or less.`,
   logo_type: 'The logo must be a PNG, JPEG or WebP image.',
+  logo_pixels: `The logo must be at most ${maxImageSide} pixels on each side.`,
+  photo_pixels: `The photo must be at most ${maxImageSide} pixels on each side (25 megapixels in all).`,
+  photo_rate: 'Too many photos uploaded in the last hour. Try again later.',
+  photo_set: 'Photo saved. They were told the team changed it.',
+  photo_removed: 'Photo removed. Their Instagram photo or initials show instead.',
   reward_requested: 'Reward requested. The team has been notified.',
   not_available: 'That reward is not available any more.',
   missing_details: 'Tell us which item and size you would like.',
@@ -266,12 +276,23 @@ const messages: Record<string, string> = {
   media_saved: 'Media drive saved. Promoters on this event now see it.',
   media_removed: 'Media drive removed.',
   media_url: 'The media drive must be a link starting with https://.',
-  media_event: 'Pick one of the events listed.',
+  media_event: 'Pick one of the events listed: drafts and events that are not over.',
 };
 // Own keys only: ?ok=constructor must not pick up something from Object.prototype.
 const flash = (key?: string) => (key && Object.hasOwn(messages, key) ? messages[key] : undefined);
 
-// '' means "use the default", anything else must be a percentage.
+// A promoter's usual commission from their form: the default, a percentage, or a flat amount per ticket.
+function parseUsualCommission(body: Record<string, unknown>): UsualCommission | 'invalid' {
+  const kind = String(body.commission_kind ?? 'default');
+  if (kind === 'default') return { percent: null, flatCents: null };
+  const raw = String(body.commission_value ?? '').trim().replace(',', '.');
+  const value = /^[0-9]+(\.[0-9]{1,2})?$/.test(raw) ? Number(raw) : NaN;
+  if (kind === 'percent') return value <= 100 ? { percent: value, flatCents: null } : 'invalid';
+  if (kind === 'flat') return value <= 10_000 ? { percent: null, flatCents: Math.round(value * 100) } : 'invalid';
+  return 'invalid';
+}
+
+// The team lead's team commission: '' means none, anything else must be a percentage.
 function parseCommission(raw: unknown): number | null | 'invalid' {
   const text = String(raw ?? '').trim().replace(',', '.');
   if (text === '') return null;
@@ -356,13 +377,26 @@ app.use(async (c, next) => {
   await next();
   if (!c.res.headers.has('Cache-Control')) c.header('Cache-Control', 'no-store');
 });
-// Every form here is a few short fields; only the branding form carries a file (the logo).
-const smallBodies = bodyLimit({ maxSize: 32 * 1024, onError: (c) => c.text('Request too large', 413) });
-// Room above the logo limit so an oversized file gets a clear message from the handler.
-const logoBodies = bodyLimit({ maxSize: 4 * maxLogoBytes, onError: (c) => c.redirect('/admin/branding?error=logo_size') });
-app.use((c, next) =>
-  c.req.path === '/admin/branding' || c.req.path === '/account/profile' ? logoBodies(c, next) : smallBodies(c, next),
-);
+// A body over the limit is answered before it is read, so the connection is closed: the rest of the
+// upload would otherwise be read as the next request on it, which then hangs.
+const refuse = (c: Context, res: () => Response) => {
+  c.header('Connection', 'close');
+  return res();
+};
+// Every form here is a few short fields; only the branding, account and welcome photo forms carry a file.
+const smallBodies = bodyLimit({ maxSize: 32 * 1024, onError: (c) => refuse(c, () => c.text('Request too large', 413)) });
+// Room above the logo and photo limits so an oversized file gets a clear message from the handler;
+// a file far too big is sent back to its own form.
+function tooBig(path: string): string | null {
+  if (path === '/admin/branding') return '/admin/branding?error=logo_size';
+  if (path === '/account/profile') return '/account?error=photo_size';
+  if (path === '/welcome/photo') return '/welcome?step=3&error=photo_size';
+  const promoter = path.match(/^\/admin\/promoters\/(\d+)\/photo$/);
+  return promoter ? `/admin/promoters/${promoter[1]}?error=photo_size#photo` : null;
+}
+const fileBodies = bodyLimit({ maxSize: 4 * maxLogoBytes, onError: (c) => refuse(c, () => c.redirect(tooBig(c.req.path)!)) });
+app.use((c, next) => (tooBig(c.req.path) ? fileBodies(c, next) : smallBodies(c, next)));
+const photoError: Record<ImageProblem, string> = { too_big: 'photo_size', bad_type: 'photo_type', too_many_pixels: 'photo_pixels' };
 
 app.get('/healthz', (c) => c.text('ok'));
 
@@ -752,7 +786,8 @@ async function renderEvent(c: Context<Env>, promoter: User, basePath: string) {
 
 app.get('/', async (c) => {
   const user = c.get('user');
-  if (user.is_admin && codesFor(user.id).length === 0) return c.redirect('/admin/dashboard');
+  // Admins land on the admin dashboard; their own sales, if any, are on their promoter page there.
+  if (user.is_admin) return c.redirect('/admin/dashboard');
   // First sign-in: a few welcome steps before the dashboard.
   if (!user.is_admin && !user.onboarded_at) return c.redirect('/welcome');
   return renderDashboard(c, user, '');
@@ -762,13 +797,14 @@ app.get('/events/:eventId', (c) => renderEvent(c, c.get('user'), ''));
 
 app.get('/welcome', (c) => {
   const user = c.get('user');
-  const step = Math.min(3, Math.max(1, Number(c.req.query('step') ?? 1) || 1));
+  const step = Math.min(4, Math.max(1, Number(c.req.query('step') ?? 1) || 1));
   return c.html(
     <WelcomePage
       user={user}
       step={step}
       codes={codesFor(user.id)}
       pushKey={pushPublicKey}
+      error={flash(c.req.query('error'))}
     />,
   );
 });
@@ -789,9 +825,24 @@ app.post('/welcome/profile', async (c) => {
     theme: user.theme ?? 'system',
   });
   audit(c, 'account.profile_updated', { userId: user.id, during: 'welcome' });
+  // The next step is the photo: give Instagram a few seconds so theirs is already there.
   const updated = findUser(user.id)!;
-  setTimeout(() => void refreshInstagramAvatar(updated), 0);
+  if (updated.instagram) await Promise.race([refreshInstagramAvatar(updated).catch(() => {}), Bun.sleep(5000)]);
   return c.redirect('/welcome?step=3');
+});
+
+app.post('/welcome/photo', async (c) => {
+  const user = c.get('user');
+  const photo = (await c.req.parseBody()).photo;
+  if (photo instanceof File && photo.size > 0) {
+    if (!allowImageUpload(user.id)) return c.redirect('/welcome?step=3&error=photo_rate');
+    const result = saveUploadedAvatar(user.id, new Uint8Array(await photo.arrayBuffer()));
+    if (result !== 'ok') return c.redirect(`/welcome?step=3&error=${photoError[result]}`);
+    audit(c, 'account.photo_uploaded', { userId: user.id, during: 'welcome' });
+  } else if (!avatarOf(user)) {
+    return c.redirect('/welcome?step=3&error=photo_missing');
+  }
+  return c.redirect('/welcome?step=4');
 });
 
 app.post('/welcome/done', (c) => {
@@ -1110,8 +1161,10 @@ app.post('/account/profile', async (c) => {
   audit(c, 'account.profile_updated', { userId: user.id });
   const photo = body.photo;
   if (photo instanceof File && photo.size > 0) {
+    if (!allowImageUpload(user.id)) return c.redirect('/account?error=photo_rate');
     const result = saveUploadedAvatar(user.id, new Uint8Array(await photo.arrayBuffer()));
-    if (result !== 'ok') return c.redirect(`/account?error=${result === 'too_big' ? 'photo_size' : 'photo_type'}`);
+    if (result !== 'ok') return c.redirect(`/account?error=${photoError[result]}`);
+    audit(c, 'account.photo_uploaded', { userId: user.id });
   } else if (body.use_instagram_photo === '1') {
     await useInstagramAvatar(findUser(user.id)!);
   } else {
@@ -1138,31 +1191,36 @@ app.post('/account/password', async (c) => {
   return c.redirect('/account?ok=password');
 });
 
-app.get('/admin', async (c) =>
-  c.html(
+app.get('/admin', async (c) => {
+  const unassigned = filterCodes(await allPromoCodes(), codeOwners(), { q: '', show: 'unassigned', when: 'upcoming', page: 1 }).total;
+  return c.html(
     <AdminPage
       user={c.get('user')}
       promoters={listUsers()}
-      promoCodes={await allPromoCodes()}
-      owners={codeOwners()}
+      unassigned={unassigned}
       ok={flash(c.req.query('ok'))}
       error={flash(c.req.query('error'))}
     />,
-  ),
-);
+  );
+});
+
+app.get('/admin/codes', async (c) => {
+  const filter = parseCodeFilter(c.req.query());
+  return c.html(<AdminCodesPage user={c.get('user')} filter={filter} result={filterCodes(await allPromoCodes(), codeOwners(), filter)} />);
+});
 
 app.post('/admin/promoters', async (c) => {
   const body = await c.req.parseBody();
   const name = String(body.name ?? '').trim();
   const email = String(body.email ?? '').trim();
-  const commissionPercent = parseCommission(body.commission_percent);
+  const commission = parseUsualCommission(body);
   if (!name || !email) return c.redirect('/admin?error=missing');
-  if (commissionPercent === 'invalid') return c.redirect('/admin?error=commission');
+  if (commission === 'invalid') return c.redirect('/admin?error=commission');
   if (findUserByEmail(email)) return c.redirect('/admin?error=exists');
-  const id = await createUser({ name, email, isAdmin: body.is_admin === '1', commissionPercent });
+  const id = await createUser({ name, email, isAdmin: body.is_admin === '1', commission });
   setCodes(id, normalizeCodes(String(body.codes ?? '')));
   setAlias(id, suggestAlias(name, id));
-  audit(c, 'admin.promoter_created', { by: c.get('user').id, userId: id, isAdmin: body.is_admin === '1', commissionPercent });
+  audit(c, 'admin.promoter_created', { by: c.get('user').id, userId: id, isAdmin: body.is_admin === '1', commission });
   if (body.invite !== '1') return c.redirect(`/admin/promoters/${id}?ok=created`);
   const sent = await emailLoginLink(findUser(id)!, 'invite', undefined, 1);
   return c.redirect(sent ? `/admin/promoters/${id}?ok=invited` : `/admin/promoters/${id}?error=mail_failed`);
@@ -1199,9 +1257,9 @@ app.post('/admin/promoters/:id', async (c) => {
   const name = String(body.name ?? '').trim();
   const email = String(body.email ?? '').trim();
   const isAdmin = body.is_admin === '1';
-  const commissionPercent = parseCommission(body.commission_percent);
+  const commission = parseUsualCommission(body);
   if (!name || !email) return c.redirect(`${back}?error=missing`);
-  if (commissionPercent === 'invalid') return c.redirect(`${back}?error=commission`);
+  if (commission === 'invalid') return c.redirect(`${back}?error=commission`);
   const existing = findUserByEmail(email);
   if (existing && existing.id !== promoter.id) return c.redirect(`${back}?error=exists`);
   if (promoter.is_admin && !isAdmin && countAdmins() === 1) return c.redirect(`${back}?error=last_admin`);
@@ -1209,7 +1267,7 @@ app.post('/admin/promoters/:id', async (c) => {
   if (!aliasPattern.test(alias)) return c.redirect(`${back}?error=alias_invalid`);
   if (aliasTaken(alias, promoter.id)) return c.redirect(`${back}?error=alias_taken`);
   setAlias(promoter.id, alias);
-  updateUser(promoter.id, { name, email, isAdmin, commissionPercent });
+  updateUser(promoter.id, { name, email, isAdmin, commission });
   if (isAdmin && !promoter.is_admin) leaveTeams(promoter.id);
   if (email.toLowerCase() !== promoter.email.toLowerCase()) {
     revokeAccess(promoter.id);
@@ -1220,10 +1278,36 @@ app.post('/admin/promoters/:id', async (c) => {
     userId: promoter.id,
     emailChanged: email.toLowerCase() !== promoter.email.toLowerCase(),
     isAdmin,
-    commissionPercent,
+    commission,
   });
   setCodes(promoter.id, normalizeCodes(String(body.codes ?? '')));
   return c.redirect(`${back}?ok=saved`);
+});
+
+// An admin sets a promoter's photo, or removes it (back to their Instagram photo or initials).
+app.post('/admin/promoters/:id/photo', async (c) => {
+  const promoter = findUser(Number(c.req.param('id')));
+  if (!promoter) return c.notFound();
+  const back = `/admin/promoters/${promoter.id}`;
+  const admin = c.get('user');
+  const photo = (await c.req.parseBody()).photo;
+  if (!(photo instanceof File) || photo.size === 0) return c.redirect(`${back}?error=photo_type#photo`);
+  if (!allowImageUpload(admin.id)) return c.redirect(`${back}?error=photo_rate#photo`);
+  const result = saveUploadedAvatar(promoter.id, new Uint8Array(await photo.arrayBuffer()), 'admin');
+  if (result !== 'ok') return c.redirect(`${back}?error=${photoError[result]}#photo`);
+  audit(c, 'admin.photo_set', { by: admin.id, userId: promoter.id });
+  if (promoter.id !== admin.id) {
+    notify(promoter.id, { title: 'The team set your profile photo', body: 'You can change it on Account.', link: '/account' });
+  }
+  return c.redirect(`${back}?ok=photo_set#photo`);
+});
+
+app.post('/admin/promoters/:id/photo/remove', async (c) => {
+  const promoter = findUser(Number(c.req.param('id')));
+  if (!promoter) return c.notFound();
+  await useInstagramAvatar(promoter);
+  audit(c, 'admin.photo_removed', { by: c.get('user').id, userId: promoter.id });
+  return c.redirect(`/admin/promoters/${promoter.id}?ok=photo_removed#photo`);
 });
 
 app.post('/admin/promoters/:id/invite', async (c) => {
@@ -1260,12 +1344,12 @@ app.post('/admin/promoters/:id/adjust', async (c) => {
       body: label,
     };
   } else if (kind === 'outside_sale') {
-    // The admin gives the ticket sales; the promoter gets their usual commission on them.
+    // The admin gives the ticket sales; the promoter gets their usual commission on them (a percentage of
+    // the sales, or their flat amount per ticket).
     const rawSales = String(body.sales ?? '').trim().replace(',', '.');
     const salesCents = rawSales === '' ? 0 : /^-?[0-9]+(\.[0-9]{1,2})?$/.test(rawSales) ? Math.round(Number(rawSales) * 100) : NaN;
     if (!wholeNumber || !Number.isFinite(salesCents) || Math.abs(salesCents) > 1_000_000_00) return c.redirect(`${back}?error=adjust_amount#adjust`);
-    const percent = commissionPercentFor(promoter);
-    const commission = Math.round((salesCents * percent) / 100);
+    const commission = usualCommissionOn(usualRuleFor(promoter), salesCents, quantity);
     const saleId = addAdjustment(admin, promoter.id, { kind: 'tickets_sold', quantity, amountCents: salesCents, currency, label });
     if (commission !== 0) addAdjustment(admin, promoter.id, { kind: 'money', amountCents: commission, currency, label: `${label} (commission)`, parentId: saleId });
     message = {
@@ -1420,9 +1504,9 @@ app.post('/team/invites/:id/:action{off|on}', (c) => toggleInvite(c, '/team/invi
 
 // --- Commission per event ---------------------------------------------------------------------------
 
-/** Events that are not over (or all of them, with `past`), each with the promoters who have one of its codes. */
-async function commissionEvents(opts: { past?: boolean } = {}) {
-  const codes = await currentEventCodes(opts);
+/** Events that are not over (drafts included), each with the promoters who have one of its codes. */
+async function commissionEvents() {
+  const codes = await currentEventCodes();
   const promoters = listUsers().filter((u) => u.codes.length > 0);
   const events = new Map<number, { id: number; title: string; start: Date | null; timezone: string | null; currency: string; promoters: User[] }>();
   for (const row of codes) {
@@ -1475,8 +1559,7 @@ app.get('/admin/media', async (c) =>
   c.html(
     <AdminMediaPage
       user={c.get('user')}
-      // Newest first: upcoming events on top, then the ones just over (when photos come in).
-      events={(await commissionEvents({ past: true })).reverse()}
+      events={await commissionEvents()}
       drives={allMediaDrives()}
       ok={flash(c.req.query('ok'))}
       error={flash(c.req.query('error'))}
@@ -1488,8 +1571,8 @@ app.post('/admin/media', async (c) => {
   const body = await c.req.parseBody();
   const eventId = Number(body.event_id);
   const hash = `#event-${eventId}`;
-  // Only for an event that promoters see (one of them has a code on it).
-  if (!(await commissionEvents({ past: true })).some((e) => e.id === eventId)) return c.redirect('/admin/media?error=media_event');
+  // Only for a draft or upcoming event that promoters see (one of them has a code on it).
+  if (!(await commissionEvents()).some((e) => e.id === eventId)) return c.redirect('/admin/media?error=media_event');
   const url = parseMediaUrl(body.url);
   if (url === 'invalid') return c.redirect(`/admin/media?error=media_url${hash}`);
   setMediaDrive(eventId, url, c.get('user').id);
@@ -1891,11 +1974,10 @@ app.post('/admin/branding', async (c) => {
   if (!isHex(accent)) return c.redirect('/admin/branding?error=bad_color');
   const logo = body.logo;
   if (logo instanceof File && logo.size > 0) {
-    if (logo.size > maxLogoBytes) return c.redirect('/admin/branding?error=logo_size');
-    const bytes = new Uint8Array(await logo.arrayBuffer());
-    const type = sniffImage(bytes);
-    if (!type) return c.redirect('/admin/branding?error=logo_type');
-    saveLogo(bytes, type);
+    if (!allowImageUpload(c.get('user').id)) return c.redirect('/admin/branding?error=photo_rate');
+    const image = prepareImage(new Uint8Array(await logo.arrayBuffer()), maxLogoBytes);
+    if (typeof image === 'string') return c.redirect(`/admin/branding?error=${{ too_big: 'logo_size', bad_type: 'logo_type', too_many_pixels: 'logo_pixels' }[image]}`);
+    saveLogo(image.bytes, image.type);
   } else if (body.remove_logo === '1') {
     removeLogo();
   }
@@ -2003,6 +2085,7 @@ ensureAliases();
 purgeExpiredSessions();
 setInterval(() => {
   purgeExpiredSessions();
+  purgeUploadCounts();
   purgeOldNotifications();
   purgeEmailLog();
   purgePendingSignIns();

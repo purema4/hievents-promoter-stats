@@ -1,4 +1,4 @@
-import { commissionPercentFor, db, type User } from './local-db';
+import { db, usualRuleFor, type User } from './local-db';
 import type { EventRule, Rate } from './money';
 
 /*
@@ -21,7 +21,7 @@ export function rateFor(user: User): Rate {
   const rows = db
     .query<{ event_id: number } & EventRule, [number]>('SELECT event_id, kind, value FROM event_commissions WHERE user_id = ?')
     .all(user.id);
-  return { percent: commissionPercentFor(user), events: new Map(rows.map((r) => [r.event_id, { kind: r.kind, value: r.value }])) };
+  return { usual: usualRuleFor(user), events: new Map(rows.map((r) => [r.event_id, { kind: r.kind, value: r.value }])) };
 }
 
 /** Every event rate, by "userId:eventId". */
