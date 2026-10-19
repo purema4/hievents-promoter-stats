@@ -37,14 +37,14 @@ describeIntegration('payouts, rewards and changes by hand', () => {
       expect(balanceRow(payouts, 'Added by the team')).toBe('+$40.00');
       expect(text(payouts)).toContain('+$40.00 Bonus for the flyers');
       const cards = stats(await p.client.page('/'));
-      expect(cards.get('Commission earned (10%) · incl. +$40.00 from the team')).toBe('$68.50');
+      expect(cards.get('Commission earned · incl. +$40.00 from the team')).toBe('$68.50');
       // The promoter was told.
       expect(text(await p.client.page('/notifications'))).toContain('$40.00 added to your balance');
 
       const undo = (await admin.page(`/admin/promoters/${p.id}`)).match(/action="(\/admin\/promoters\/\d+\/adjust\/\d+\/undo)"/)![1]!;
       expect(location(await admin.post(undo))).toBe(`/admin/promoters/${p.id}?ok=undone#adjust`);
       expect(available(await p.client.page('/payouts'))).toBe('$28.50');
-      expect(stats(await p.client.page('/')).get('Commission earned (10%)')).toBe('$28.50');
+      expect(stats(await p.client.page('/')).get('Commission earned')).toBe('$28.50');
       // Undoing twice finds nothing.
       expect((await admin.post(undo)).status).toBe(404);
     });

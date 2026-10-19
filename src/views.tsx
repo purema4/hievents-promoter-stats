@@ -147,7 +147,7 @@ td.failed { color: var(--danger); }
 .how .num { flex: none; width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; font-weight: 700; background: color-mix(in srgb, var(--accent) 14%, var(--surface)); color: var(--accent); }
 .welcome-actions { display: flex; gap: 14px; align-items: center; justify-content: space-between; flex-wrap: wrap; margin-top: 20px; }
 .card-actions { display: flex; gap: 8px; flex-wrap: wrap; border-top: 1px solid var(--border); padding-top: 10px; }
-button.small { padding: 6px 12px; font-size: 14px; }
+button.small, a.button.small { padding: 6px 12px; font-size: 14px; }
 .links-card { margin-bottom: 20px; display: grid; gap: 10px; }
 .links-card h2 { margin: 0; }
 .link-row { display: grid; gap: 6px; }
@@ -414,6 +414,9 @@ body.impersonating .sidebar { padding-bottom: calc(96px + env(safe-area-inset-bo
 .rate-fields { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .rate-fields select { width: auto; }
 .rate-fields input { width: 110px; }
+/* Promoters → Media drives */
+.media-form { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 0; }
+.media-form input { flex: 1 1 280px; width: auto; }
 .team-rate label { display: grid; gap: 6px; }
 .team-rate-row { display: flex; gap: 8px; align-items: center; }
 .team-rate-row input { width: 120px; }
@@ -727,6 +730,7 @@ function Sidebar(props: { user: User }) {
             <a href="/admin">All promoters</a>
             <a href="/admin/teams">Teams</a>
             <a href="/admin/commissions">Commissions</a>
+            <a href="/admin/media">Media drives</a>
             <a href="/admin/invites">Invite links</a>
             <a href="/admin/pages">Promoter pages</a>
           </NavGroup>
@@ -2163,7 +2167,6 @@ export function WelcomePage(props: {
   user: User;
   step: number;
   codes: string[];
-  percent: number;
   pushKey: string;
 }) {
   const u = props.user;
@@ -2197,10 +2200,10 @@ export function WelcomePage(props: {
               <div class="card">
                 <span class="num">2</span>
                 <div>
-                  <strong>Earn {formatPercent(props.percent)} commission</strong>
+                  <strong>Earn commission</strong>
                   <div class="muted">
-                    On the full ticket price, before your code's discount, without taxes and fees. Request a payout whenever
-                    you like.
+                    On every ticket sold with your codes, set by the team for each event. Request a payout whenever you
+                    like.
                   </div>
                 </div>
               </div>
@@ -2896,7 +2899,7 @@ export function TeamPage(props: {
       {mode !== 'member' && (
         <p class="muted">
           {percent > 0
-            ? `The team commission is ${formatPercent(percent)} of the full-price sales of ${self ? 'your' : `${props.lead.name}'s`} promoters, from the day each joined the team, on top of what they earn. ${self ? 'Your own sales earn your usual commission.' : 'Their own sales earn their usual commission.'} It is part of ${self ? 'your' : 'their'} balance on Payouts.`
+            ? `The team commission is ${formatPercent(percent)} of the full-price sales of ${self ? 'your' : `${props.lead.name}'s`} promoters, from the day each joined the team, on top of what they earn. ${self ? 'Your own sales earn your own commission.' : 'Their own sales earn their own commission.'} It is part of ${self ? 'your' : 'their'} balance on Payouts.`
             : `No team commission is set${self ? ' for you yet' : ''}.${self ? '' : ' Set it on Teams.'}`}
         </p>
       )}
@@ -3197,6 +3200,62 @@ export function AdminCommissionsPage(props: {
           </div>
         </div>
       ))}
+    </Layout>
+  );
+}
+
+// Promoters → Media drives: a public folder per event (photos, videos, flyers) for the promoters on it.
+export function AdminMediaPage(props: {
+  user: User;
+  events: { id: number; title: string; start: Date | null; timezone: string | null; promoters: User[] }[];
+  drives: Map<number, string>;
+  ok?: string;
+  error?: string;
+}) {
+  return (
+    <Layout title="Media drives" user={props.user}>
+      <h1>Media drives</h1>
+      <p class="muted">
+        Add a link to a shared folder (Google Drive, Dropbox…) with the photos, videos and flyers for an event. The
+        promoters with a code on the event get a Media drive button on their dashboard and on the event page. Share
+        the folder so anyone with the link can open it.
+      </p>
+      <Flash error={props.error} ok={props.ok} />
+      {props.events.length === 0 && <p class="muted">No events with promoter codes.</p>}
+      {props.events.map((e) => {
+        const url = props.drives.get(e.id);
+        return (
+          <div class="card rate-card" id={`event-${e.id}`}>
+            <h2 class="first">{e.title}</h2>
+            <p class="muted">
+              {formatDate(e.start, e.timezone)} · {e.promoters.length} {e.promoters.length === 1 ? 'promoter' : 'promoters'}
+              {url && (
+                <>
+                  {' · '}
+                  <a href={url} target="_blank" rel="noopener noreferrer">
+                    Open the drive
+                  </a>
+                </>
+              )}
+            </p>
+            <form class="media-form" method="post" action="/admin/media">
+              <input type="hidden" name="event_id" value={String(e.id)} />
+              <input
+                type="url"
+                name="url"
+                value={url ?? ''}
+                maxlength={2000}
+                placeholder="https://drive.google.com/…"
+                aria-label={`Media drive for ${e.title}`}
+              />
+              <button class="secondary" type="submit">
+                Save
+              </button>
+            </form>
+            {url && <p class="muted">Empty the link and save to remove it.</p>}
+          </div>
+        );
+      })}
     </Layout>
   );
 }

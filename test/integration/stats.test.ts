@@ -22,7 +22,7 @@ describeIntegration('sales numbers from the seeded Hi.Events database', () => {
 
   test('dashboard totals', async () => {
     const cards = stats(await promoter.client.page('/'));
-    expect(cards.get('Commission earned (10%)')).toBe('$28.50');
+    expect(cards.get('Commission earned')).toBe('$28.50');
     expect(cards.get('Available to request · Request payout')).toBe('$28.50');
     expect(cards.get('Ticket sales at full price')).toBe('$285.00');
     // 10 tickets on 6 completed orders, 1 more awaiting an offline payment.
@@ -69,7 +69,7 @@ describeIntegration('sales numbers from the seeded Hi.Events database', () => {
     const html = await promoter.client.page('/events/2');
     expect(html).toContain('<h1>Winter Opening</h1>');
     const cards = stats(html);
-    expect(cards.get('Commission (10%)')).toBe('$1.00');
+    expect(cards.get('Commission')).toBe('$1.00');
     expect(cards.get('Ticket sales at full price')).toBe('$10.00');
     expect(cards.get('Paid by customers after discounts')).toBe('$9.00');
     expect(cards.get('Tickets sold, 1 order')).toBe('1');
@@ -78,7 +78,7 @@ describeIntegration('sales numbers from the seeded Hi.Events database', () => {
   test('"Warehouse Night": a half-refunded order counts 50%, pending and cancelled orders count nothing', async () => {
     const cards = stats(await promoter.client.page('/events/1'));
     expect(cards.get('Ticket sales at full price')).toBe('$100.00');
-    expect(cards.get('Commission (10%)')).toBe('$10.00');
+    expect(cards.get('Commission')).toBe('$10.00');
     expect(cards.get('Paid by customers after discounts')).toBe('$90.00');
     expect(cards.get('Tickets sold, 3 orders · 1 awaiting payment')).toBe('4');
   });
@@ -86,10 +86,10 @@ describeIntegration('sales numbers from the seeded Hi.Events database', () => {
   test('past event and the other account’s event', async () => {
     const rooftop = stats(await promoter.client.page('/events/4'));
     expect(rooftop.get('Ticket sales at full price')).toBe('$75.00');
-    expect(rooftop.get('Commission (10%)')).toBe('$7.50');
+    expect(rooftop.get('Commission')).toBe('$7.50');
     const other = stats(await promoter.client.page('/events/3'));
     expect(other.get('Ticket sales at full price')).toBe('$100.00');
-    expect(other.get('Commission (10%)')).toBe('$10.00');
+    expect(other.get('Commission')).toBe('$10.00');
   });
 
   test('the chart counts completed tickets by the day they were ordered', async () => {
@@ -108,17 +108,17 @@ describeIntegration('sales numbers from the seeded Hi.Events database', () => {
     const vip = await newPromoter(server, admin, { codes: 'djmax', commission: '12.5' });
     const cards = stats(await vip.client.page('/'));
     // Rounded per code and event: $12.50 + $1.25 + $12.50 + $9.375 → $9.38.
-    expect(cards.get('Commission earned (12.5%)')).toBe('$35.63');
-    expect(stats(await vip.client.page('/events/2')).get('Commission (12.5%)')).toBe('$1.25');
+    expect(cards.get('Commission earned')).toBe('$35.63');
+    expect(stats(await vip.client.page('/events/2')).get('Commission')).toBe('$1.25');
   });
 
   test('admins see exactly what the promoter sees', async () => {
     const own = stats(await promoter.client.page('/'));
     const viewed = stats(await admin.page(`/admin/promoters/${promoter.id}/view`));
-    expect(viewed.get('Commission earned (10%)')).toBe(own.get('Commission earned (10%)'));
+    expect(viewed.get('Commission earned')).toBe(own.get('Commission earned'));
     expect(viewed.get('Ticket sales at full price')).toBe('$285.00');
     const event = stats(await admin.page(`/admin/promoters/${promoter.id}/view/events/2`));
-    expect(event.get('Commission (10%)')).toBe('$1.00');
+    expect(event.get('Commission')).toBe('$1.00');
   });
 
   test('the admin dashboard counts the promoter', async () => {
@@ -174,7 +174,7 @@ describeIntegration('HIEVENTS_ACCOUNT_IDS', () => {
     const cards = stats(await promoter.client.page('/'));
     // Without "Someone else's event" (2 tickets, $100 full price).
     expect(cards.get('Ticket sales at full price')).toBe('$185.00');
-    expect(cards.get('Commission earned (10%)')).toBe('$18.50');
+    expect(cards.get('Commission earned')).toBe('$18.50');
     expect((await promoter.client.get('/events/3')).status).toBe(404);
   });
 });

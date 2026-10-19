@@ -42,13 +42,6 @@ export function describeRule(rule: EventRule, currency: string): string {
   return rule.kind === 'flat' ? `${formatMoney(rule.value, currency)} per ticket` : formatPercent(rule.value);
 }
 
-/** "10%", or "$2.00 per ticket" when the event has its own rate. */
-export function describeEventRate(rate: Rate | number, eventId: number, currency: string): string {
-  const r = asRate(rate);
-  const rule = r.events.get(eventId);
-  return rule ? describeRule(rule, currency) : formatPercent(r.percent);
-}
-
 /** "10%", or "10%, other rates on some events" for a promoter with event rates. */
 export function describeRate(rate: Rate | number, eventIds?: number[]): string {
   const r = asRate(rate);

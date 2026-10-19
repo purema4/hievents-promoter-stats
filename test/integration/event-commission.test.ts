@@ -46,26 +46,33 @@ describeIntegration('commission per event', () => {
     // Over: not listed.
     expect(card(4)).toBe('');
     expect(text(html)).not.toContain('Summer Rooftop');
-    expect(await earned()).toEqual(['Commission earned (10%)', '$28.50']);
+    expect(await earned()).toEqual(['Commission earned', '$28.50']);
   });
 
   test('a flat amount per ticket on one event', async () => {
     expect(location(await set(maya.id, 1, 'flat', '3'))).toBe('/admin/commissions?ok=rate_saved#event-1');
     // 4 tickets × $3 = $12 instead of $10.
-    expect(await earned()).toEqual(['Commission earned (10%, other rates on some events)', '$30.50']);
+    expect(await earned()).toEqual(['Commission earned', '$30.50']);
     const event = await maya.client.page('/events/1');
-    expect(stats(event).get('Commission ($3.00 per ticket)')).toBe('$12.00');
-    expect(stats(await maya.client.page('/events/2')).get('Commission (10%)')).toBe('$1.00');
+    expect(stats(event).get('Commission')).toBe('$12.00');
+    expect(stats(await maya.client.page('/events/2')).get('Commission')).toBe('$1.00');
     expect(text(await admin.page('/admin/commissions'))).toContain('$3.00 per ticket');
     // Luna on the same event keeps her usual rate.
-    expect(stats(await luna.client.page('/')).get('Commission earned (10%)')).toBe('$2.50');
+    expect(stats(await luna.client.page('/')).get('Commission earned')).toBe('$2.50');
+  });
+
+  test('promoters never see a rate, since it can differ per event', async () => {
+    for (const path of ['/', '/events/1', '/events/2', '/payouts', '/welcome?step=1']) {
+      const page = text(await maya.client.page(path));
+      expect(page).not.toMatch(/[0-9]%|per ticket/);
+    }
   });
 
   test('another percentage on another event', async () => {
     expect(location(await set(maya.id, 2, 'percent', '50'))).toBe('/admin/commissions?ok=rate_saved#event-2');
     // $10 × 50% = $5 instead of $1.
-    expect(await earned()).toEqual(['Commission earned (10%, other rates on some events)', '$34.50']);
-    expect(stats(await maya.client.page('/events/2')).get('Commission (50%)')).toBe('$5.00');
+    expect(await earned()).toEqual(['Commission earned', '$34.50']);
+    expect(stats(await maya.client.page('/events/2')).get('Commission')).toBe('$5.00');
   });
 
   test('the same numbers everywhere: payouts, the chart, the admin dashboard', async () => {
@@ -82,7 +89,7 @@ describeIntegration('commission per event', () => {
   test('back to the usual rate', async () => {
     await set(maya.id, 1, 'usual');
     await set(maya.id, 2, 'usual');
-    expect(await earned()).toEqual(['Commission earned (10%)', '$28.50']);
+    expect(await earned()).toEqual(['Commission earned', '$28.50']);
   });
 
   test('what is refused', async () => {
@@ -95,7 +102,7 @@ describeIntegration('commission per event', () => {
     expect(await err(await set(maya.id, 4, 'flat', '5'))).toBe('rate_event');
     expect(await err(await set(luna.id, 2, 'flat', '5'))).toBe('rate_event');
     expect(await err(await set(999999, 1, 'flat', '5'))).toBe('rate_event');
-    expect(await earned()).toEqual(['Commission earned (10%)', '$28.50']);
+    expect(await earned()).toEqual(['Commission earned', '$28.50']);
     // Admins only.
     expect((await maya.client.post('/admin/commissions', { user_id: String(maya.id), event_id: '1', kind: 'flat', value: '100' })).status).toBe(403);
     expect((await maya.client.get('/admin/commissions')).status).toBe(403);

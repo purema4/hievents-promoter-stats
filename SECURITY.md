@@ -63,6 +63,12 @@ Verified as safe, with no change needed:
 - Uploads are recognised by their content, are size-limited and are served with `nosniff`.
 - The service worker caches only static files and the offline notice.
 
+## Re-check 2026-10-19: media drives and commission per event
+
+- **Promoters → Media drives** (`/admin/media`): admin-only, like every `/admin/*` route; a promoter gets 403, a signed-out visitor goes to the sign-in page, and a POST from another site gets 403 with nothing saved. Only `https://` links with a real host and no user name or password are saved (`javascript:`, `data:`, protocol-relative and over-long links are refused), and the event must be one with promoter codes. The server never fetches the link, so it cannot be used for SSRF. Quotes and brackets in a link are percent-encoded and shown as text. The button opens the drive with `rel="noopener noreferrer"`, and each change is in the audit log. A promoter only sees the drive of events with one of their codes. These checks are in `test/integration/media-drives.test.ts`.
+- Promoters' pages no longer show commission rates, only amounts.
+- `bun audit`: no vulnerabilities. gitleaks (history and the files to commit): no leaks. Trivy on the rebuilt image: 0 HIGH or CRITICAL. ZAP baseline with `.zap/rules.tsv`: 0 failures, 0 warnings (61 pass, 6 ignored with reasons). 344 tests pass.
+
 ## Controls by category
 
 | OWASP 2025 | How it is handled |

@@ -214,8 +214,15 @@ async function canReadStatus(): Promise<boolean> {
 /** The upcoming events a promoter's public page lists: not ended, not deleted, and live when that is known. No sales figures. */
 export type EventCode = { event_id: number; title: string; start: Date | null; timezone: string | null; currency: string; code: string };
 
-/** Every promo code (lower-cased) on events that are not over, drafts included, for Promoters → Commissions. */
-export async function currentEventCodes(): Promise<EventCode[]> {
+/**
+ * Every promo code (lower-cased) on events that are not over, drafts included, for Promoters → Commissions.
+ * With `past`, events that are over too (newest last), for Promoters → Media drives.
+ */
+export async function currentEventCodes(opts: { past?: boolean } = {}): Promise<EventCode[]> {
+  const notOver = opts.past
+    ? sql``
+    : sql`AND (coalesce(occ.last_end, occ.first_start, e.start_date) IS NULL
+           OR coalesce(occ.last_end, occ.first_start, e.start_date) >= (now() AT TIME ZONE 'UTC'))`;
   return sql<EventCode[]>`
     SELECT DISTINCT
       e.id::int AS event_id,
@@ -227,9 +234,7 @@ export async function currentEventCodes(): Promise<EventCode[]> {
     FROM promo_codes pc
     JOIN events e ON e.id = pc.event_id AND e.deleted_at IS NULL
     ${eventDates()}
-    WHERE pc.deleted_at IS NULL ${accountFilter()}
-      AND (coalesce(occ.last_end, occ.first_start, e.start_date) IS NULL
-           OR coalesce(occ.last_end, occ.first_start, e.start_date) >= (now() AT TIME ZONE 'UTC'))
+    WHERE pc.deleted_at IS NULL ${accountFilter()} ${notOver}
   `.then((rows) => rows.sort((a, b) => (a.start?.getTime() ?? Infinity) - (b.start?.getTime() ?? Infinity) || a.event_id - b.event_id));
 }
 

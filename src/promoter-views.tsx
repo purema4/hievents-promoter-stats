@@ -2,7 +2,7 @@ import { parseRange, SalesChart, type Range } from './chart';
 import { config } from './config';
 import type { CodeStats, DailySales } from './hievents';
 import type { User } from './local-db';
-import { commissionOn, describeEventRate, describeRate, formatMoney, formatPercent, toCents, totalsByCurrency, type Rate, type Totals } from './money';
+import { commissionOn, formatMoney, toCents, totalsByCurrency, type Rate, type Totals } from './money';
 import { cashAvailable, type Balance, type PayoutRequest } from './payouts';
 import { describeReward, levelFor, type RewardRequest, type Rewards } from './rewards';
 import { describeTrack, rewardRules, trackOn } from './reward-rules';
@@ -79,9 +79,9 @@ function plural(n: number, one: string, many = `${one}s`): string {
 function Footnote() {
   return (
     <p class="muted">
-      Commission is a percentage of the full ticket price, before your promo code's discount, without taxes and fees,
-      minus refunds, or a set amount per ticket on events where the team chose one. Tickets awaiting payment count once
-      they are paid. Refunded and cancelled tickets are not counted.
+      Commission is set by the team for each event. Sales count at the full ticket price, before your promo code's
+      discount, without taxes and fees, minus refunds. Tickets awaiting payment count once they are paid. Refunded and
+      cancelled tickets are not counted.
     </p>
   );
 }
@@ -90,8 +90,6 @@ function SummaryCards(props: {
   totals: Totals[];
   balances: Balance[];
   outsideSold: number;
-  percent: Rate | number;
-  eventIds?: number[]; // their events, to say when some have their own rate
   payoutsHref?: string;
 }) {
   // One set of cards per currency; a promoter can also have only hand-entered sales and money.
@@ -104,7 +102,7 @@ function SummaryCards(props: {
           <div class="card stat highlight">
             <div class="value">{formatMoney(b?.earned ?? 0, cur)}</div>
             <div class="label">
-              Commission earned ({describeRate(props.percent, props.eventIds)})
+              Commission earned
               {b && b.added !== 0 && <> · incl. {b.added > 0 ? '+' : '−'}{formatMoney(Math.abs(b.added), cur)} from the team</>}
               {b && b.fromTeam !== 0 && <> · incl. {formatMoney(b.fromTeam, cur)} team commission</>}
             </div>
@@ -304,7 +302,23 @@ function CodesCard(props: { codes: string[]; rows: CodeStats[]; upcoming: EventS
   );
 }
 
-function EventCard(props: { event: EventSummary; href: string; freeTickets?: number; link?: string | null; copyCodes?: boolean }) {
+// The event's media drive (photos, videos, flyers), set by admins on Promoters → Media drives.
+function MediaButton(props: { url: string }) {
+  return (
+    <a class="button secondary small" href={props.url} target="_blank" rel="noopener noreferrer">
+      Media drive
+    </a>
+  );
+}
+
+function EventCard(props: {
+  event: EventSummary;
+  href: string;
+  freeTickets?: number;
+  link?: string | null;
+  copyCodes?: boolean;
+  media?: string;
+}) {
   const e = props.event;
   return (
     <div class="card event-card">
@@ -336,7 +350,7 @@ function EventCard(props: { event: EventSummary; href: string; freeTickets?: num
         </span>
       </span>
     </a>
-    {(props.link || props.copyCodes) && (
+    {(props.link || props.copyCodes || props.media) && (
       <div class="card-actions">
         {props.link && (
           <button type="button" class="secondary small" data-copy-text={props.link}>
@@ -349,6 +363,7 @@ function EventCard(props: { event: EventSummary; href: string; freeTickets?: num
             Share
           </button>
         )}
+        {props.media && <MediaButton url={props.media} />}
       </div>
     )}
     </div>
@@ -365,6 +380,7 @@ export function DashboardPage(props: {
   balances: Balance[];
   rewards: Rewards;
   percent: Rate | number;
+  media: Map<number, string>;
   range: Range;
   pageLink?: string | null; // the promoter's public page (short link when there is one); none when hidden
 }) {
@@ -404,8 +420,6 @@ export function DashboardPage(props: {
             totals={totals}
             balances={props.balances}
             outsideSold={props.rewards.outsideSold}
-            percent={props.percent}
-            eventIds={events.map((e) => e.id)}
             payoutsHref={self ? '/payouts' : undefined}
           />
           <LevelCard rewards={props.rewards} rewardsHref={self ? '/payouts#rewards' : undefined} />
@@ -432,6 +446,7 @@ export function DashboardPage(props: {
                   freeTickets={freeFor(e)}
                   link={shareLink(props.promoter, { id: e.id, title: e.title }, e.codes[0]!)}
                   copyCodes
+                  media={props.media.get(e.id)}
                 />
               ))}
             </div>
@@ -442,7 +457,7 @@ export function DashboardPage(props: {
               <h2>Past events</h2>
               <div class="rows">
                 {past.map((e) => (
-                  <EventCard event={e} href={eventHref(e)} />
+                  <EventCard event={e} href={eventHref(e)} media={props.media.get(e.id)} />
                 ))}
               </div>
             </>
@@ -464,6 +479,7 @@ export function EventPage(props: {
   daily: DailySales[];
   rewards: Rewards;
   percent: Rate | number;
+  media: string | null;
   range: Range;
 }) {
   const events = summarizeEvents(props.rows, props.percent);
@@ -496,7 +512,7 @@ export function EventPage(props: {
       <div class="grid">
         <div class="card stat highlight">
           <div class="value">{formatMoney(e.commission, e.currency)}</div>
-          <div class="label">Commission ({describeEventRate(props.percent, e.id, e.currency)})</div>
+          <div class="label">Commission</div>
         </div>
         <div class="card stat">
           <div class="value">{e.tickets}</div>
@@ -545,6 +561,18 @@ export function EventPage(props: {
           </>
         )}
       </div>
+
+      {props.media && (
+        <div class="card reward-card media-card">
+          <div>
+            <strong>Media drive</strong>
+            <div class="muted">Photos, videos and flyers for this event, ready to post.</div>
+          </div>
+          <a class="button" href={props.media} target="_blank" rel="noopener noreferrer">
+            Open →
+          </a>
+        </div>
+      )}
 
       {reward && (
         <div class="card reward-card">

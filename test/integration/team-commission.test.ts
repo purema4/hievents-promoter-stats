@@ -69,7 +69,7 @@ describeIntegration('team commission', () => {
     // Team totals include the team lead's own sales (none here), tagged.
     expect(stats(all).get('Sales at full price')).toBe(money(anaSales + benSales));
     expect(all).toContain('<span class="lead-tag">Team lead</span>');
-    expect(text(all)).toContain('Your own sales earn your usual commission');
+    expect(text(all)).toContain('Your own sales earn your own commission');
     // The last 7 days count less than all time.
     const week = cents(stats(await lead.client.page('/team?range=7')).get(`Team commission (5% of ${money(25_00)})`) ?? '$0');
     expect(week).toBeLessThanOrEqual(expected);
@@ -78,12 +78,12 @@ describeIntegration('team commission', () => {
   test("it goes to the team lead's balance, and can be requested", async () => {
     const expected = Math.round((anaSales + benSales) * 0.05);
     const dashboard = await lead.client.page('/');
-    expect(stats(dashboard).get(`Commission earned (10%) · incl. ${money(expected)} team commission`)).toBe(money(expected));
+    expect(stats(dashboard).get(`Commission earned · incl. ${money(expected)} team commission`)).toBe(money(expected));
     expect(stats(dashboard).get('Available to request · Request payout')).toBe(money(expected));
     const payouts = text(await lead.client.page('/payouts'));
     expect(payouts).toContain(`Team commission, on your team's sales +${money(expected)}`);
     // The promoters' own balances do not change.
-    expect(stats(await ana.client.page('/')).get('Commission earned (10%)')).toBe(money(Math.round(anaSales * 0.1)));
+    expect(stats(await ana.client.page('/')).get('Commission earned')).toBe(money(Math.round(anaSales * 0.1)));
 
     const res = await lead.client.post('/payouts', { amount: (expected / 100).toFixed(2), currency: 'CAD', method: 'Interac e-Transfer', details: 'lea@example.test' });
     expect(location(res)).toBe('/payouts?ok=requested');
@@ -111,7 +111,7 @@ describeIntegration('team commission', () => {
     expect(stats(html).get(`Team commission (5% of ${money(base)})`)).toBe(money(before + 15_00));
     expect(text(await admin.page(`/admin/promoters/${ana.id}`))).toContain('+4 tickets sold ($200.00 in sales)');
     // Ana gets her own 10% of them.
-    expect(stats(await ana.client.page('/')).get('Commission earned (10%) · incl. +$30.00 from the team')).toBe(money(Math.round(anaSales * 0.1) + 30_00));
+    expect(stats(await ana.client.page('/')).get('Commission earned · incl. +$30.00 from the team')).toBe(money(Math.round(anaSales * 0.1) + 30_00));
   });
 
   test('what was earned stays when a promoter leaves, moves or is deleted', async () => {

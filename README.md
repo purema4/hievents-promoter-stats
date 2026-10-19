@@ -93,7 +93,9 @@ On **Promoters → Invite links**, admins make links to share (a group chat, a f
 
 ## Commission per event
 
-**Promoters → Commissions** lists every event that is not over (drafts included) with the promoters who have one of its codes. For each promoter and event, choose **Usual rate** (their own %), **% of sales** (another percentage) or **per ticket** (a flat amount for each ticket sold). Like the usual rate, a change applies to all their sales for that event, earlier ones too, and stays when the event is over. Promoters see it on the event page ("Commission ($3.00 per ticket)") and their dashboard says "10%, other rates on some events". Their balance, payouts, charts and the admin dashboard all use it. A team lead's team commission stays a percentage of their promoters' sales.
+**Promoters → Commissions** lists every event that is not over (drafts included) with the promoters who have one of its codes. For each promoter and event, choose **Usual rate** (their own %), **% of sales** (another percentage) or **per ticket** (a flat amount for each ticket sold). Like the usual rate, a change applies to all their sales for that event, earlier ones too, and stays when the event is over. Promoters see the commission amounts, never a rate, since it can differ per event; a flat amount replaces the percentage on that event, it is not added to it. Their balance, payouts, charts and the admin dashboard all use it. A team lead's team commission stays a percentage of their promoters' sales.
+
+**Promoters → Media drives** lists every event with promoter codes, newest first, past events included. Paste a link to a public folder (Google Drive, Dropbox…, `https://` only) with the event's photos, videos and flyers: the promoters with a code on the event get a **Media drive** button on their dashboard's event card and on the event page. Save an empty link to remove it.
 
 ## Changes by hand
 

@@ -72,7 +72,7 @@ import { blankPng, eventCover } from './covers';
 import { allPromoCodes, currentEventCodes, dailyForCodes, sql, statsForCodes } from './hievents';
 import { recentEmails, sendEmail, purgeEmailLog } from './mail';
 import { emailTypes, getTemplate, renderEmail, resetTemplate, sampleVars, saveReplyTo, saveTemplate, type EmailType } from './email-templates';
-import { formatMoney, formatPercent, totalsByCurrency, type EventRule } from './money';
+import { formatMoney, totalsByCurrency, type EventRule } from './money';
 import {
   balances,
   findPayout,
@@ -96,6 +96,7 @@ import { kuttDomains, kuttEnabled, pageClicks, pageShortLink, prepareShortLinks,
 import { MyPagePage, PageMissing, PromoterPublicPage } from './page-views';
 import { hiddenByTeam, pageEvents, pageOwner, setPageHidden } from './promoter-page';
 import { allEventRules, rateFor, setEventRule } from './commission';
+import { allMediaDrives, parseMediaUrl, setMediaDrive } from './media-drives';
 import {
   allowSignup,
   canManageInvite,
@@ -157,6 +158,7 @@ import {
   AdminDashboardPage,
   AdminTeamsPage,
   AdminCommissionsPage,
+  AdminMediaPage,
   InvitesPage,
   JoinPage,
   TeamPage,
@@ -261,6 +263,10 @@ const messages: Record<string, string> = {
   rate_event: 'Pick one of the promoters on an event that is not over.',
   rate_percent: 'The percentage must be a number between 0 and 100.',
   rate_flat: 'The amount per ticket must be like 2 or 2.50.',
+  media_saved: 'Media drive saved. Promoters on this event now see it.',
+  media_removed: 'Media drive removed.',
+  media_url: 'The media drive must be a link starting with https://.',
+  media_event: 'Pick one of the events listed.',
 };
 // Own keys only: ?ok=constructor must not pick up something from Object.prototype.
 const flash = (key?: string) => (key && Object.hasOwn(messages, key) ? messages[key] : undefined);
@@ -691,6 +697,7 @@ async function promoterData(promoter: User) {
     team,
     balances: balances(promoter.id, totalsByCurrency(rows, percent), team),
     rewards: rewardsFor(promoter.id, summarizeEvents(rows, percent)),
+    media: allMediaDrives(),
   };
 }
 
@@ -713,6 +720,7 @@ async function renderDashboard(c: Context<Env>, promoter: User, basePath: string
       balances={data.balances}
       rewards={data.rewards}
       percent={data.percent}
+      media={data.media}
       range={parseRange(c.req.query('range'), '30')}
       pageLink={withPage ? (pageShortLink(promoter) ?? pageLink(promoter)) : null}
     />,
@@ -736,6 +744,7 @@ async function renderEvent(c: Context<Env>, promoter: User, basePath: string) {
       daily={await dailyForCodes(data.codes, eventId)}
       rewards={data.rewards}
       percent={data.percent}
+      media={data.media.get(eventId) ?? null}
       range={parseRange(c.req.query('range'), 'all')}
     />,
   );
@@ -759,7 +768,6 @@ app.get('/welcome', (c) => {
       user={user}
       step={step}
       codes={codesFor(user.id)}
-      percent={commissionPercentFor(user)}
       pushKey={pushPublicKey}
     />,
   );
@@ -1263,7 +1271,7 @@ app.post('/admin/promoters/:id/adjust', async (c) => {
     message = {
       title: `${quantity} ${Math.abs(quantity) === 1 ? 'ticket' : 'tickets'} added: ${label}`,
       body: commission
-        ? `${formatMoney(salesCents, currency)} in sales: ${formatMoney(commission, currency)} commission (${formatPercent(percent)}) added to your balance.`
+        ? `${formatMoney(salesCents, currency)} in sales: ${formatMoney(commission, currency)} commission added to your balance.`
         : 'They count for your levels and rewards.',
     };
   } else if (kind === 'free_tickets') {
@@ -1412,9 +1420,9 @@ app.post('/team/invites/:id/:action{off|on}', (c) => toggleInvite(c, '/team/invi
 
 // --- Commission per event ---------------------------------------------------------------------------
 
-/** Events that are not over, each with the promoters who have one of its codes. */
-async function commissionEvents() {
-  const codes = await currentEventCodes();
+/** Events that are not over (or all of them, with `past`), each with the promoters who have one of its codes. */
+async function commissionEvents(opts: { past?: boolean } = {}) {
+  const codes = await currentEventCodes(opts);
   const promoters = listUsers().filter((u) => u.codes.length > 0);
   const events = new Map<number, { id: number; title: string; start: Date | null; timezone: string | null; currency: string; promoters: User[] }>();
   for (const row of codes) {
@@ -1459,6 +1467,34 @@ app.post('/admin/commissions', async (c) => {
   setEventRule(userId, eventId, rule);
   audit(c, 'admin.event_commission_changed', { by: c.get('user').id, userId, eventId, rule });
   return c.redirect(`/admin/commissions?ok=rate_saved${hash}`);
+});
+
+// --- Media drive per event ---------------------------------------------------------------------------
+
+app.get('/admin/media', async (c) =>
+  c.html(
+    <AdminMediaPage
+      user={c.get('user')}
+      // Newest first: upcoming events on top, then the ones just over (when photos come in).
+      events={(await commissionEvents({ past: true })).reverse()}
+      drives={allMediaDrives()}
+      ok={flash(c.req.query('ok'))}
+      error={flash(c.req.query('error'))}
+    />,
+  ),
+);
+
+app.post('/admin/media', async (c) => {
+  const body = await c.req.parseBody();
+  const eventId = Number(body.event_id);
+  const hash = `#event-${eventId}`;
+  // Only for an event that promoters see (one of them has a code on it).
+  if (!(await commissionEvents({ past: true })).some((e) => e.id === eventId)) return c.redirect('/admin/media?error=media_event');
+  const url = parseMediaUrl(body.url);
+  if (url === 'invalid') return c.redirect(`/admin/media?error=media_url${hash}`);
+  setMediaDrive(eventId, url, c.get('user').id);
+  audit(c, 'admin.media_drive_changed', { by: c.get('user').id, eventId, url });
+  return c.redirect(`/admin/media?ok=${url ? 'media_saved' : 'media_removed'}${hash}`);
 });
 
 // --- Promoters' public pages, for admins -------------------------------------------------------------
