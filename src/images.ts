@@ -1,21 +1,58 @@
+import sharp from 'sharp';
+
 /*
  * Every image people upload (profile photos, the logo) or the server fetches (Instagram photos) goes
- * through here before it is stored:
+ * through here before it is stored. First, without decoding it (prepareImage):
  *  - the type comes from the bytes, never the file name or the browser: PNG, JPEG or WebP only;
  *  - the file is parsed, so a broken or disguised file is refused;
- *  - its size in pixels is limited, so a small file cannot unpack into a huge image in viewers' browsers;
+ *  - its size in bytes and in pixels is limited, so a small file cannot unpack into a huge image;
  *  - metadata is removed (EXIF with the phone's GPS position, XMP, comments, text chunks), keeping only a
- *    photo's rotation so phone pictures stay upright;
- *  - anything after the end of the image (a hidden second file) is dropped.
- * Pixels are not re-encoded: the image data is kept as it is.
+ *    photo's rotation, and anything after the end of the image (a hidden second file) is dropped.
+ * Then (processImage) it is decoded and rebuilt from its pixels with sharp: turned upright, shrunk to the
+ * size it is shown at, and saved as a new JPEG (photos) or PNG (the logo, which may be transparent) with no
+ * metadata at all. JPEG and PNG rather than WebP: the logo goes in emails, photos in link previews.
  */
 
 export type ImageType = 'image/png' | 'image/jpeg' | 'image/webp';
 export type CleanImage = { bytes: Uint8Array; type: ImageType; width: number; height: number };
 export type ImageProblem = 'too_big' | 'bad_type' | 'too_many_pixels';
 
-export const maxImageSide = 6000;
-export const maxImagePixels = 25_000_000;
+// Phone photos as they come (a 48-megapixel camera is 8064 × 6048); they are shrunk before being stored.
+export const maxUploadBytes = 15 * 1024 * 1024;
+export const maxImageSide = 12_000;
+export const maxImagePixels = 50_000_000;
+
+export type ImageKind = 'photo' | 'logo';
+// Profile photos are shown as circles of at most 120 px (on high-density screens too); the logo at 36 px high.
+const sizes = { photo: { width: 512, height: 512, fit: 'cover' }, logo: { width: 600, height: 300, fit: 'inside' } } as const;
+
+// One image at a time: decoding a large photo takes memory, and uploads are rare.
+sharp.cache(false);
+sharp.concurrency(1);
+let queue: Promise<unknown> = Promise.resolve();
+
+/** Checks an image, then shrinks and rebuilds it for storage; the reason when it is refused. */
+export async function processImage(bytes: Uint8Array, kind: ImageKind): Promise<{ bytes: Uint8Array; type: ImageType } | ImageProblem> {
+  const image = prepareImage(bytes, maxUploadBytes);
+  if (typeof image === 'string') return image;
+  const run = queue.then(() => rebuild(image, kind));
+  queue = run.catch(() => {});
+  return run;
+}
+
+async function rebuild(image: CleanImage, kind: ImageKind): Promise<{ bytes: Uint8Array; type: ImageType } | ImageProblem> {
+  const size = sizes[kind];
+  try {
+    const pipeline = sharp(image.bytes, { limitInputPixels: maxImagePixels, failOn: 'error' })
+      .rotate() // upright, from the EXIF rotation
+      .resize({ width: size.width, height: size.height, fit: size.fit, position: 'centre', withoutEnlargement: true });
+    if (kind === 'logo') return { bytes: new Uint8Array(await pipeline.png({ compressionLevel: 9 }).toBuffer()), type: 'image/png' };
+    const out = await pipeline.flatten({ background: '#ffffff' }).jpeg({ quality: 82, mozjpeg: true }).toBuffer();
+    return { bytes: new Uint8Array(out), type: 'image/jpeg' };
+  } catch {
+    return 'bad_type'; // the header looked right but the image data could not be decoded
+  }
+}
 
 /** Checks and cleans an image; the reason when it is refused. */
 export function prepareImage(bytes: Uint8Array, maxBytes: number): CleanImage | ImageProblem {

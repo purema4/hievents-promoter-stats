@@ -132,8 +132,9 @@ describeIntegration('admin pages', () => {
 
       expect(location(await admin.request('/admin/branding', { method: 'POST', body: brandingForm(new File([png], 'logo.png')) }))).toBe('/admin/branding?ok=saved');
       const logo = await admin.get('/brand/logo');
+      // Stored rebuilt as a PNG (src/images.ts).
       expect(logo.headers.get('content-type')).toBe('image/png');
-      expect(Buffer.from(await logo.arrayBuffer()).equals(png)).toBe(true);
+      expect(Buffer.from(await logo.arrayBuffer()).subarray(0, 8).equals(png.subarray(0, 8))).toBe(true);
     });
 
     test('the brand shows on the sign-in page, as text', async () => {

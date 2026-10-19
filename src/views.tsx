@@ -1,6 +1,7 @@
 import type { Child } from 'hono/jsx';
-import { avatarOf, initials, maxAvatarBytes } from './avatars';
-import { accentWarnings, brandVersion, getBrand, maxLogoBytes, type Brand } from './brand';
+import { avatarOf, initials } from './avatars';
+import { maxUploadBytes } from './images';
+import { accentWarnings, brandVersion, getBrand, type Brand } from './brand';
 import { chartCss, RangeLinks, SalesChart, type Range } from './chart';
 import type { Leaderboard, Sort } from './leaderboard';
 import { sessionsFor, type DeviceSession } from './auth';
@@ -963,7 +964,7 @@ export function AccountPage(props: { user: User; error?: string; ok?: string }) 
               </div>
             </div>
             <label>
-              Upload a photo instead (PNG, JPEG or WebP, up to {Math.round(maxAvatarBytes / 1024 / 1024)} MB)
+              Upload a photo instead (PNG, JPEG or WebP, up to {Math.round(maxUploadBytes / 1024 / 1024)} MB)
               <input type="file" name="photo" accept="image/png,image/jpeg,image/webp" />
             </label>
             {(u.avatar_source === 'upload' || u.avatar_source === 'admin') && (
@@ -1597,7 +1598,7 @@ export function PromoterPage(props: {
         </div>
         <form class="stack" method="post" action={`/admin/promoters/${p.id}/photo`} enctype="multipart/form-data">
           <label>
-            Set their photo (PNG, JPEG or WebP, up to {Math.round(maxAvatarBytes / 1024 / 1024)} MB). They are told.
+            Set their photo (PNG, JPEG or WebP, up to {Math.round(maxUploadBytes / 1024 / 1024)} MB). They are told.
             <input type="file" name="photo" accept="image/png,image/jpeg,image/webp" required />
           </label>
           <button type="submit">Save photo</button>
@@ -1990,7 +1991,7 @@ export function AdminBrandingPage(props: { user: User; error?: string; ok?: stri
             ))}
             <p class="muted">A lighter version is worked out automatically for dark mode.</p>
             <label>
-              Logo (PNG, JPEG or WebP, up to {Math.round(maxLogoBytes / 1024)} KB; shown about 28 px high)
+              Logo (PNG, JPEG or WebP, up to {Math.round(maxUploadBytes / 1024 / 1024)} MB; shrunk to fit 600 × 300, shown about 28 px high)
               <input type="file" name="logo" accept="image/png,image/jpeg,image/webp" />
             </label>
             {brand.logoType && (
@@ -2413,7 +2414,7 @@ export function WelcomePage(props: {
                 </div>
               </div>
               <label>
-                {hasPhoto ? 'Upload another photo' : 'Upload a photo'} (PNG, JPEG or WebP, up to {Math.round(maxAvatarBytes / 1024 / 1024)} MB)
+                {hasPhoto ? 'Upload another photo' : 'Upload a photo'} (PNG, JPEG or WebP, up to {Math.round(maxUploadBytes / 1024 / 1024)} MB)
                 <input type="file" name="photo" accept="image/png,image/jpeg,image/webp" required={!hasPhoto} />
               </label>
               <div class="welcome-actions">

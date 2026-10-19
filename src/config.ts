@@ -66,6 +66,19 @@ export const config = {
   loginLinkMinutes: Number(process.env.LOGIN_LINK_MINUTES ?? 30),
   // Invites sent by an admin stay valid longer than links a promoter requests themselves.
   inviteLinkDays: Number(process.env.INVITE_LINK_DAYS ?? 7),
+  // Optional S3-compatible bucket (AWS S3, DigitalOcean Spaces, Cloudflare R2, MinIO…) for uploaded files
+  // (profile photos, the logo). Without S3_BUCKET they are kept in DATA_DIR.
+  s3: {
+    bucket: (process.env.S3_BUCKET ?? '').trim(),
+    region: (process.env.S3_REGION ?? '').trim() || 'us-east-1',
+    endpoint: (process.env.S3_ENDPOINT ?? '').trim().replace(/\/+$/, ''),
+    accessKeyId: (process.env.S3_ACCESS_KEY_ID ?? '').trim(),
+    secretAccessKey: (process.env.S3_SECRET_ACCESS_KEY ?? '').trim(),
+    // A folder in the bucket, e.g. "promoter-stats/", so the bucket can be shared with other apps.
+    prefix: (process.env.S3_PREFIX ?? '').trim().replace(/^\/+/, '').replace(/([^/])$/, '$1/'),
+  },
+  // Optional CDN in front of the bucket (its root, so a file is at CDN_URL/<prefix><key>). Only used with S3_BUCKET.
+  cdnUrl: (process.env.CDN_URL ?? '').trim().replace(/\/+$/, ''),
   smtp: {
     host: process.env.SMTP_HOST,
     port: Number(process.env.SMTP_PORT ?? 587),

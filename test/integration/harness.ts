@@ -1,7 +1,7 @@
 /*
  * Integration test harness. The real server (`bun src/index.tsx`) runs as a subprocess with its own
  * temporary DATA_DIR and port, against the sandbox stack from docker-compose.dev.yml +
- * docker-compose.test.yml (Hi.Events Postgres with dev/seed.sql, Mailpit, the cover CDN).
+ * docker-compose.test.yml (Hi.Events Postgres with dev/seed.sql, Mailpit, the cover CDN, MinIO for S3).
  * Tests talk to it over HTTP only and read its emails through the Mailpit API.
  *
  * When the stack is unreachable the integration tests are skipped, except with CI=true, where that
@@ -22,10 +22,17 @@ export const stack = {
   mailpitUrl: (process.env.TEST_MAILPIT_URL || 'http://127.0.0.1:18025').replace(/\/$/, ''),
   smtpPort: Number(process.env.TEST_SMTP_PORT || 11025),
   cdnUrl: (process.env.TEST_CDN_URL || 'http://127.0.0.1:18080').replace(/\/$/, ''),
+  // MinIO, for S3_BUCKET and CDN_URL.
+  s3: {
+    endpoint: (process.env.TEST_S3_URL || 'http://127.0.0.1:19000').replace(/\/$/, ''),
+    bucket: 'promoter-test',
+    accessKeyId: 'promoter-test',
+    secretAccessKey: 'promoter-test-secret',
+  },
 };
 
 const START_HINT =
-  'Start it with: docker compose -p promoterstats-tests -f docker-compose.dev.yml -f docker-compose.test.yml up -d --wait hievents-db mailpit cdn';
+  'Start it with: docker compose -p promoterstats-tests -f docker-compose.dev.yml -f docker-compose.test.yml up -d --wait hievents-db mailpit cdn s3';
 
 function tcpOpen(host: string, port: number, timeoutMs: number): Promise<boolean> {
   return new Promise((done) => {
@@ -61,6 +68,12 @@ async function probeStack(): Promise<string | null> {
     if (!res.ok) return `Cover CDN at ${stack.cdnUrl} answered ${res.status}`;
   } catch (err) {
     return `Cover CDN not reachable at ${stack.cdnUrl} (${(err as Error).message})`;
+  }
+  try {
+    const res = await fetch(`${stack.s3.endpoint}/minio/health/live`, { signal: AbortSignal.timeout(3000) });
+    if (!res.ok) return `S3 (MinIO) at ${stack.s3.endpoint} answered ${res.status}`;
+  } catch (err) {
+    return `S3 (MinIO) not reachable at ${stack.s3.endpoint} (${(err as Error).message})`;
   }
   return null;
 }

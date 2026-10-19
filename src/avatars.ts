@@ -1,7 +1,5 @@
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { prepareImage, type ImageProblem } from './images';
-import { config } from './config';
+import { maxUploadBytes, processImage, type ImageProblem } from './images';
+import { deleteFile, deliver, fileKnown, getFile, moveToBucket, newKey, putFile, storageKind, type Delivery } from './storage';
 import { addColumn, db, findUser, type User } from './local-db';
 
 /*
@@ -13,56 +11,92 @@ addColumn('users', 'avatar_type', 'TEXT'); // image/png, image/jpeg or image/web
 addColumn('users', 'avatar_source', 'TEXT'); // 'upload', 'admin' (set by an admin) or 'instagram'
 addColumn('users', 'avatar_for', 'TEXT'); // the Instagram handle the stored photo came from
 addColumn('users', 'avatar_checked_at', 'INTEGER');
+// Where the photo is stored (src/storage.ts); NULL for photos saved before keys, kept on disk as avatars/<id>.
+addColumn('users', 'avatar_key', 'TEXT');
 
-const dir = join(config.dataDir, 'avatars');
-const fileFor = (userId: number) => join(dir, String(userId));
-export const maxAvatarBytes = 2 * 1024 * 1024;
+const keyOf = (user: User) => user.avatar_key ?? `avatars/${user.id}`;
 const WEEK = 7 * 24 * 3600;
 
 export type AvatarInfo = { userId: number; version: number } | null;
 
 export function avatarOf(user: User): AvatarInfo {
-  return user.avatar_type && existsSync(fileFor(user.id)) ? { userId: user.id, version: user.avatar_checked_at ?? 0 } : null;
+  return user.avatar_type && fileKnown(keyOf(user)) ? { userId: user.id, version: user.avatar_checked_at ?? 0 } : null;
 }
 
-export function readAvatar(userId: number): { bytes: Buffer; type: string } | null {
+/** The photo to send (or the CDN address to send the browser to). Callers check who may see it first. */
+export async function deliverAvatar(userId: number): Promise<Delivery | null> {
   const user = findUser(userId);
-  if (!user?.avatar_type || !existsSync(fileFor(userId))) return null;
-  return { bytes: readFileSync(fileFor(userId)), type: user.avatar_type };
+  return user?.avatar_type ? deliver(keyOf(user), user.avatar_type) : null;
 }
 
 type Source = 'upload' | 'admin' | 'instagram';
 /** A photo chosen by a person (the promoter or an admin): Instagram does not replace it. */
 const chosen = (source: string | null | undefined) => source === 'upload' || source === 'admin';
 
-function store(userId: number, bytes: Uint8Array, type: string, source: Source, handle: string | null) {
-  mkdirSync(dir, { recursive: true });
-  writeFileSync(fileFor(userId), bytes);
-  db.query('UPDATE users SET avatar_type = ?, avatar_source = ?, avatar_for = ?, avatar_checked_at = ? WHERE id = ?').run(
+// Each photo gets a new key, so a CDN or browser never shows an old one; the previous file is then removed.
+async function store(userId: number, bytes: Uint8Array, type: string, source: Source, handle: string | null) {
+  const before = findUser(userId);
+  const key = newKey(`avatars/${userId}`, type);
+  await putFile(key, bytes, type);
+  db.query('UPDATE users SET avatar_type = ?, avatar_source = ?, avatar_for = ?, avatar_checked_at = ?, avatar_key = ? WHERE id = ?').run(
     type,
     source,
     handle,
     Math.floor(Date.now() / 1000),
+    key,
     userId,
   );
+  if (before?.avatar_type) await deleteFile(keyOf(before));
 }
 
-function clear(userId: number) {
-  rmSync(fileFor(userId), { force: true });
-  db.query('UPDATE users SET avatar_type = NULL, avatar_source = NULL, avatar_for = NULL WHERE id = ?').run(userId);
+async function clear(userId: number) {
+  const before = findUser(userId);
+  if (before?.avatar_type || before?.avatar_key) await deleteFile(keyOf(before));
+  db.query('UPDATE users SET avatar_type = NULL, avatar_source = NULL, avatar_for = NULL, avatar_key = NULL WHERE id = ?').run(userId);
 }
 
-/** Stores a photo uploaded by the promoter, or by an admin for them, once checked and cleaned (src/images.ts). */
-export function saveUploadedAvatar(userId: number, bytes: Uint8Array, source: 'upload' | 'admin' = 'upload'): 'ok' | ImageProblem {
-  const image = prepareImage(bytes, maxAvatarBytes);
+/** Once, at startup: shrinks the photos stored before uploads were shrunk. How many were shrunk. */
+export async function shrinkStoredAvatars(): Promise<number> {
+  db.exec('CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
+  if (db.query("SELECT 1 FROM settings WHERE key = 'photosShrunk'").get()) return 0;
+  let shrunk = 0;
+  for (const user of db.query<User, []>('SELECT * FROM users WHERE avatar_type IS NOT NULL').all()) {
+    const bytes = await getFile(keyOf(user));
+    const image = bytes ? await processImage(bytes, 'photo') : null;
+    // A photo that cannot be read is left as it is.
+    if (!image || typeof image === 'string') continue;
+    await store(user.id, image.bytes, image.type, user.avatar_source ?? 'upload', user.avatar_for ?? null);
+    shrunk++;
+  }
+  db.query("INSERT INTO settings (key, value) VALUES ('photosShrunk', ?)").run(new Date().toISOString());
+  return shrunk;
+}
+
+/** With S3 set up: moves the photos still on disk to the bucket (at startup). */
+export async function moveAvatarsToBucket(): Promise<number> {
+  if (storageKind !== 's3') return 0;
+  let moved = 0;
+  for (const user of db.query<User, []>('SELECT * FROM users WHERE avatar_type IS NOT NULL').all()) {
+    const key = newKey(`avatars/${user.id}`, user.avatar_type!);
+    if (await moveToBucket(keyOf(user), key, user.avatar_type!)) {
+      db.query('UPDATE users SET avatar_key = ? WHERE id = ?').run(key, user.id);
+      moved++;
+    }
+  }
+  return moved;
+}
+
+/** Stores a photo uploaded by the promoter, or by an admin for them, once checked and shrunk (src/images.ts). */
+export async function saveUploadedAvatar(userId: number, bytes: Uint8Array, source: 'upload' | 'admin' = 'upload'): Promise<'ok' | ImageProblem> {
+  const image = await processImage(bytes, 'photo');
   if (typeof image === 'string') return image;
-  store(userId, image.bytes, image.type, source, null);
+  await store(userId, image.bytes, image.type, source, null);
   return 'ok';
 }
 
 /** Drops an uploaded photo and goes back to the Instagram one, if any. */
 export async function useInstagramAvatar(user: User) {
-  clear(user.id);
+  await clear(user.id);
   await refreshInstagramAvatar({ ...user, avatar_source: null, avatar_for: null }, true);
 }
 
@@ -72,16 +106,16 @@ export async function refreshInstagramAvatar(user: User, force = false) {
   if (chosen(user.avatar_source)) return;
   const handle = handleOf(user.instagram);
   if (!/^[a-z0-9._]{1,30}$/.test(handle)) {
-    if (user.avatar_source === 'instagram') clear(user.id);
+    if (user.avatar_source === 'instagram') await clear(user.id);
     return;
   }
   const fresh = user.avatar_for === handle && (user.avatar_checked_at ?? 0) > Date.now() / 1000 - WEEK;
   if (fresh && !force) return;
   db.query('UPDATE users SET avatar_checked_at = ? WHERE id = ?').run(Math.floor(Date.now() / 1000), user.id);
   const photo = await fetchInstagramPhoto(handle);
-  if (photo) store(user.id, photo.bytes, photo.type, 'instagram', handle);
+  if (photo) await store(user.id, photo.bytes, photo.type, 'instagram', handle);
   // A changed handle whose photo cannot be fetched should not keep showing the old person's photo.
-  else if (user.avatar_for && user.avatar_for !== handle) clear(user.id);
+  else if (user.avatar_for && user.avatar_for !== handle) await clear(user.id);
 }
 
 async function fetchInstagramPhoto(handle: string): Promise<{ bytes: Uint8Array; type: string } | null> {
@@ -102,8 +136,8 @@ async function fetchInstagramPhoto(handle: string): Promise<{ bytes: Uint8Array;
     const image = await fetch(url, { signal: AbortSignal.timeout(8000), redirect: 'manual' });
     if (!image.ok) return null;
     // Stops reading past the size limit instead of loading a huge answer into memory.
-    const bytes = await readCapped(image, maxAvatarBytes);
-    const clean = bytes ? prepareImage(bytes, maxAvatarBytes) : null;
+    const bytes = await readCapped(image, maxUploadBytes);
+    const clean = bytes ? await processImage(bytes, 'photo') : null;
     return clean && typeof clean !== 'string' ? { bytes: clean.bytes, type: clean.type } : null;
   } catch {
     return null;

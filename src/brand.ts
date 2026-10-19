@@ -1,7 +1,6 @@
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { config } from './config';
 import { db } from './local-db';
+import { processImage } from './images';
+import { deleteFile, deliver, fileKnown, getFile, moveToBucket, newKey, putFile, storageKind, type Delivery } from './storage';
 
 // Branding is set by admins on /admin/branding and stored here, not in the environment.
 db.exec('CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
@@ -12,6 +11,7 @@ export type Brand = {
   loginMessage: string;
   footer: string;
   logoType: string | null; // image/png, image/jpeg or image/webp when a logo is uploaded
+  logoKey: string | null; // where it is stored (src/storage.ts)
   updatedAt: string;
 };
 
@@ -21,11 +21,12 @@ const defaults: Brand = {
   loginMessage: 'Sign in to see the tickets sold with your promo codes, your commission and your rewards.',
   footer: '',
   logoType: null,
+  logoKey: null,
   updatedAt: '0',
 };
 
-const logoDir = join(config.dataDir, 'brand');
-const logoPath = join(logoDir, 'logo');
+// Logos saved before keys are on disk at brand/logo.
+const legacyLogoKey = 'brand/logo';
 
 let cached: Brand | null = null;
 
@@ -38,7 +39,8 @@ export function getBrand(): Brand {
     accent: stored.accent && isHex(stored.accent) ? stored.accent : defaults.accent,
     loginMessage: stored.loginMessage ?? defaults.loginMessage,
     footer: stored.footer ?? defaults.footer,
-    logoType: stored.logoType && existsSync(logoPath) ? stored.logoType : null,
+    logoType: stored.logoType && fileKnown(stored.logoKey || legacyLogoKey) ? stored.logoType : null,
+    logoKey: stored.logoType ? stored.logoKey || legacyLogoKey : null,
     updatedAt: stored.updatedAt ?? defaults.updatedAt,
   };
   return cached;
@@ -70,24 +72,46 @@ export function updateBrand(input: { name: string; accent: string; loginMessage:
   });
 }
 
-// PNG, JPEG or WebP only (an SVG could carry scripts), checked and cleaned by src/images.ts.
-export const maxLogoBytes = 1024 * 1024;
-
-export function saveLogo(bytes: Uint8Array, type: string) {
-  mkdirSync(logoDir, { recursive: true });
-  writeFileSync(logoPath, bytes);
-  save({ logoType: type });
+// Each logo gets a new key (a CDN never shows an old one); the previous file is then removed.
+export async function saveLogo(bytes: Uint8Array, type: string) {
+  const before = getBrand().logoKey;
+  const key = newKey('brand/logo', type);
+  await putFile(key, bytes, type);
+  save({ logoType: type, logoKey: key });
+  if (before) await deleteFile(before);
 }
 
-export function removeLogo() {
-  rmSync(logoPath, { force: true });
-  save({ logoType: null });
+export async function removeLogo() {
+  const before = getBrand().logoKey;
+  save({ logoType: null, logoKey: null });
+  if (before) await deleteFile(before);
 }
 
-export function readLogo(): { bytes: Buffer; type: string } | null {
+/** The logo to send, or the CDN address to send the browser to. */
+export async function deliverLogo(): Promise<Delivery | null> {
   const brand = getBrand();
-  if (!brand.logoType) return null;
-  return { bytes: readFileSync(logoPath), type: brand.logoType };
+  return brand.logoType && brand.logoKey ? deliver(brand.logoKey, brand.logoType) : null;
+}
+
+/** Once, at startup: shrinks a logo stored before uploads were shrunk. True when it was. */
+export async function shrinkStoredLogo(): Promise<boolean> {
+  if (db.query("SELECT 1 FROM settings WHERE key = 'logoShrunk'").get()) return false;
+  const brand = getBrand();
+  const bytes = brand.logoKey && brand.logoType ? await getFile(brand.logoKey) : null;
+  const image = bytes ? await processImage(bytes, 'logo') : null;
+  if (image && typeof image !== 'string') await saveLogo(image.bytes, image.type);
+  db.query("INSERT INTO settings (key, value) VALUES ('logoShrunk', ?)").run(new Date().toISOString());
+  return !!image && typeof image !== 'string';
+}
+
+/** With S3 set up: moves a logo still on disk to the bucket (at startup). */
+export async function moveLogoToBucket(): Promise<boolean> {
+  const brand = getBrand();
+  if (storageKind !== 's3' || !brand.logoType || !brand.logoKey) return false;
+  const key = newKey('brand/logo', brand.logoType);
+  if (!(await moveToBucket(brand.logoKey, key, brand.logoType))) return false;
+  save({ logoKey: key });
+  return true;
 }
 
 // --- Colour ------------------------------------------------------------------------------------

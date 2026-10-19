@@ -105,6 +105,7 @@ export type User = {
   theme?: 'system' | 'light' | 'dark' | null;
   avatar_type?: string | null;
   avatar_source?: 'upload' | 'admin' | 'instagram' | null;
+  avatar_key?: string | null;
   avatar_for?: string | null;
   avatar_checked_at?: number | null;
   app_installed_at?: number | null;

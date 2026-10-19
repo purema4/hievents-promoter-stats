@@ -139,8 +139,9 @@ describeIntegration('security controls', () => {
 
     const own = await promoter.client.get(`/avatar/${promoter.id}`);
     expect(own.status).toBe(200);
-    expect(own.headers.get('content-type')).toBe('image/png');
-    expect(Buffer.from(await own.arrayBuffer()).equals(png)).toBe(true);
+    // Stored rebuilt as a JPEG (src/images.ts), whatever was uploaded.
+    expect(own.headers.get('content-type')).toBe('image/jpeg');
+    expect([...new Uint8Array(await own.arrayBuffer()).subarray(0, 3)]).toEqual([0xff, 0xd8, 0xff]);
     expect((await other.client.get(`/avatar/${promoter.id}`)).status).toBe(404);
     expect((await promoter.client.get(`/avatar/${adminId}`)).status).toBe(404);
     expect((await admin.get(`/avatar/${promoter.id}`)).status).toBe(200);

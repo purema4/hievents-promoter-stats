@@ -72,11 +72,20 @@ Verified as safe, with no change needed:
 ## Image uploads (2026-10-19)
 
 - Every stored image (profile photos uploaded by promoters or set by admins, the logo, Instagram photos) goes through `prepareImage` in `src/images.ts`: the type comes from the bytes (PNG, JPEG, WebP; SVG and anything else refused), the file is parsed and a truncated or disguised one is refused, its size is limited in bytes (2 MB photos, 1 MB logo) and in pixels (6000 per side, 25 megapixels, so a small file cannot expand into a huge image in an admin's browser), and metadata is removed: EXIF (GPS position, camera, dates), XMP, IPTC, comments and PNG text chunks. Only a JPEG's rotation is kept, in a new minimal EXIF block. Data after the end of the image (a second file appended to it) is dropped. Pixels are not re-encoded.
+- Since sharp was added, images are also decoded and re-encoded from their pixels (512 × 512 JPEG photos, ≤ 600 × 300 PNG logo) with no metadata, after the checks above and with sharp's own `limitInputPixels` set to the same 50-megapixel limit. Limits since then: 15 MB, 12,000 px per side, 50 megapixels. Re-encoding means nothing but pixels from an upload is ever stored or served. Images are processed one at a time (`sharp.concurrency(1)`, a queue) to bound memory. sharp ships libvips as a native binary: Trivy scans it with the image, Dependabot updates it.
 - At most 20 image uploads per person per hour (in memory).
 - A body over the upload limit is answered without being read, with `Connection: close`, so the rest of the upload is not read as the next request on that connection.
 - Instagram: no redirects are followed, the page read stops at 2 MB and the image download stops past 2 MB instead of being loaded whole.
 - Admins setting a promoter's photo: admin-only route (403 for promoters, 403 cross-site), audited, and the promoter is notified.
 - Images are served with their own type, `nosniff` and the strict CSP. Tests: `test/unit/images.test.ts` (real PNG, JPEG, lossy and lossless WebP with fake GPS, XMP, comments and appended files) and `test/integration/profile-photo.test.ts`.
+
+## File storage in S3 (2026-10-19)
+
+- Optional S3 bucket (`S3_BUCKET`) for photos and the logo, and optional CDN (`CDN_URL`). Object keys are made by the app only, with 96 random bits (`avatars/<id>-<random>.jpg`), never from user input, so they cannot be guessed or used for path tricks. Each new photo gets a new key and the old object is deleted.
+- Without a CDN the app reads the object and serves it, so the bucket stays private. With a CDN, every request still goes through the app's access check first (a promoter's photo: themselves, their team and admins; the public page photo: anyone, as before); only then is the browser redirected. Someone not allowed gets a 404 and never the address. The CDN address of a photo works for anyone who has it, like any CDN file: treat it as unlisted, not secret.
+- The CSP's `img-src` adds the CDN's origin only when `CDN_URL` is in use.
+- S3 keys come from the environment only and are never logged. The app refuses to start with a bucket but no keys, and logs (without the secret) when the bucket cannot be written to.
+- Tests: `test/integration/storage.test.ts` against MinIO (bucket, CDN redirects and access checks, moving files from the volume, settings errors).
 
 ## Controls by category
 

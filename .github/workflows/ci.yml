@@ -42,8 +42,8 @@ jobs:
       - name: Typecheck
         run: bun run typecheck
 
-      - name: Start test stack (Postgres, Mailpit, CDN)
-        run: docker compose up -d --wait hievents-db mailpit cdn
+      - name: Start test stack (Postgres, Mailpit, CDN, S3)
+        run: docker compose up -d --wait hievents-db mailpit cdn s3
 
       - name: Run tests
         env:

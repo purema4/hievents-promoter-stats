@@ -51,9 +51,10 @@ import {
 } from './two-factor';
 import { leaderboard, type Sort } from './leaderboard';
 import { aliasPattern, aliasTaken, ensureAliases, eventLink, linkSettings, pageLink, saveLinkSettings, setAlias, suggestAlias } from './links';
-import { avatarOf, maxAvatarBytes, readAvatar, refreshAllAvatars, refreshInstagramAvatar, saveUploadedAvatar, useInstagramAvatar } from './avatars';
-import { brandCss, getBrand, isHex, maxLogoBytes, readLogo, removeLogo, saveLogo, updateBrand } from './brand';
-import { allowImageUpload, maxImageSide, prepareImage, purgeUploadCounts, type ImageProblem } from './images';
+import { avatarOf, deliverAvatar, moveAvatarsToBucket, shrinkStoredAvatars, refreshAllAvatars, refreshInstagramAvatar, saveUploadedAvatar, useInstagramAvatar } from './avatars';
+import { brandCss, deliverLogo, getBrand, isHex, moveLogoToBucket, shrinkStoredLogo, removeLogo, saveLogo, updateBrand } from './brand';
+import { cdnOrigin, checkStorage, type Delivery } from './storage';
+import { allowImageUpload, maxImageSide, maxUploadBytes, processImage, purgeUploadCounts, type ImageProblem } from './images';
 import { parseRange } from './chart';
 import { checkAllMilestones, checkMilestones } from './milestones';
 import {
@@ -230,13 +231,13 @@ const messages: Record<string, string> = {
   reset: 'Back to the default wording.',
   test_sent: 'Saved, and a test was sent to your email address.',
   test_failed: 'Saved, but the test could not be sent. The list of recent emails shows why.',
-  photo_size: `The photo must be ${Math.round(maxAvatarBytes / 1024 / 1024)} MB or less.`,
+  photo_size: `The photo must be ${Math.round(maxUploadBytes / 1024 / 1024)} MB or less.`,
   photo_type: 'The photo must be a PNG, JPEG or WebP image.',
   photo_missing: 'Choose a photo, or skip this step for now.',
-  logo_size: `The logo must be ${Math.round(maxLogoBytes / 1024)} KB or less.`,
+  logo_size: `The logo must be ${Math.round(maxUploadBytes / 1024 / 1024)} MB or less.`,
   logo_type: 'The logo must be a PNG, JPEG or WebP image.',
   logo_pixels: `The logo must be at most ${maxImageSide} pixels on each side.`,
-  photo_pixels: `The photo must be at most ${maxImageSide} pixels on each side (25 megapixels in all).`,
+  photo_pixels: `The photo must be at most ${maxImageSide} pixels on each side (50 megapixels in all).`,
   photo_rate: 'Too many photos uploaded in the last hour. Try again later.',
   photo_set: 'Photo saved. They were told the team changed it.',
   photo_removed: 'Photo removed. Their Instagram photo or initials show instead.',
@@ -326,7 +327,8 @@ const strictHeaders = secureHeaders({
       workerSrc: ["'self'"],
       manifestSrc: ["'self'"],
       styleSrc: ["'self'"],
-      imgSrc: ["'self'", 'data:'],
+      // Photos and the logo may come from the CDN in front of the S3 bucket (CDN_URL).
+      imgSrc: ["'self'", 'data:', ...(cdnOrigin ? [cdnOrigin] : [])],
       formAction: ["'self'"],
       // Only the admin email preview is framed, and only by this site.
       frameSrc: ["'self'"],
@@ -341,8 +343,8 @@ const previewHeaders = secureHeaders({
   contentSecurityPolicy: {
     defaultSrc: ["'none'"],
     styleSrc: ["'unsafe-inline'"],
-    // The only image is the logo, served by the app itself.
-    imgSrc: ["'self'", 'data:'],
+    // The only image is the logo, served by the app itself or its CDN.
+    imgSrc: ["'self'", 'data:', ...(cdnOrigin ? [cdnOrigin] : [])],
     formAction: ["'none'"],
     frameAncestors: ["'self'"],
     baseUri: ["'none'"],
@@ -394,7 +396,8 @@ function tooBig(path: string): string | null {
   const promoter = path.match(/^\/admin\/promoters\/(\d+)\/photo$/);
   return promoter ? `/admin/promoters/${promoter[1]}?error=photo_size#photo` : null;
 }
-const fileBodies = bodyLimit({ maxSize: 4 * maxLogoBytes, onError: (c) => refuse(c, () => c.redirect(tooBig(c.req.path)!)) });
+// One file of up to maxUploadBytes, plus the form's other fields.
+const fileBodies = bodyLimit({ maxSize: maxUploadBytes + 1024 * 1024, onError: (c) => refuse(c, () => c.redirect(tooBig(c.req.path)!)) });
 app.use((c, next) => (tooBig(c.req.path) ? fileBodies(c, next) : smallBodies(c, next)));
 const photoError: Record<ImageProblem, string> = { too_big: 'photo_size', bad_type: 'photo_type', too_many_pixels: 'photo_pixels' };
 
@@ -420,13 +423,16 @@ app.get('/brand.css', (c) => {
   c.header('Cache-Control', 'public, max-age=31536000, immutable');
   return c.body(brandCss());
 });
-app.get('/brand/logo', (c) => {
-  const logo = readLogo();
-  if (!logo) return c.notFound();
-  c.header('Content-Type', logo.type);
-  c.header('Cache-Control', 'public, max-age=31536000, immutable');
-  return c.body(new Uint8Array(logo.bytes));
-});
+// Sends a stored file (src/storage.ts), or sends the browser to its CDN copy; the cache time applies to either.
+function sendStored(c: Context, file: Delivery | null, cache: string) {
+  if (!file) return c.notFound();
+  c.header('Cache-Control', cache);
+  if ('redirect' in file) return c.redirect(file.redirect, 302);
+  c.header('Content-Type', file.type);
+  return c.body(new Uint8Array(file.bytes));
+}
+
+app.get('/brand/logo', async (c) => sendStored(c, await deliverLogo(), 'public, max-age=31536000, immutable'));
 app.get('/icon.svg', (c) => publicAsset(c, 'icon.svg'));
 app.get('/:icon{icon-[a-z0-9-]+\\.png}', (c) => publicAsset(c, c.req.param('icon')));
 app.get('/badge-96.png', (c) => publicAsset(c, 'badge-96.png'));
@@ -452,13 +458,9 @@ app.get('/p/:alias', async (c) => {
   return c.html(<PromoterPublicPage owner={owner} events={events} shareUrl={pageShortLink(owner) ?? pageLink(owner)!} />);
 });
 
-app.get('/p/:alias/avatar', (c) => {
+app.get('/p/:alias/avatar', async (c) => {
   const owner = pageOwner(c.req.param('alias'));
-  const avatar = owner ? readAvatar(owner.id) : null;
-  if (!avatar) return c.notFound();
-  c.header('Content-Type', avatar.type);
-  c.header('Cache-Control', 'public, max-age=3600');
-  return c.body(new Uint8Array(avatar.bytes));
+  return sendStored(c, owner ? await deliverAvatar(owner.id) : null, 'public, max-age=3600');
 });
 
 // Only the covers of the events the page lists.
@@ -836,7 +838,7 @@ app.post('/welcome/photo', async (c) => {
   const photo = (await c.req.parseBody()).photo;
   if (photo instanceof File && photo.size > 0) {
     if (!allowImageUpload(user.id)) return c.redirect('/welcome?step=3&error=photo_rate');
-    const result = saveUploadedAvatar(user.id, new Uint8Array(await photo.arrayBuffer()));
+    const result = await saveUploadedAvatar(user.id, new Uint8Array(await photo.arrayBuffer()));
     if (result !== 'ok') return c.redirect(`/welcome?step=3&error=${photoError[result]}`);
     audit(c, 'account.photo_uploaded', { userId: user.id, during: 'welcome' });
   } else if (!avatarOf(user)) {
@@ -1127,15 +1129,11 @@ app.post('/account/security/2fa/:action{off|new-codes}', async (c) => {
 });
 
 // Promoters see their own photo and their team's; admins see everyone's.
-app.get('/avatar/:userId', (c) => {
+app.get('/avatar/:userId', async (c) => {
   const viewer = c.get('user');
   const userId = Number(c.req.param('userId'));
   if (viewer.id !== userId && !viewer.is_admin && !teamMember(viewer, userId) && !sameTeam(viewer, userId)) return c.notFound();
-  const avatar = readAvatar(userId);
-  if (!avatar) return c.notFound();
-  c.header('Content-Type', avatar.type);
-  c.header('Cache-Control', 'private, max-age=604800');
-  return c.body(new Uint8Array(avatar.bytes));
+  return sendStored(c, await deliverAvatar(userId), 'private, max-age=604800');
 });
 
 app.post('/account/profile', async (c) => {
@@ -1162,7 +1160,7 @@ app.post('/account/profile', async (c) => {
   const photo = body.photo;
   if (photo instanceof File && photo.size > 0) {
     if (!allowImageUpload(user.id)) return c.redirect('/account?error=photo_rate');
-    const result = saveUploadedAvatar(user.id, new Uint8Array(await photo.arrayBuffer()));
+    const result = await saveUploadedAvatar(user.id, new Uint8Array(await photo.arrayBuffer()));
     if (result !== 'ok') return c.redirect(`/account?error=${photoError[result]}`);
     audit(c, 'account.photo_uploaded', { userId: user.id });
   } else if (body.use_instagram_photo === '1') {
@@ -1293,7 +1291,7 @@ app.post('/admin/promoters/:id/photo', async (c) => {
   const photo = (await c.req.parseBody()).photo;
   if (!(photo instanceof File) || photo.size === 0) return c.redirect(`${back}?error=photo_type#photo`);
   if (!allowImageUpload(admin.id)) return c.redirect(`${back}?error=photo_rate#photo`);
-  const result = saveUploadedAvatar(promoter.id, new Uint8Array(await photo.arrayBuffer()), 'admin');
+  const result = await saveUploadedAvatar(promoter.id, new Uint8Array(await photo.arrayBuffer()), 'admin');
   if (result !== 'ok') return c.redirect(`${back}?error=${photoError[result]}#photo`);
   audit(c, 'admin.photo_set', { by: admin.id, userId: promoter.id });
   if (promoter.id !== admin.id) {
@@ -1975,11 +1973,11 @@ app.post('/admin/branding', async (c) => {
   const logo = body.logo;
   if (logo instanceof File && logo.size > 0) {
     if (!allowImageUpload(c.get('user').id)) return c.redirect('/admin/branding?error=photo_rate');
-    const image = prepareImage(new Uint8Array(await logo.arrayBuffer()), maxLogoBytes);
+    const image = await processImage(new Uint8Array(await logo.arrayBuffer()), 'logo');
     if (typeof image === 'string') return c.redirect(`/admin/branding?error=${{ too_big: 'logo_size', bad_type: 'logo_type', too_many_pixels: 'logo_pixels' }[image]}`);
-    saveLogo(image.bytes, image.type);
+    await saveLogo(image.bytes, image.type);
   } else if (body.remove_logo === '1') {
-    removeLogo();
+    await removeLogo();
   }
   updateBrand({
     name: String(body.name ?? ''),
@@ -2083,6 +2081,21 @@ if (config.adminEmail && config.adminPassword && !findUserByEmail(config.adminEm
 
 ensureAliases();
 purgeExpiredSessions();
+// With S3 set up: check the bucket answers, then move files still on disk to it. Then, once, shrink the
+// photos and logo stored before uploads were shrunk.
+void checkStorage()
+  .then(async () => {
+    const photos = await moveAvatarsToBucket();
+    const logo = await moveLogoToBucket();
+    if (photos || logo) console.log(`Moved to the S3 bucket: ${photos} profile photos${logo ? ' and the logo' : ''}.`);
+  })
+  .catch((err) => console.error('Moving files to the S3 bucket failed; they are still on disk:', err))
+  .then(async () => {
+    const photos = await shrinkStoredAvatars();
+    const logo = await shrinkStoredLogo();
+    if (photos || logo) console.log(`Shrunk the stored images: ${photos} profile photos${logo ? ' and the logo' : ''}.`);
+  })
+  .catch((err) => console.error('Shrinking the stored images failed; they are kept as they were:', err));
 setInterval(() => {
   purgeExpiredSessions();
   purgeUploadCounts();

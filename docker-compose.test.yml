@@ -1,6 +1,6 @@
 # Test stack: the sandbox services from docker-compose.dev.yml on fixed localhost ports, for `bun test`.
 # Only ever used together with docker-compose.dev.yml:
-#   docker compose -p promoterstats-tests -f docker-compose.dev.yml -f docker-compose.test.yml up -d --wait hievents-db mailpit cdn
+#   docker compose -p promoterstats-tests -f docker-compose.dev.yml -f docker-compose.test.yml up -d --wait hievents-db mailpit cdn s3
 # The app itself is not started here: the integration tests run `bun src/index.tsx` against these services.
 services:
   hievents-db:
@@ -32,6 +32,23 @@ services:
       test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/event_cover/warehouse.png"]
       interval: 2s
       timeout: 5s
+      retries: 30
+
+  # S3-compatible storage for the S3_BUCKET and CDN_URL tests. Healthy once the bucket exists; its files can
+  # be read without a key, like a bucket behind a CDN (the CDN tests use it as the CDN).
+  s3:
+    # RELEASE.2025-09-07T16-13-09Z. Pinned by digest: Docker Hub no longer serves MinIO's version tags.
+    image: minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
+    command: server /data
+    environment:
+      MINIO_ROOT_USER: promoter-test
+      MINIO_ROOT_PASSWORD: promoter-test-secret
+    ports:
+      - "127.0.0.1:19000:9000"
+    healthcheck:
+      test: ["CMD-SHELL", "mc alias set t http://127.0.0.1:9000 promoter-test promoter-test-secret >/dev/null && mc mb -p t/promoter-test >/dev/null && mc anonymous set download t/promoter-test >/dev/null"]
+      interval: 2s
+      timeout: 10s
       retries: 30
 
   # Not needed by the tests; keep it off the dev port if someone starts the whole file.

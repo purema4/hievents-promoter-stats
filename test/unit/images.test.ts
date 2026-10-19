@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
-import { allowImageUpload, maxImageSide, prepareImage, type CleanImage } from '../../src/images';
-import { bytes, has, jpg, lossless, phoneJpeg, png, pngSized, u16, u32le, webp } from '../fixtures/images';
+import sharp from 'sharp';
+import { allowImageUpload, maxImageSide, maxUploadBytes, prepareImage, processImage, type CleanImage } from '../../src/images';
+import { bytes, has, jpg, lossless, phoneExif, phoneJpeg, png, pngSized, u16, u32le, webp } from '../fixtures/images';
 
 const MB = 1024 * 1024;
 const clean = (b: Uint8Array) => {
@@ -39,8 +40,8 @@ describe('images: types and sizes', () => {
     const sized = pngSized;
     expect(prepareImage(sized(maxImageSide + 1, 10), 2 * MB)).toBe('too_many_pixels');
     expect(prepareImage(sized(10, 100_000), 2 * MB)).toBe('too_many_pixels');
-    expect(prepareImage(sized(5001, 5001), 2 * MB)).toBe('too_many_pixels');
-    expect(prepareImage(sized(5000, 5000), 2 * MB)).toMatchObject({ width: 5000, height: 5000 });
+    expect(prepareImage(sized(7072, 7072), 2 * MB)).toBe('too_many_pixels'); // just over 50 megapixels
+    expect(prepareImage(sized(8064, 6048), 2 * MB)).toMatchObject({ width: 8064, height: 6048 }); // a 48-megapixel phone
   });
 });
 
@@ -96,5 +97,65 @@ describe('images: upload limit', () => {
     for (let i = 0; i < 20; i++) expect(allowImageUpload(id)).toBe(true);
     expect(allowImageUpload(id)).toBe(false);
     expect(allowImageUpload(id + 1)).toBe(true);
+  });
+});
+
+describe('images: shrunk and rebuilt for storage', () => {
+  const made = (width: number, height: number, channels: 3 | 4 = 3) =>
+    sharp({ create: { width, height, channels, background: channels === 4 ? { r: 200, g: 30, b: 30, alpha: 0.5 } : '#c81e1e' } });
+  // A JPEG straight from a "phone": its EXIF (rotation 6, GPS) right after the start.
+  const fromPhone = async (width: number, height: number) => {
+    const plain = await made(width, height).jpeg().toBuffer();
+    return bytes(plain.subarray(0, 2), phoneExif(6), plain.subarray(2));
+  };
+  const ok = async (input: Uint8Array, kind: 'photo' | 'logo') => {
+    const out = await processImage(input, kind);
+    if (typeof out === 'string') throw new Error(`refused: ${out}`);
+    return { ...out, meta: await sharp(out.bytes).metadata() };
+  };
+
+  test('a big phone photo becomes a 512 × 512 JPEG with no metadata', async () => {
+    const input = await fromPhone(4032, 3024);
+    const out = await ok(input, 'photo');
+    expect(out.type).toBe('image/jpeg');
+    expect(out.meta).toMatchObject({ format: 'jpeg', width: 512, height: 512 });
+    expect(out.meta.exif).toBeUndefined();
+    expect(has(out.bytes, 'SECRET')).toBe(false);
+    expect(out.bytes.length).toBeLessThan(input.length);
+  });
+
+  test('photos are turned upright from their rotation', async () => {
+    // 300 wide × 200 high, rotation 6 (90°): upright it is 200 × 300, so the logo (which keeps its shape) is portrait.
+    const out = await ok(await fromPhone(300, 200), 'logo');
+    expect(out.meta).toMatchObject({ width: 200, height: 300 });
+  });
+
+  test('the logo stays a PNG with its transparency, at most 600 × 300', async () => {
+    const out = await ok(await made(1800, 600, 4).png().toBuffer(), 'logo');
+    expect(out.type).toBe('image/png');
+    expect(out.meta).toMatchObject({ format: 'png', width: 600, height: 200, hasAlpha: true });
+  });
+
+  test('a transparent photo gets a white background', async () => {
+    const out = await ok(await made(600, 600, 4).png().toBuffer(), 'photo');
+    expect(out.meta).toMatchObject({ format: 'jpeg', hasAlpha: false });
+  });
+
+  test('small images are not enlarged, and WebP becomes JPEG', async () => {
+    const out = await ok(webp, 'photo');
+    expect(out.meta.format).toBe('jpeg');
+    expect(out.meta.width).toBeLessThanOrEqual(40);
+  });
+
+  test('an image whose header is fine but whose data is broken is refused', async () => {
+    const broken = Buffer.from(png);
+    broken.fill(0x41, 45, 80); // inside the image data
+    expect(await processImage(broken, 'photo')).toBe('bad_type');
+  });
+
+  test('still refused before decoding: too big, too many pixels, not an image', async () => {
+    expect(await processImage(new Uint8Array(maxUploadBytes + 1), 'photo')).toBe('too_big');
+    expect(await processImage(pngSized(20_000, 20_000), 'photo')).toBe('too_many_pixels');
+    expect(await processImage(bytes('<svg/>'), 'logo')).toBe('bad_type');
   });
 });

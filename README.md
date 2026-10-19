@@ -141,7 +141,14 @@ A promoter's photo is the one they upload on Account, or else the one from their
 
 Admins can also set or remove a promoter's photo on the promoter's page (**Photo**); the promoter is notified and can replace it with their own.
 
-Every image (profile photos, the logo, Instagram photos) is checked and cleaned before it is stored (`src/images.ts`): PNG, JPEG or WebP recognised by their content, at most 2 MB for photos and 1 MB for the logo, at most 6000 pixels on a side and 25 megapixels, with metadata removed (EXIF including GPS position, XMP, comments, text chunks; a photo's rotation is kept) and anything after the end of the image dropped. Each person can upload at most 20 images an hour. Instagram photos are downloaded without following redirects and the download stops past 2 MB.
+Every image (profile photos, the logo, Instagram photos) is checked, then shrunk and rebuilt before it is stored (`src/images.ts`, with [sharp](https://sharp.pixelplumbing.com)):
+
+- Checked without decoding it: PNG, JPEG or WebP recognised by their content, at most 15 MB, 12,000 pixels on a side and 50 megapixels (a 48-megapixel phone photo fits), metadata removed and anything after the end of the image dropped.
+- Then rebuilt from its pixels: turned upright, shrunk and saved with no metadata at all. Profile photos become a 512 × 512 JPEG cropped from the centre (they show as circles); the logo a PNG of at most 600 × 300 that keeps its transparency. A 4 MB phone photo ends up around 30–60 KB. JPEG and PNG, not WebP, because the logo goes in emails and photos in link previews.
+- At most 20 uploads per person per hour, and one image is processed at a time.
+- Instagram photos go through the same steps; they are downloaded without following redirects and the download stops past 15 MB.
+
+Photos and a logo stored before shrinking was added are shrunk once, at the next start (the log says how many).
 
 Adding one is a welcome step. Until a promoter has a photo, their dashboard shows **Add your profile photo** (linking to Account), and **All promoters** flags them with **No photo** for admins.
 
@@ -267,9 +274,25 @@ This uses `NGROK_AUTHTOKEN`, `NGROK_DOMAIN` and `NGROK_URL` from `~/hi.events/do
 
 The app is public while the tunnel runs: use a strong `ADMIN_PASSWORD`, never the sample one.
 
+## File storage (S3 and CDN)
+
+Profile photos and the logo are kept in the `promoter-data` volume and served by the app, unless you set up a bucket:
+
+| Setting | Effect |
+| --- | --- |
+| Nothing | Files on the volume (`avatars/`, `brand/`), served by the app. |
+| `S3_BUCKET` + `S3_ACCESS_KEY_ID` + `S3_SECRET_ACCESS_KEY` (+ `S3_ENDPOINT`, `S3_REGION`, `S3_PREFIX`) | Files in the bucket. The app reads them and serves them itself, so the bucket can stay private. Works with AWS S3, DigitalOcean Spaces, Cloudflare R2 or MinIO (`S3_ENDPOINT` for anything but AWS). `S3_PREFIX` keeps them in a folder, to share the bucket with Hi.Events. |
+| The above + `CDN_URL` | The app still checks who may see a file, then sends the browser to `CDN_URL/<prefix><file>` (a 302 redirect). Pages allow images from the CDN's origin. Point the CDN at the bucket's root. |
+
+`CDN_URL` without `S3_BUCKET` is ignored (with a warning in the log). With `S3_BUCKET` but no keys, the app does not start. At startup the app writes and deletes a small test file in the bucket and logs whether it worked; if it did not, it still starts, but uploads fail until the bucket is fixed.
+
+File names in the bucket carry a random part (`avatars/12-3f9c….jpg`), so a CDN address cannot be guessed from a promoter's number, and each new photo gets a new name (no stale CDN copies); the previous file is deleted. Files cached by a CDN can be given a long lifetime.
+
+**Moving to S3 later:** set the S3 settings and restart. Photos and the logo still on the volume are copied to the bucket, then removed from the volume (the log says how many). Going back from S3 to the volume is not automatic.
+
 ## Backups
 
-All promoter accounts are in the `promoter-data` volume (`promoters.sqlite`). Back it up, and do not remove it with `docker volume prune`.
+All promoter accounts are in the `promoter-data` volume (`promoters.sqlite`). Back it up, and do not remove it with `docker volume prune`. With S3, photos and the logo are in the bucket instead: keep the bucket's versioning or backups on if you need them.
 
 ## CI/CD
 
@@ -279,7 +302,7 @@ The code lives in the private repository `purema4/hievents-promoter-stats`. GitH
 
 | Job | What it does |
 | --- | --- |
-| Typecheck and tests | Runs `bun install --frozen-lockfile` and `bun run typecheck`, starts Postgres, Mailpit and the CDN from `docker-compose.dev.yml` + `docker-compose.test.yml`, then runs `bun test` with `CI=true`. With `CI=true`, integration tests fail when the stack is missing instead of skipping. A failed run prints the container logs, and the job always removes the stack. |
+| Typecheck and tests | Runs `bun install --frozen-lockfile` and `bun run typecheck`, starts Postgres, Mailpit, the cover CDN and MinIO (S3) from `docker-compose.dev.yml` + `docker-compose.test.yml`, then runs `bun test` with `CI=true`. With `CI=true`, integration tests fail when the stack is missing instead of skipping. A failed run prints the container logs, and the job always removes the stack. |
 | Dependency audit | `bun audit` fails the job if any dependency has a known vulnerability. |
 | Secret scan | gitleaks scans the whole git history. |
 | DAST (ZAP baseline) | Starts the full sandbox with `docker compose -f docker-compose.dev.yml up -d --build --wait`, waits for `/healthz`, then runs the OWASP ZAP baseline scan on http://localhost:3000 with the rule overrides in `.zap/rules.tsv`. The report is attached to the run as the `zap-baseline-report` artifact. A rule set to `FAIL` in that file fails the job. `WARN` alerts only go in the report. |

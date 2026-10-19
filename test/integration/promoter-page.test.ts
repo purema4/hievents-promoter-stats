@@ -60,7 +60,7 @@ describeIntegration("promoters' public pages", () => {
     for (const id of ['2', '4', '5', 'x']) expect((await visitor.get(`/p/${alias}/cover/${id}`)).status).toBe(404);
     const avatar = await visitor.get(`/p/${alias}/avatar`);
     expect(avatar.status).toBe(200);
-    expect(Buffer.from(await avatar.arrayBuffer()).equals(png)).toBe(true);
+    expect(avatar.headers.get('content-type')).toBe('image/jpeg');
     // Still private everywhere else.
     expect((await visitor.get(`/avatar/${promoter.id}`)).status).toBe(302);
     expect((await visitor.get('/event-image/1')).status).toBe(302);

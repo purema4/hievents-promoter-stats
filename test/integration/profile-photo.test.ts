@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, expect, test } from 'bun:test';
+import sharp from 'sharp';
 import { bytes, has, jpg, phoneJpeg, pngSized } from '../fixtures/images';
 import { Client, createPromoter, describeIntegration, location, newPromoter, signInAdmin, signInPromoter, startServer, text, uid, type Server } from './harness';
 
@@ -63,12 +64,12 @@ describeIntegration('profile photos', () => {
     expect(text(await client.page('/welcome?step=3&error=photo_missing'))).toContain('Choose a photo, or skip this step for now.');
     const notImage = new TextEncoder().encode('<svg onload="alert(1)"></svg>');
     expect(location(await client.request('/welcome/photo', { method: 'POST', body: photoForm(notImage, 'image/png') }))).toBe('/welcome?step=3&error=photo_type');
-    const big = new Uint8Array(3 * 1024 * 1024);
+    const big = new Uint8Array(15.5 * 1024 * 1024);
     big.set(png);
     expect(location(await client.request('/welcome/photo', { method: 'POST', body: photoForm(big) }))).toBe('/welcome?step=3&error=photo_size');
     // Far over every limit: back to the same step, not to an admin page. The server answers without reading
     // the upload and closes the connection, so the test's fetch must not keep it for the next request.
-    const huge = new Uint8Array(6 * 1024 * 1024);
+    const huge = new Uint8Array(20 * 1024 * 1024);
     const refused = await client.request('/welcome/photo', { method: 'POST', body: photoForm(huge), keepalive: false });
     expect(location(refused)).toBe('/welcome?step=3&error=photo_size');
     expect(refused.headers.get('connection')).toBe('close');
@@ -97,7 +98,7 @@ describeIntegration('profile photos', () => {
   });
 
   test('a photo far over the limit on Account goes back to Account', async () => {
-    const res = await maya.client.request('/account/profile', { method: 'POST', body: photoForm(new Uint8Array(6 * 1024 * 1024)), keepalive: false });
+    const res = await maya.client.request('/account/profile', { method: 'POST', body: photoForm(new Uint8Array(20 * 1024 * 1024)), keepalive: false });
     expect(location(res)).toBe('/account?error=photo_size');
   });
 
@@ -165,6 +166,13 @@ describeIntegration('photos set by admins, and image safety', () => {
     expect(text(await admin.page(`/admin/promoters/${maya.id}`))).toContain('Uploaded by them.');
   });
 
+  test('a big photo is shrunk to 512 × 512', async () => {
+    const big = new Uint8Array(await sharp({ create: { width: 4000, height: 3000, channels: 3, background: '#2f5bea' } }).jpeg().toBuffer());
+    expect(location(await upload(admin, `/admin/promoters/${maya.id}/photo`, big))).toBe(`/admin/promoters/${maya.id}?ok=photo_set#photo`);
+    const stored = await storedPhoto(maya.id);
+    expect(await sharp(stored).metadata()).toMatchObject({ format: 'jpeg', width: 512, height: 512 });
+  });
+
   test('removed by an admin', async () => {
     expect(location(await admin.post(`/admin/promoters/${maya.id}/photo/remove`))).toBe(`/admin/promoters/${maya.id}?ok=photo_removed#photo`);
     expect((await admin.get(`/avatar/${maya.id}`)).status).toBe(404);
@@ -177,10 +185,10 @@ describeIntegration('photos set by admins, and image safety', () => {
     expect(location(await upload(admin, `${back}/photo`, svg))).toBe(`${back}?error=photo_type#photo`);
     expect(location(await upload(admin, `${back}/photo`, pngSized(8000, 8000)))).toBe(`${back}?error=photo_pixels#photo`);
     expect(location(await upload(maya.client, '/welcome/photo', pngSized(20_000, 20_000)))).toBe('/welcome?step=3&error=photo_pixels');
-    const big = new Uint8Array(3 * 1024 * 1024);
+    const big = new Uint8Array(15.5 * 1024 * 1024);
     big.set(jpg);
     expect(location(await upload(admin, `${back}/photo`, big))).toBe(`${back}?error=photo_size#photo`);
-    const huge = new Uint8Array(6 * 1024 * 1024);
+    const huge = new Uint8Array(20 * 1024 * 1024);
     const form = new FormData();
     form.set('photo', new File([huge], 'huge.jpg'));
     const refused = await admin.request(`${back}/photo`, { method: 'POST', body: form, keepalive: false });
@@ -193,7 +201,7 @@ describeIntegration('photos set by admins, and image safety', () => {
 
   test('the logo is checked and cleaned the same way', async () => {
     const brand = { name: 'Brand', accent: '#2f5bea', login_message: '', footer: '' };
-    expect(location(await upload(admin, '/admin/branding', pngSized(9000, 10), 'logo', brand))).toBe('/admin/branding?error=logo_pixels');
+    expect(location(await upload(admin, '/admin/branding', pngSized(13_000, 10), 'logo', brand))).toBe('/admin/branding?error=logo_pixels');
     expect(location(await upload(admin, '/admin/branding', phoneJpeg(1), 'logo', brand))).toBe('/admin/branding?ok=saved');
     const logo = new Uint8Array(await (await new Client(server).get('/brand/logo')).arrayBuffer());
     expect(has(logo, 'SECRET')).toBe(false);
