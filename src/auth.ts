@@ -36,7 +36,7 @@ db.exec(`
   );
 `);
 
-function clientIp(c: Context): string | null {
+export function clientIp(c: Context): string | null {
   // Behind the proxy (ngrok, Caddy) the client is the first forwarded address.
   const forwarded = c.req.header('x-forwarded-for')?.split(',')[0]?.trim();
   if (forwarded) return forwarded.slice(0, 64);

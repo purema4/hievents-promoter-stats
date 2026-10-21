@@ -29,6 +29,7 @@ import { countPendingRewards, describeReward, type RewardRequest } from './rewar
 import { unreadCount, type Notification } from './notifications';
 import { definitions, emailTypes, getReplyTo, getTemplate, isCustomized, type EmailType } from './email-templates';
 import type { EmailLogEntry } from './mail';
+import { tokensFor, type ApiToken } from './api-tokens';
 
 export const css = `
 :root {
@@ -187,6 +188,7 @@ table.activity td .muted, table.activity td.muted { font-size: inherit; }
 .device strong { display: block; }
 .qr { width: 200px; height: 200px; background: #fff; padding: 8px; border-radius: 10px; }
 .qr svg { width: 100%; height: 100%; display: block; }
+p code, td code { font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere; }
 .secret { font: 600 15px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: 0.08em; word-break: break-all; }
 .recovery { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 16px; font: 600 15px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; padding: 12px 16px; background: var(--bg); border-radius: 10px; margin: 8px 0; }
 .setup { display: flex; gap: 20px; flex-wrap: wrap; align-items: flex-start; }
@@ -261,6 +263,11 @@ button.danger { background: var(--danger); }
 .flash.error { color: var(--danger); border-color: var(--danger); }
 .flash.ok { color: var(--ok); border-color: var(--ok); }
 .table-wrap { overflow-x: auto; }
+/* Account → API & Claude: long commands and the table stay inside the card. */
+.api-docs > * { min-width: 0; }
+.api-docs table.activity td { white-space: normal; min-width: 200px; }
+.api-docs table.activity td:first-child { white-space: nowrap; min-width: 0; }
+@media (max-width: 600px) { .api-docs thead { display: none; } .api-docs table.activity tr, .api-docs table.activity td { display: block; min-width: 0; } .api-docs table.activity td:first-child { padding-bottom: 0; border-bottom: 0; } }
 table { width: 100%; border-collapse: collapse; font-size: 14px; }
 th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
 th { color: var(--muted); font-weight: 500; font-size: 13px; }
@@ -727,6 +734,7 @@ function AccountMenu(props: { user: User }) {
         <a href="/notifications">Notifications {count(unreadCount(u.id))}</a>
         <a href="/account">Account</a>
         <a href="/account/security">Security</a>
+        <a href="/account/api">API &amp; Claude</a>
         <form method="post" action="/logout">
           <button type="submit">Sign out</button>
         </form>
@@ -795,6 +803,7 @@ function Sidebar(props: { user: User }) {
           <a href="/notifications">Notifications {count(unread)}</a>
           <a href="/account">Account</a>
           <a href="/account/security">Security</a>
+          <a href="/account/api">API &amp; Claude</a>
         </NavGroup>
         <form class="nav-signout" method="post" action="/logout">
           <button class="link" type="submit">
@@ -1568,7 +1577,16 @@ export function PromoterPage(props: {
               .map((d) => `${d.device ?? 'Unknown device'}${d.is_app ? ' (app)' : ''}`)
               .join(', ') || 'Not signed in anywhere'}
           </dd>
+          <dt>API</dt>
+          <dd>{apiAccessSummary(tokensFor(p.id))}</dd>
         </dl>
+        {tokensFor(p.id).length > 0 && (
+          <form class="stack" method="post" action={`/admin/promoters/${p.id}/api-revoke`}>
+            <button class="secondary" type="submit">
+              Remove their API keys and connected apps
+            </button>
+          </form>
+        )}
         {hasTwoFactor(p) && (
           <form class="stack" method="post" action={`/admin/promoters/${p.id}/2fa-reset`}>
             <label class="check">
@@ -3677,7 +3695,18 @@ export function TwoFactorPage(props: { error?: string }) {
   );
 }
 
-function since(epoch: number | null): string {
+// "2 API keys, 1 connected app (Claude)" on an admin's view of a promoter.
+function apiAccessSummary(tokens: ApiToken[]): string {
+  const keys = tokens.filter((t) => !t.client_id).length;
+  const apps = tokens.filter((t) => t.client_id);
+  const parts = [
+    keys ? `${keys} API ${keys === 1 ? 'key' : 'keys'}` : '',
+    apps.length ? `${apps.length} connected ${apps.length === 1 ? 'app' : 'apps'} (${[...new Set(apps.map((a) => a.name))].join(', ')})` : '',
+  ].filter(Boolean);
+  return parts.join(', ') || 'None';
+}
+
+export function since(epoch: number | null): string {
   if (!epoch) return 'unknown';
   const minutes = Math.round((Date.now() / 1000 - epoch) / 60);
   if (minutes < 5) return 'active now';

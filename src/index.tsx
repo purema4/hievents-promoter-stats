@@ -16,7 +16,6 @@ import {
   startWaiting,
   summarizeDevice,
   consumeLoginToken,
-  createLoginToken,
   endSession,
   purgeExpiredSessions,
   requireAdmin,
@@ -32,7 +31,7 @@ import {
 } from './auth';
 import { config } from './config';
 import { audit } from './audit';
-import { alertAdmins, alerts, prefsFor, savePrefs, type Prefs } from './alert-prefs';
+import { alerts, prefsFor, savePrefs, type Prefs } from './alert-prefs';
 import { addAdjustment, adjustmentsFor, describeAdjustment, findAdjustment, removeAdjustment } from './adjustments';
 import {
   confirmSetup,
@@ -71,33 +70,28 @@ import {
   sendTestNotification,
 } from './notifications';
 import { blankPng, eventCover } from './covers';
-import { allPromoCodes, currentEventCodes, dailyForCodes, sql, statsForCodes } from './hievents';
+import { allPromoCodes, dailyForCodes, sql } from './hievents';
 import { recentEmails, sendEmail, purgeEmailLog } from './mail';
 import { emailTypes, getTemplate, renderEmail, resetTemplate, sampleVars, saveReplyTo, saveTemplate, type EmailType } from './email-templates';
-import { formatMoney, totalsByCurrency, usualCommissionOn, type EventRule } from './money';
+import { formatMoney, usualCommissionOn, type EventRule } from './money';
 import {
-  balances,
   findPayout,
   listPayouts,
   payoutsFor,
   requestPayout,
-  settlePayout,
 } from './payouts';
 import { DashboardPage, EventPage, PayoutsPage, summarizeEvents } from './promoter-views';
 import {
-  describeReward,
   findRewardRequest,
   listRewardRequests,
   requestReward,
   rewardRequestsFor,
-  rewardsFor,
-  settleReward,
 } from './rewards';
 import { describeProblem, isCustomized as isRulesCustomized, rewardRules, saveRewardRules, type LevelColor, type RewardRules, type Track } from './reward-rules';
 import { kuttDomains, kuttEnabled, pageClicks, pageShortLink, prepareShortLinks, renamePageLink, saveShortDomain, shortLinkStatus } from './short-links';
 import { MyPagePage, PageMissing, PromoterPublicPage } from './page-views';
 import { hiddenByTeam, pageEvents, pageOwner, setPageHidden } from './promoter-page';
-import { allEventRules, rateFor, setEventRule } from './commission';
+import { allEventRules, setEventRule } from './commission';
 import { allMediaDrives, parseMediaUrl, setMediaDrive } from './media-drives';
 import { filterCodes, parseCodeFilter } from './promo-code-list';
 import {
@@ -115,7 +109,6 @@ import {
 } from './invites';
 import {
   assignTeam,
-  hadTeam,
   isTeamLead,
   keepTeamHistory,
   leaveTeams,
@@ -130,7 +123,11 @@ import {
 } from './teams';
 import QRCode from 'qrcode';
 import { publicAsset, publicText, serviceWorker } from './static';
+import { announcePayoutRequest, announceRewardRequest, commissionEvents, emailLoginLink, finishPayout, finishReward, promoterData } from './actions';
 import { iconUrl } from './icons';
+import { isTokenPath, mountApi, purgeApiLimits, takeOAuthReturn } from './api';
+import { createKey, KEY_DAYS, MAX_KEYS, type KeyDays, purgeApiTokens, revokeAllTokens, revokeToken, tokensFor } from './api-tokens';
+import { ApiPage } from './api-views';
 import { vendorAsset } from './vendor';
 import { tidyCity } from './places';
 import {
@@ -281,6 +278,9 @@ const messages: Record<string, string> = {
   media_removed: 'Media drive removed.',
   media_url: 'The media drive must be a link starting with https://.',
   media_event: 'Pick one of the events listed: drafts and events that are not over.',
+  api_removed: 'Removed. It stops working right away.',
+  api_removed_all: 'Their API keys and connected apps are removed and stop working right away.',
+  api_too_many: `You can have up to ${MAX_KEYS} keys. Remove one to make another.`,
 };
 // Own keys only: ?ok=constructor must not pick up something from Object.prototype.
 const flash = (key?: string) => (key && Object.hasOwn(messages, key) ? messages[key] : undefined);
@@ -302,19 +302,6 @@ function parseCommission(raw: unknown): number | null | 'invalid' {
   if (text === '') return null;
   const value = Number(text);
   return Number.isFinite(value) && value >= 0 && value <= 100 ? value : 'invalid';
-}
-
-async function emailLoginLink(
-  user: User,
-  kind: 'invite' | 'login',
-  waiting?: { id: string; from: string },
-  attempts = 3,
-): Promise<boolean> {
-  const seconds = kind === 'invite' ? config.inviteLinkDays * 86400 : config.loginLinkMinutes * 60;
-  const { token, code } = createLoginToken(user.id, seconds, waiting);
-  const link = `${config.appUrl}/login/verify?token=${token}`;
-  const expiry = kind === 'invite' ? `${config.inviteLinkDays} days` : `${config.loginLinkMinutes} minutes`;
-  return sendEmail(kind, [user], { link, code, expiry }, undefined, { attempts });
 }
 
 const app = new Hono<Env>();
@@ -357,11 +344,13 @@ const previewHeaders = secureHeaders({
   permissionsPolicy,
 });
 app.use((c, next) => (/^\/admin\/emails\/[a-z_]+\/preview$/.test(c.req.path) ? previewHeaders(c, next) : strictHeaders(c, next)));
-app.use(csrf({ origin: config.appUrl }));
+// The API, MCP server and OAuth token endpoints take a key in a header, never the cookie (see api.tsx).
+const csrfCheck = csrf({ origin: config.appUrl });
+app.use((c, next) => (isTokenPath(c.req.path) ? next() : csrfCheck(c, next)));
 // hono/csrf only checks form content types. JSON and other POSTs (/push/*, /login/wait,
 // /account/app-installed) get the same check here, so no state change relies on CORS alone.
 app.use(async (c, next) => {
-  if (!/^(GET|HEAD|OPTIONS)$/.test(c.req.method) && c.req.header('origin') !== config.appUrl && c.req.header('sec-fetch-site') !== 'same-origin') {
+  if (!/^(GET|HEAD|OPTIONS)$/.test(c.req.method) && !isTokenPath(c.req.path) && c.req.header('origin') !== config.appUrl && c.req.header('sec-fetch-site') !== 'same-origin') {
     return c.text('Forbidden', 403);
   }
   await next();
@@ -403,6 +392,7 @@ function tooBig(path: string): string | null {
 // One file of up to maxUploadBytes, plus the form's other fields.
 const fileBodies = bodyLimit({ maxSize: maxUploadBytes + 1024 * 1024, onError: (c) => refuse(c, () => c.redirect(tooBig(c.req.path)!)) });
 app.use((c, next) => (tooBig(c.req.path) ? fileBodies(c, next) : smallBodies(c, next)));
+mountApi(app);
 const photoError: Record<ImageProblem, string> = { too_big: 'photo_size', bad_type: 'photo_type', too_many_pixels: 'photo_pixels' };
 
 app.get('/healthz', (c) => c.text('ok'));
@@ -730,22 +720,6 @@ app.use('/team/*', requireUser, (c, next) => (c.req.path === '/team' ? next() : 
 app.use('/admin/*', requireUser, requireAdmin);
 app.use('/admin', requireUser, requireAdmin);
 
-// Everything a promoter's pages need; admins load the same data to see exactly what a promoter sees.
-async function promoterData(promoter: User) {
-  const codes = codesFor(promoter.id);
-  const percent = rateFor(promoter);
-  const [rows, team] = await Promise.all([statsForCodes(codes), hadTeam(promoter.id) ? teamCommission(promoter) : []]);
-  return {
-    codes,
-    percent,
-    rows,
-    team,
-    balances: balances(promoter.id, totalsByCurrency(rows, percent), team),
-    rewards: rewardsFor(promoter.id, summarizeEvents(rows, percent)),
-    media: allMediaDrives(),
-  };
-}
-
 async function renderDashboard(c: Context<Env>, promoter: User, basePath: string) {
   const data = await promoterData(promoter);
   // Also checked on a timer; checking here makes a new milestone show up the moment they look.
@@ -797,6 +771,9 @@ async function renderEvent(c: Context<Env>, promoter: User, basePath: string) {
 
 app.get('/', async (c) => {
   const user = c.get('user');
+  // Signed in on the way to connecting an app: back to approving it.
+  const connecting = takeOAuthReturn(c);
+  if (connecting) return c.redirect(connecting);
   // Admins land on the admin dashboard; their own sales, if any, are on their promoter page there.
   if (user.is_admin) return c.redirect('/admin/dashboard');
   // First sign-in: a few welcome steps before the dashboard.
@@ -1013,22 +990,13 @@ app.post('/payouts', async (c) => {
   });
   if (result !== 'ok') return renderPayouts(c, messages[result]);
   audit(c, 'payout.requested', { userId: user.id, amountCents, currency: balance.currency });
-  alertAdmins(
-    'payout_requested',
-    {
-      title: `${user.name} requested ${formatMoney(amountCents, balance.currency)}`,
-      body: `Payout by ${String(body.method)}. Review it on Requests.`,
-      link: '/admin/payouts',
-    },
-    {
-      promoter: `${user.name} (${user.email})`,
-      amount: formatMoney(amountCents, balance.currency),
-      method: String(body.method ?? ''),
-      details: String(body.details ?? '').slice(0, 200) || 'Not needed',
-      note: String(body.note ?? '').slice(0, 500),
-      link: `${config.appUrl}/admin/payouts`,
-    },
-  );
+  announcePayoutRequest(user, {
+    amountCents,
+    currency: balance.currency,
+    method: String(body.method ?? ''),
+    details: String(body.details ?? '').slice(0, 200),
+    note: String(body.note ?? '').slice(0, 500),
+  });
   return c.redirect('/payouts?ok=requested');
 });
 
@@ -1046,16 +1014,7 @@ app.post('/rewards/:kind{ticket|merch}', async (c) => {
   if (result !== 'ok') return renderPayouts(c, messages[result]);
   const request = rewardRequestsFor(user.id)[0];
   audit(c, 'reward.requested', { userId: user.id, kind, rewardId: request.id });
-  alertAdmins(
-    'reward_requested',
-    { title: `${user.name} requested a reward`, body: describeReward(request), link: '/admin/payouts' },
-    {
-      promoter: `${user.name} (${user.email})`,
-      reward: describeReward(request),
-      details: request.details ?? 'None',
-      link: `${config.appUrl}/admin/payouts`,
-    },
-  );
+  announceRewardRequest(user, request);
   return c.redirect('/payouts?ok=reward_requested#rewards');
 });
 
@@ -1093,6 +1052,35 @@ async function renderSecurity(c: Context<Env>, extra: { setupSecret?: string; re
 }
 
 app.get('/account/security', (c) => renderSecurity(c));
+
+// --- API keys and connected apps ---------------------------------------------------------------------
+
+app.get('/account/api', (c) => {
+  const user = c.get('user');
+  return c.html(<ApiPage user={user} tokens={tokensFor(user.id)} ok={flash(c.req.query('ok'))} />);
+});
+
+app.post('/account/api/keys', async (c) => {
+  const user = c.get('user');
+  const body = await c.req.parseBody();
+  const name = String(body.name ?? '').trim().slice(0, 60) || 'API key';
+  // 90 days unless another choice was picked; anything not offered is refused rather than guessed.
+  const days = body.days === 'never' ? null : Number(body.days ?? 90);
+  if (!KEY_DAYS.includes(days as KeyDays)) return c.text('Bad request', 400);
+  const made = createKey(user.id, name, body.can_write === '1', days as KeyDays);
+  if (!made) return c.html(<ApiPage user={user} tokens={tokensFor(user.id)} error={messages.api_too_many} />, 400);
+  audit(c, 'api.key_created', { userId: user.id, keyId: made.id, canWrite: body.can_write === '1', days });
+  // Shown on this answer only, never in an address or stored anywhere.
+  return c.html(<ApiPage user={user} tokens={tokensFor(user.id)} newKey={{ key: made.key, name }} />);
+});
+
+app.post('/account/api/:id/remove', (c) => {
+  const user = c.get('user');
+  const id = Number(c.req.param('id'));
+  if (!revokeToken(user.id, id)) return c.redirect('/account/api');
+  audit(c, 'api.key_removed', { userId: user.id, keyId: id });
+  return c.redirect('/account/api?ok=api_removed');
+});
 
 app.post('/account/security/devices/:id/sign-out', (c) => {
   const id = Number(c.req.param('id'));
@@ -1400,6 +1388,14 @@ app.post('/admin/promoters/:id/adjust/:adjustmentId/undo', (c) => {
 });
 
 // For a promoter who lost their phone and their recovery codes.
+app.post('/admin/promoters/:id/api-revoke', (c) => {
+  const promoter = findUser(Number(c.req.param('id')));
+  if (!promoter) return c.notFound();
+  const removed = revokeAllTokens(promoter.id);
+  audit(c, 'admin.api_access_removed', { by: c.get('user').id, userId: promoter.id, removed });
+  return c.redirect(`/admin/promoters/${promoter.id}?ok=api_removed_all`);
+});
+
 app.post('/admin/promoters/:id/2fa-reset', (c) => {
   const promoter = findUser(Number(c.req.param('id')));
   if (!promoter) return c.notFound();
@@ -1510,19 +1506,6 @@ app.post('/team/invites', (c) => createInviteFrom(c, '/team/invites'));
 app.post('/team/invites/:id/:action{off|on}', (c) => toggleInvite(c, '/team/invites'));
 
 // --- Commission per event ---------------------------------------------------------------------------
-
-/** Events that are not over (drafts included), each with the promoters who have one of its codes. */
-async function commissionEvents() {
-  const codes = await currentEventCodes();
-  const promoters = listUsers().filter((u) => u.codes.length > 0);
-  const events = new Map<number, { id: number; title: string; start: Date | null; timezone: string | null; currency: string; promoters: User[] }>();
-  for (const row of codes) {
-    const event = events.get(row.event_id) ?? { id: row.event_id, title: row.title, start: row.start, timezone: row.timezone, currency: row.currency, promoters: [] };
-    for (const p of promoters) if (p.codes.includes(row.code) && !event.promoters.includes(p)) event.promoters.push(p);
-    events.set(row.event_id, event);
-  }
-  return [...events.values()].filter((e) => e.promoters.length > 0);
-}
 
 app.get('/admin/commissions', async (c) =>
   c.html(
@@ -2018,25 +2001,7 @@ app.post('/admin/rewards/:id/:action{fulfil|reject}', async (c) => {
   const status = c.req.param('action') === 'fulfil' ? 'fulfilled' : 'rejected';
   const adminNote = String((await c.req.parseBody()).admin_note ?? '').slice(0, 200);
   if (status === 'rejected' && !adminNote.trim()) return c.redirect('/admin/payouts');
-  if (!settleReward(reward.id, c.get('user').id, status, adminNote)) return c.redirect('/admin/payouts?error=payout_gone');
-  audit(c, `reward.${status}`, { by: c.get('user').id, rewardId: reward.id, userId: reward.user_id });
-  const what = describeReward(reward);
-  if (reward.user_id) {
-    notify(reward.user_id, {
-      title: status === 'fulfilled' ? 'Reward on its way' : 'Reward request declined',
-      body: `${what}${adminNote.trim() ? `: ${adminNote.trim()}` : ''}`,
-      link: '/payouts#rewards',
-    });
-  }
-  setTimeout(
-    () =>
-      void sendEmail(status === 'fulfilled' ? 'reward_given' : 'reward_declined', [{ name: reward.promoter_name, email: reward.promoter_email }], {
-        reward: what,
-        note: adminNote.trim(),
-        link: `${config.appUrl}/payouts#rewards`,
-      }),
-    0,
-  );
+  if (!finishReward(c, c.get('user'), reward, status, adminNote)) return c.redirect('/admin/payouts?error=payout_gone');
   return c.redirect(`/admin/payouts?ok=reward_${status}`);
 });
 
@@ -2046,31 +2011,7 @@ app.post('/admin/payouts/:id/:action{paid|reject}', async (c) => {
   const status = c.req.param('action') === 'paid' ? 'paid' : 'rejected';
   const adminNote = String((await c.req.parseBody()).admin_note ?? '').slice(0, 200);
   if (status === 'rejected' && !adminNote.trim()) return c.redirect('/admin/payouts');
-  if (!settlePayout(payout.id, c.get('user').id, status, adminNote)) return c.redirect('/admin/payouts?error=payout_gone');
-  audit(c, `payout.${status}`, { by: c.get('user').id, payoutId: payout.id, userId: payout.user_id });
-  const amount = formatMoney(payout.amount_cents, payout.currency);
-  if (payout.user_id) {
-    notify(payout.user_id, {
-      title: status === 'paid' ? `Payout sent: ${amount}` : `Payout request declined: ${amount}`,
-      body:
-        status === 'paid'
-          ? `By ${payout.method}${payout.details ? ` to ${payout.details}` : ''}.${adminNote.trim() ? ` Reference: ${adminNote.trim()}` : ''}`
-          : `${adminNote.trim()} The amount is available to request again.`,
-      link: '/payouts',
-    });
-  }
-  const to = [{ name: payout.promoter_name, email: payout.promoter_email }];
-  setTimeout(
-    () =>
-      void sendEmail(status === 'paid' ? 'payout_paid' : 'payout_declined', to, {
-        amount,
-        method: payout.method,
-        details: payout.details ? `to ${payout.details}` : '',
-        note: status === 'paid' ? (adminNote.trim() ? `Reference: ${adminNote.trim()}` : '') : adminNote.trim(),
-        link: `${config.appUrl}/payouts`,
-      }),
-    0,
-  );
+  if (!finishPayout(c, c.get('user'), payout, status, adminNote)) return c.redirect('/admin/payouts?error=payout_gone');
   return c.redirect(`/admin/payouts?ok=payout_${status}`);
 });
 
@@ -2111,6 +2052,8 @@ setInterval(() => {
   purgeOldNotifications();
   purgeEmailLog();
   purgePendingSignIns();
+  purgeApiTokens();
+  purgeApiLimits();
   void refreshAllAvatars();
 }, 60 * 60 * 1000);
 // New sales become milestone notifications within a few minutes, even if nobody has the app open.

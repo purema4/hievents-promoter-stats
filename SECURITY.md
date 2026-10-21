@@ -94,6 +94,52 @@ Verified as safe, with no change needed:
 - The CSP's `img-src` allows `https://tile.openstreetmap.org` for the tiles. Tile requests carry only the app's origin as referrer (OpenStreetMap requires one; the app's own policy stays `no-referrer`). OpenStreetMap sees the viewer's IP and the map area, not who the promoters are.
 - Only cities are stored and shown, never addresses or GPS positions. Tests: `test/integration/locations.test.ts`, `test/unit/places.test.ts`.
 
+## API, MCP and connected apps (2026-10-20)
+
+- **Who can do what.** Keys and connections act as one person, and that person's role is checked on every call. An admin who is demoted loses admin calls at once.
+  - A promoter only reaches their own data. Another promoter's id answers 404.
+  - A team lead reaches their team, like `/team/<id>`.
+  - Admin calls answer 403 for everyone else.
+  - Calls that change something need a key or connection that was allowed to. They send the same emails and notifications as the app, and are audited with `"via":"api"`.
+  - Admin accounts cannot be made through the API.
+- **Secrets.**
+  - Keys (`psk_` + 256 random bits), access tokens, refresh tokens and sign-in codes are stored only as SHA-256 hashes.
+  - A key is shown once, on the page that made it, and is never put in an address or the log.
+  - Keys work for 30 days, 90 days (the default), a year, or until removed, as their owner picks.
+  - Access tokens expire after an hour. Refresh tokens last 60 days and are replaced on each use. If a used one comes back, someone has a copy, so the connection is ended for both.
+- **CSRF.** `/api/*`, `/mcp` and the OAuth token, registration and revocation endpoints read only the `Authorization` header and never the session cookie, so they are left out of the Origin check. The cookie does not work there (401). Everything else keeps the check, including the approval form at `/oauth/authorize`.
+- **No CORS headers.** Apps call from their own servers or the computer, so pages on other sites still cannot read anything (ZAP 10098 stays FAIL).
+- **OAuth 2.1** for MCP apps, as the MCP spec describes it:
+  - Public clients only. PKCE with S256 is required. Codes work once, for 10 minutes.
+  - `redirect_uri` must exactly match one the app registered. Only https is accepted, or http on localhost, 127.0.0.1 or [::1].
+  - An unknown app or address shows an error page and never sends anyone on.
+  - Registration is open, as MCP apps need. It is limited to 20 per IP per hour, and to 200 apps waiting to be connected overall, since the IP can be faked without a proxy. Apps nobody connected within a day are deleted.
+  - A malformed request (no PKCE, for example) gets an error page, never a redirect to the app's address. Anyone can register an app, so a redirect would be an open redirect.
+  - The approval page names the app and its return address. The "make changes" box always starts unticked, whatever the app asks for.
+  - An admin viewing the app as a promoter cannot approve a connection.
+  - The return to the app goes through a page with a link (and a refresh), because the CSP's `form-action 'self'` blocks a form redirect to another site.
+- **Limits**, kept in memory and counted per person across all their keys and connections:
+  - 120 calls a minute. Each message of an MCP batch counts.
+  - 60 changes an hour, failed ones included.
+  - 4 calls running at once.
+- **Input** is checked against each call's schema: unknown fields (like `is_admin`), wrong types and over-long text are refused.
+- **Tests:** `test/integration/api.test.ts`. The MCP endpoint was also checked with the official MCP SDK client (Streamable HTTP).
+
+### OWASP API Security Top 10 (2023), checked 2026-10-20
+
+| Risk | How it is handled | Tested in `api.test.ts` |
+| --- | --- | --- |
+| API1 Broken object level authorization | Every id is checked against the caller: a promoter gets only their own data; a team lead gets their team's stats but no one else's payouts; any other id answers 404 (not 403, so ids cannot be probed). Keys and connected apps can only be removed by their owner (the user id is part of the delete). | yes |
+| API2 Broken authentication | 256-bit keys and tokens, stored hashed, only in the `Authorization` header (never in addresses). Keys can expire, access tokens last an hour, refresh tokens rotate and their reuse ends the connection. OAuth needs PKCE S256 and exact redirect addresses. The cookie never works on the API. | yes |
+| API3 Broken object property level authorization | Answers are built field by field, never whole database rows: no password hashes, two-step secrets or emails beyond what the role sees (team leads get no emails or rates; promoters on a team get no commission). Unknown input fields are refused, so `is_admin` and the like cannot be slipped in. | yes |
+| API4 Unrestricted resource consumption | Per-person limits on calls, changes and parallel calls; 32 KB bodies; MCP batches of at most 20; lists capped or paged (200 requests, 25 codes a page); app registrations capped per IP and overall; Hi.Events queries time out after 10 s. | yes |
+| API5 Broken function level authorization | Each operation names who may use it (anyone, team, team leads, admins) and whether it changes anything; both are checked on every call against the person's current role and the key's permission. MCP only lists the tools the caller may use. | yes |
+| API6 Unrestricted access to sensitive business flows | Payout and reward requests go through the same checks as the app (live balance in a transaction, one open payout per currency, earned rewards only) and an admin still decides. Changes are limited to 60 an hour and audited with `"via":"api"`. Admin accounts cannot be created through the API. | yes |
+| API7 Server side request forgery | No operation fetches an address given by the caller. OAuth return addresses are only ever sent to the person's browser, never fetched by the server. | n/a |
+| API8 Security misconfiguration | Same strict headers as the pages (`nosniff`, `no-store`, CSP, HSTS), no CORS, JSON errors without stack traces or internals, unknown addresses and methods refused. | yes |
+| API9 Improper inventory management | One version (`/api/v1`), every operation in one list (`src/api-ops.ts`) from which the routes, the MCP tools, `/api/v1` and `openapi.json` are all generated, so nothing undocumented exists. | yes |
+| API10 Unsafe consumption of APIs | Data from Hi.Events and Kutt is already validated (see above). MCP results contain text typed by promoters (names, notes, payout details, event titles), which could try to steer an AI: the server tells MCP apps to treat it as data, tools that change things are marked so apps ask before using them, and the server's own checks apply whatever the AI asks. | yes |
+
 ## Controls by category
 
 | OWASP 2025 | How it is handled |
@@ -105,7 +151,7 @@ Verified as safe, with no change needed:
 | A05 Injection | All SQL goes through parameterized postgres.js / bun:sqlite queries. All HTML is escaped by JSX; email HTML escapes names. Tested with XSS and SQL payloads in every user-controlled field (see above) and in query strings. Email subjects cannot carry extra headers. |
 | A06 Insecure design | Sign-in links and their 6-digit codes are single use and expire (30 minutes, or 7 days for admin invites). The link page is submitted by script, so mail scanners cannot use it up. 5 wrong codes cancel all open links and codes for that account. A device waiting for a link it asked for is only signed in after someone signed in from that link explicitly approves it, within 10 minutes, once; the approval page names the device and time. Changing a promoter's email revokes their sessions and unused links. Payout requests are checked against the live balance inside a transaction (one open request per currency; double submits create one), need an admin to mark them paid, and are kept when a promoter is deleted. The last admin cannot be demoted or deleted. |
 | A07 Authentication failures | The link request form gives the same answer, in the same time (padded to 300 ms), for known and unknown emails. At most 3 links per email every 15 minutes. Password sign-in locks for 15 minutes after 5 failures. Two-step codes lock for 15 minutes after 10 wrong codes per account, wherever they are asked for. Links are built from `APP_URL`, never from the Host header. |
-| A08 Integrity failures | Every POST, form or JSON, must carry an `Origin` header that matches `APP_URL` (or `Sec-Fetch-Site: same-origin`), or it is rejected (403). This is `hono/csrf` for forms plus an explicit check for every other content type. Destructive actions need an explicit confirmation field. |
+| A08 Integrity failures | Every POST, form or JSON, must carry an `Origin` header that matches `APP_URL` (or `Sec-Fetch-Site: same-origin`), or it is rejected (403); only the API, MCP and OAuth token endpoints are exempt, as they never read the cookie (see above). This is `hono/csrf` for forms plus an explicit check for every other content type. Destructive actions need an explicit confirmation field. |
 | A09 Logging and alerting | JSON audit lines on stdout for sign-ins (password, link, code), failures, lockouts, link requests, invalid links and codes, payout requests and decisions, and every admin change (who, whom, from which IP). Admins are emailed on every payout request. In production, sign-in links and codes are never written to the log. |
 | A10 Exceptional conditions | Errors return a generic message; details go to the log only. Malformed request bodies get a 400. Queries time out after 10 seconds. The app refuses to start if the database is unreachable or the role lacks access. |
 
@@ -126,6 +172,9 @@ Verified as safe, with no change needed:
 - **Lockout can be triggered by others.** Someone who knows the admin's email can lock password sign-in for 15 minutes. The admin can still sign in with an emailed link. Likewise, someone who already has the first step (the password or a session) can lock two-step codes for that account for 15 minutes.
 - **Event covers, read state and push endpoints** (S-07 to S-09 above) are accepted as described in the findings table.
 - **No Cross-Origin-Embedder-Policy** (ZAP 90004). The app loads nothing from other origins and uses no cross-origin-isolated APIs. COOP and CORP are set.
+
+- **API keys do not expire and skip two-step verification.** A key is as good as being signed in, until it is removed, so the page tells people to keep it like a password. They can see when each key was last used and remove it. An admin can remove all of a promoter's keys and connections.
+- **App names in OAuth come from the app itself.** Any app can register as "Claude". The approval page also shows the address it returns to (claude.ai for Claude), and only someone signed in who clicks **Connect** gives access.
 
 ## Reporting
 

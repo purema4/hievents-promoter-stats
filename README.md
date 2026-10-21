@@ -188,6 +188,30 @@ Milestones come from live Hi.Events sales: every `MILESTONE_CHECK_MINUTES` (defa
 
 Promoters fill in their first and last name, phone, city, Instagram and preferred payout method and email (used to prefill payout requests), and choose a theme: same as the device, light or dark. Admins see these on the promoter's page. Payout methods offered are set with `PAYOUT_METHODS` (default `Interac e-Transfer`; set `Interac e-Transfer,Cash` to offer cash too). Cash, when offered, is paid in whole steps of `CASH_STEP` dollars (default 50): $50, $100 and so on, so cash needs at least $50 available.
 
+## API and Claude (MCP)
+
+Everyone (promoters, team leads, admins) has **Account → API & Claude**. From there they can connect Claude, or make API keys for their own programs. Either way, the program acts as that person and sees exactly what they see in the app. A promoter sees their own sales, balance, payouts, rewards and links. A team lead also sees their team. An admin sees everyone.
+
+**Claude (MCP).** The server address is `APP_URL/mcp`.
+- **Claude on the web, desktop or phone:** Settings → Connectors → Add custom connector, paste the address, then Connect. Claude opens the app's sign-in. The person approves the connection, and can tick **Also let it make changes**.
+- **Claude Code:** `claude mcp add --transport http promoter-stats https://…/mcp`, then `/mcp` to sign in. Or connect with a key: `--header "Authorization: Bearer psk_…"`.
+
+Connections show under **Connected apps**, where they can be disconnected.
+
+**REST API.**
+- Base address: `APP_URL/api/v1`, with the key in the header: `Authorization: Bearer psk_…`.
+- `GET /api/v1` lists the calls, and `/api/v1/openapi.json` describes them (OpenAPI 3.1). Answers are JSON. Money is in cents, with its currency.
+- Keys are read-only unless **Can also make changes** is ticked. A key is shown once, when it is made, and only its last 4 characters are kept on screen.
+- Keys work for 30 days, 90 days (the default), a year, or until removed. Each person can have up to 10 keys.
+- Limits per person, across all their keys and connections: 120 calls a minute, 60 changes an hour, 4 calls at once.
+
+**What can be done.** The API and the MCP tools are made from one list, in `src/api-ops.ts`:
+- **Everyone:** who am I, stats (totals, events, balances, level, rewards), sales by day, links to share, payout and reward requests. Team leads and promoters on a team also get the leaderboard.
+- **With changes allowed:** request a payout or a reward.
+- **Admins:** promoters, promo codes and current events. With changes allowed, they can also mark payouts paid or declined, give or decline rewards, add a promoter (never an admin), change a promoter's codes and set commission for an event.
+
+Changes send the same emails and notifications as the buttons in the app, and are audited with `"via":"api"`. An admin can remove all of a promoter's keys and connections from the promoter's page.
+
 ## Branding
 
 Admins set it on **Branding**: the name (header, browser tab, installed app, email subjects), the accent colour (buttons, links, charts; a lighter shade for dark mode is computed automatically, and the page warns when a colour is hard to read), a logo (PNG, JPEG or WebP up to 1 MB; SVG is refused because it can carry scripts), the welcome message on the sign-in page and a footer. Promoters cannot change it. It is stored in the app's own database and logo file under `/data`.

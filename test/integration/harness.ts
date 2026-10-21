@@ -76,8 +76,12 @@ async function probeStack(): Promise<string | null> {
   const bucket = new S3Client({ ...stack.s3, region: 'us-east-1' });
   for (let deadline = Date.now() + 30_000; ; await Bun.sleep(500)) {
     try {
-      await bucket.file('.harness-check').write('ok');
-      await bucket.file('.harness-check').delete();
+      // A stuck SeaweedFS accepts the connection and never answers: give each try 5 s.
+      const check = async () => {
+        await bucket.file('.harness-check').write('ok');
+        await bucket.file('.harness-check').delete();
+      };
+      await Promise.race([check(), Bun.sleep(5000).then(() => Promise.reject(new Error('no answer within 5 s')))]);
       break;
     } catch (err) {
       if (Date.now() > deadline) return `S3 (SeaweedFS) at ${stack.s3.endpoint} cannot store files (${(err as Error).message})`;
