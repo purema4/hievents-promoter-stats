@@ -9,7 +9,7 @@
  */
 import { S3Client } from 'bun';
 import { describe, setDefaultTimeout, test } from 'bun:test';
-import { createHmac } from 'node:crypto';
+import { createHmac, randomBytes } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { createConnection } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -160,6 +160,7 @@ export async function startServer(extraEnv: Record<string, string> = {}): Promis
     MAIL_FROM: 'Promoter stats <promoters@example.test>',
     COMMISSION_PERCENT: '10',
     APP_TIMEZONE: 'America/Toronto',
+    TWO_FACTOR_KEY: randomBytes(32).toString('base64'),
     ...extraEnv,
   };
   const proc = Bun.spawn([process.execPath, '--no-env-file', 'src/index.tsx'], { cwd: root, env, stdout: 'pipe', stderr: 'pipe' });

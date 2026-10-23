@@ -328,9 +328,11 @@ File names in the bucket carry a random part (`avatars/12-3f9c….jpg`), so a CD
 
 All promoter accounts are in the `promoter-data` volume (`promoters.sqlite`). Back it up, and do not remove it with `docker volume prune`. With S3, photos and the logo are in the bucket instead: keep the bucket's versioning or backups on if you need them.
 
+**Two-step secrets** are encrypted in that file with `TWO_FACTOR_KEY` (`openssl rand -base64 32`), so a copy of the volume or a backup alone cannot make codes. Keep the key somewhere else than the backups, such as a password manager. Setting it on an app already in use encrypts the existing secrets at the next start (the log says how many). Once set, the app refuses to start without it or with another key, since nobody with two-step could sign in: if the key is lost, an admin resets two-step for each person (or clears `totp_secret` in the database), and they set it up again. Without the key, secrets are stored unencrypted and the log warns at each start.
+
 ## CI/CD
 
-The code lives in the private repository `purema4/hievents-promoter-stats`. GitHub Actions runs two workflows on every push to `main`, on every pull request, and on demand from **Actions → Run workflow**. A newer commit on the same branch or pull request cancels the run it replaces. Each job gets only the permissions it needs, and third-party actions are pinned to full commit SHAs.
+The code lives in the public repository `purema4/hievents-promoter-stats`. GitHub Actions runs two workflows on every push to `main`, on every pull request, and on demand from **Actions → Run workflow**. A newer commit on the same branch or pull request cancels the run it replaces. Each job gets only the permissions it needs, and third-party actions are pinned to full commit SHAs.
 
 **`ci.yml`**
 
@@ -351,7 +353,7 @@ Every commit on `main` that passes CI is published twice:
 - `ghcr.io/purema4/hievents-promoter-stats:<full commit sha>`, which never changes. Use it to pin a version or roll back.
 - `ghcr.io/purema4/hievents-promoter-stats:latest`
 
-The package is private, like the repository. To pull it on a server, create a classic personal access token with only the `read:packages` scope, then:
+The package is private (GHCR's default, even for a public repository). To pull it on a server, create a classic personal access token with only the `read:packages` scope, then:
 
 ```sh
 echo "$TOKEN" | docker login ghcr.io -u purema4 --password-stdin

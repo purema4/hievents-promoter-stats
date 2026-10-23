@@ -40,6 +40,7 @@ import {
   finishPendingSignIn,
   hasTwoFactor,
   newRecoveryCodes,
+  pendingSecret,
   pendingSignIn,
   purgePendingSignIns,
   recoveryCodesLeft,
@@ -1033,7 +1034,7 @@ async function renderSecurity(c: Context<Env>, extra: { setupSecret?: string; re
   const viewer = c.get('user');
   const user = { ...findUser(viewer.id)!, impersonator: viewer.impersonator };
   // A two-step setup in progress is the promoter's secret: never shown to an admin viewing as them.
-  const secret = viewer.impersonator ? null : (extra.setupSecret ?? (c.req.query('setup') ? user.totp_pending : null));
+  const secret = viewer.impersonator ? null : (extra.setupSecret ?? (c.req.query('setup') ? pendingSecret(user) : null));
   return c.html(
     <SecurityPage
       user={user}
@@ -1106,7 +1107,7 @@ app.post('/account/security/2fa/start', (c) => {
 app.post('/account/security/2fa/confirm', async (c) => {
   const user = findUser(c.get('user').id)!;
   const codes = confirmSetup(user, String((await c.req.parseBody()).code ?? ''));
-  if (!codes) return renderSecurity(c, { setupSecret: user.totp_pending ?? undefined, error: messages.code_wrong });
+  if (!codes) return renderSecurity(c, { setupSecret: pendingSecret(user) ?? undefined, error: messages.code_wrong });
   audit(c, 'security.2fa_on', { userId: user.id });
   // Other devices signed in before; they keep their sessions, the next sign-ins ask for a code.
   return renderSecurity(c, { recoveryCodes: codes });

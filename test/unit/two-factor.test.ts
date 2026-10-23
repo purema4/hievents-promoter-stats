@@ -1,17 +1,18 @@
 import { describe, expect, test } from 'bun:test';
-import { createUser, findUser } from '../../src/local-db';
+import { createUser, db, findUser } from '../../src/local-db';
 import {
   _test,
   confirmSetup,
   disableTwoFactor,
   hasTwoFactor,
   newRecoveryCodes,
+  pendingSecret,
   recoveryCodesLeft,
   startSetup,
   verifySecondFactor,
 } from '../../src/two-factor';
 
-const { hotp, base32Encode, base32Decode } = _test;
+const { hotp, base32Encode, base32Decode, seal, unseal } = _test;
 const step = (seconds: number) => Math.floor(seconds / 30);
 const nowStep = () => step(Date.now() / 1000);
 const codeAt = (secret: string, s: number) => hotp(base32Decode(secret), s);
@@ -158,5 +159,43 @@ describe('verifySecondFactor', () => {
     expect(recoveryCodesLeft(id)).toBe(0);
     expect(verifySecondFactor(user, codeAt(secret, confirmedStep + 1))).toBeNull();
     expect(verifySecondFactor(user, recovery[0]!)).toBeNull();
+  });
+});
+
+describe('secrets at rest (TWO_FACTOR_KEY is set in test/setup.ts)', () => {
+  const stored = (id: number) =>
+    db.query<{ totp_secret: string | null; totp_pending: string | null }, [number]>('SELECT totp_secret, totp_pending FROM users WHERE id = ?').get(id)!;
+
+  test('the pending and confirmed secrets are stored encrypted', async () => {
+    const id = await createUser({ email: `2fa-${crypto.randomUUID()}@example.test`, name: 'Two Step', isAdmin: false });
+    const secret = startSetup(id);
+    expect(stored(id).totp_pending).toMatch(/^v1:[A-Za-z0-9_-]+$/);
+    expect(stored(id).totp_pending).not.toContain(secret);
+    expect(pendingSecret(findUser(id)!)).toBe(secret);
+    confirmSetup(findUser(id)!, codeAt(secret, nowStep()));
+    expect(stored(id).totp_secret).toMatch(/^v1:/);
+    expect(stored(id).totp_secret).not.toContain(secret);
+  });
+
+  test('each encryption is different, and only opens for its own account', () => {
+    const a = seal(1, 'JBSWY3DPEHPK3PXP');
+    expect(seal(1, 'JBSWY3DPEHPK3PXP')).not.toBe(a);
+    expect(unseal(1, a)).toBe('JBSWY3DPEHPK3PXP');
+    expect(() => unseal(2, a)).toThrow();
+    const tampered = a.slice(0, -2) + (a.endsWith('A') ? 'B' : 'A') + a.slice(-1);
+    expect(() => unseal(1, tampered)).toThrow();
+  });
+
+  test('a secret copied onto another account does not give codes for it', async () => {
+    const a = await userWithTwoFactor();
+    const b = await userWithTwoFactor();
+    db.query('UPDATE users SET totp_secret = ? WHERE id = ?').run(stored(a.id).totp_secret, b.id);
+    expect(() => verifySecondFactor(findUser(b.id)!, codeAt(a.secret, a.confirmedStep + 1))).toThrow();
+  });
+
+  test('a secret stored before encryption still works', async () => {
+    const { id, secret, confirmedStep } = await userWithTwoFactor();
+    db.query('UPDATE users SET totp_secret = ? WHERE id = ?').run(secret, id);
+    expect(verifySecondFactor(findUser(id)!, codeAt(secret, confirmedStep + 1))).toBe('app');
   });
 });

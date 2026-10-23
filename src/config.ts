@@ -13,6 +13,19 @@ function bool(name: string, fallback: boolean): boolean {
   return ['1', 'true', 'yes', 'on'].includes(value.toLowerCase());
 }
 
+// 32 random bytes, as base64 (`openssl rand -base64 32`) or 64 hex characters. Anything else stops the app,
+// rather than quietly keeping two-step secrets unencrypted.
+function key32(name: string): Buffer | null {
+  const value = (process.env[name] ?? '').trim();
+  if (!value) return null;
+  const key = /^[0-9a-f]{64}$/i.test(value) ? Buffer.from(value, 'hex') : Buffer.from(value, 'base64');
+  if (key.length !== 32) {
+    console.error(`${name} must be 32 bytes, as base64 (openssl rand -base64 32) or 64 hex characters`);
+    process.exit(1);
+  }
+  return key;
+}
+
 export const config = {
   port: Number(process.env.PORT ?? 3000),
   // Public URL the app is reached at, e.g. https://promoters.example.com. Used for CSRF origin checks.
@@ -39,6 +52,8 @@ export const config = {
     clicksMinutes: ((n) => (Number.isFinite(n) && n >= 0 ? n : 10))(Number(process.env.KUTT_CLICKS_MINUTES || 10)),
   },
   cookieSecure: bool('COOKIE_SECURE', true),
+  // Encrypts two-step secrets in the SQLite file, so a copy of /data alone cannot make codes. Optional.
+  twoFactorKey: key32('TWO_FACTOR_KEY'),
   // Share of sales (after discounts, before taxes and fees) paid back to promoters. Can be overridden per promoter.
   commissionPercent: Number(process.env.COMMISSION_PERCENT ?? 10),
   // Optional password login for the first admin, so there is a way in even if email is down.

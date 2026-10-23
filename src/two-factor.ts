@@ -1,4 +1,4 @@
-import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
+import { createCipheriv, createDecipheriv, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { Context } from 'hono';
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
 import QRCode from 'qrcode';
@@ -30,6 +30,73 @@ db.exec(`
     approve_row INTEGER
   );
 `);
+
+// --- Secrets at rest ---------------------------------------------------------------------------
+// With TWO_FACTOR_KEY set, secrets are stored as `v1:` + base64url(nonce, tag, AES-256-GCM ciphertext),
+// tied to the user id so a secret copied onto another row does not decrypt. Without it they stay plain
+// base32, which never contains `:`.
+const SEALED = 'v1:';
+const aad = (userId: number) => Buffer.from(`totp:${userId}`);
+
+function seal(userId: number, secret: string): string {
+  const key = config.twoFactorKey;
+  if (!key) return secret;
+  const nonce = randomBytes(12);
+  const cipher = createCipheriv('aes-256-gcm', key, nonce).setAAD(aad(userId));
+  const body = Buffer.concat([cipher.update(secret, 'utf8'), cipher.final()]);
+  return SEALED + Buffer.concat([nonce, cipher.getAuthTag(), body]).toString('base64url');
+}
+
+function unseal(userId: number, stored: string): string {
+  if (!stored.startsWith(SEALED)) return stored;
+  const key = config.twoFactorKey;
+  if (!key) throw new Error('Two-step secret is encrypted but TWO_FACTOR_KEY is not set');
+  const raw = Buffer.from(stored.slice(SEALED.length), 'base64url');
+  const decipher = createDecipheriv('aes-256-gcm', key, raw.subarray(0, 12)).setAAD(aad(userId));
+  decipher.setAuthTag(raw.subarray(12, 28));
+  return Buffer.concat([decipher.update(raw.subarray(28)), decipher.final()]).toString('utf8');
+}
+
+/**
+ * At startup: encrypts secrets left from before the key was set, and stops the app when the key is
+ * missing or wrong for secrets already encrypted (otherwise nobody with two-step could sign in).
+ */
+function sealStoredSecrets() {
+  const rows = db
+    .query<{ id: number; totp_secret: string | null; totp_pending: string | null }, []>(
+      'SELECT id, totp_secret, totp_pending FROM users WHERE totp_secret IS NOT NULL OR totp_pending IS NOT NULL',
+    )
+    .all();
+  const stored = rows.flatMap((r) => [r.totp_secret, r.totp_pending].filter((v): v is string => !!v).map((v) => ({ id: r.id, v })));
+  const sealed = stored.filter((s) => s.v.startsWith(SEALED));
+  if (!config.twoFactorKey) {
+    if (sealed.length) {
+      console.error('Two-step secrets in the database are encrypted: set TWO_FACTOR_KEY to the key they were encrypted with');
+      process.exit(1);
+    }
+    if (stored.length) console.warn('Two-step secrets are stored unencrypted: set TWO_FACTOR_KEY to encrypt them (see README)');
+    return;
+  }
+  for (const s of sealed) {
+    try {
+      unseal(s.id, s.v);
+    } catch {
+      console.error(`TWO_FACTOR_KEY does not decrypt the two-step secret of user ${s.id}: is it the key they were encrypted with?`);
+      process.exit(1);
+    }
+  }
+  const plain = rows.filter((r) => (r.totp_secret && !r.totp_secret.startsWith(SEALED)) || (r.totp_pending && !r.totp_pending.startsWith(SEALED)));
+  if (!plain.length) return;
+  const update = db.query('UPDATE users SET totp_secret = ?, totp_pending = ? WHERE id = ?');
+  db.transaction(() => {
+    for (const r of plain) {
+      const sealIf = (v: string | null) => (v && !v.startsWith(SEALED) ? seal(r.id, v) : v);
+      update.run(sealIf(r.totp_secret), sealIf(r.totp_pending), r.id);
+    }
+  })();
+  console.log(`Encrypted the two-step secrets of ${plain.length} account(s)`);
+}
+sealStoredSecrets();
 
 const B32 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
 
@@ -95,9 +162,12 @@ export const hasTwoFactor = (user: User) => !!user.totp_enabled_at && !!user.tot
 
 export function startSetup(userId: number): string {
   const secret = base32Encode(randomBytes(20));
-  db.query('UPDATE users SET totp_pending = ? WHERE id = ?').run(secret, userId);
+  db.query('UPDATE users SET totp_pending = ? WHERE id = ?').run(seal(userId, secret), userId);
   return secret;
 }
+
+/** The secret of a setup in progress, to show again as a QR code. */
+export const pendingSecret = (user: User) => (user.totp_pending ? unseal(user.id, user.totp_pending) : null);
 
 export async function setupQr(user: User, secret: string): Promise<{ uri: string; svg: string }> {
   const issuer = getBrand().name;
@@ -110,7 +180,7 @@ export async function setupQr(user: User, secret: string): Promise<{ uri: string
 /** Confirms the first code from the app; returns the recovery codes to show once. */
 export function confirmSetup(user: User, code: string): string[] | null {
   if (!user.totp_pending) return null;
-  const matched = matchStep(user.totp_pending, code.trim());
+  const matched = matchStep(unseal(user.id, user.totp_pending), code.trim());
   if (matched === null) return null;
   db.query('UPDATE users SET totp_secret = totp_pending, totp_pending = NULL, totp_enabled_at = ?, totp_last_step = ? WHERE id = ?').run(
     Math.floor(Date.now() / 1000),
@@ -166,7 +236,7 @@ export function verifySecondFactor(user: User, input: string): 'app' | 'recovery
 function checkSecondFactor(user: User, input: string): 'app' | 'recovery' | null {
   const code = input.trim().replace(/\s/g, '');
   if (user.totp_secret && /^[0-9]{6}$/.test(code)) {
-    const matched = matchStep(user.totp_secret, code);
+    const matched = matchStep(unseal(user.id, user.totp_secret), code);
     if (matched === null) return null;
     // Checked against the stored step, not the one loaded with `user`: two requests carrying the same
     // code at the same time must not both succeed.
@@ -232,4 +302,4 @@ export function purgePendingSignIns() {
 }
 
 // Exposed for tests of the algorithm against the RFC vectors.
-export const _test = { hotp, base32Decode, base32Encode };
+export const _test = { hotp, base32Decode, base32Encode, seal, unseal };
