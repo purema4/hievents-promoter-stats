@@ -109,6 +109,17 @@ describeIntegration('promoter locations', () => {
     expect(mapData(await admin.page(`/admin/teams/${lead.id}`))).not.toBeNull();
   });
 
+  test('places are coloured by their number of promoters, with a legend', async () => {
+    const others = await Promise.all([1, 2].map(() => newPromoter(server, admin, { codes: '' })));
+    for (const p of others) await setCity(p, 'Gatineau, QC');
+    const html = await admin.page('/admin/dashboard');
+    expect(text(html)).toContain('Promoters per place: 1 2–4 5–9 10+');
+    // Two promoters in Gatineau: the 2–4 tier, in the list as on the map (/map.js uses the same tiers).
+    expect(html).toMatch(/data-place="Gatineau, QC"><summary><span>Gatineau, QC<\/span><span class="map-count tier-2">2<\/span>/);
+    const js = await (await admin.get('/map.js')).text();
+    expect(js).toContain('n >= 10 ? 4 : n >= 5 ? 3 : n >= 2 ? 2 : 1');
+  });
+
   test('the map library is served by the app, and the tiles are allowed', async () => {
     for (const file of ['leaflet.js', 'leaflet-heat.js', 'leaflet.css']) {
       const res = await new Client(server).get(`/vendor/${file}?v=1`);

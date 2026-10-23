@@ -439,6 +439,16 @@ body.impersonating .sidebar { padding-bottom: calc(96px + env(safe-area-inset-bo
 .map-place summary span:first-child { flex: 1; }
 .map-place[open], .map-place.selected { border-color: var(--accent); }
 .map-count { font-size: 12px; font-weight: 700; padding: 1px 8px; border-radius: 999px; background: var(--bg); color: var(--muted); }
+/* Promoters per place: one blue, light to dark, the same on the map pins, the list and the legend (tiles are light in both themes). */
+.map-pin, .leaflet-marker-icon.map-pin { display: grid; place-items: center; border-radius: 999px; border: 2px solid #ffffff; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35); font: 700 12px/1 system-ui, sans-serif; }
+.tier-1 { background: #86b6ef; color: #0d366b; }
+.tier-2 { background: #3987e5; color: #ffffff; }
+.tier-3 { background: #1c5cab; color: #ffffff; }
+.tier-4 { background: #0d366b; color: #ffffff; }
+.map-count.tier-1, .map-count.tier-2, .map-count.tier-3, .map-count.tier-4 { min-width: 24px; text-align: center; }
+.map-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; margin: 0; padding: 0; list-style: none; font-size: 13px; color: var(--muted); }
+.map-legend li { display: flex; align-items: center; gap: 6px; }
+.map-legend .map-pin { width: 18px; height: 18px; border-width: 1px; box-shadow: none; }
 .map-missing summary { font-weight: 500; color: var(--muted); }
 .map-note { padding: 0 12px; }
 .map-people { list-style: none; margin: 0; padding: 0 12px 10px; display: grid; gap: 2px; }
@@ -2940,6 +2950,15 @@ export function CityInput(props: { value: string | null | undefined }) {
   );
 }
 
+// The colour tiers of the promoter map, as in /map.js.
+const tierOf = (n: number) => (n >= 10 ? 4 : n >= 5 ? 3 : n >= 2 ? 2 : 1);
+const tiers = [
+  { tier: 1, label: '1' },
+  { tier: 2, label: '2–4' },
+  { tier: 3, label: '5–9' },
+  { tier: 4, label: '10+' },
+];
+
 // Where promoters are, by city, as a heat map (/map.js with Leaflet and OpenStreetMap tiles). Admins see
 // everyone; team leads their team. Cities only, never more precise. Each place opens (on the map, or in
 // the list below it, which works without the map too) to its promoters, linking to their page.
@@ -2977,13 +2996,22 @@ export function PromoterMapCard(props: { title: string; users: User[]; promoterH
             <script src={`/vendor/leaflet.js?v=${vendorVersion}`} defer />
             <script src={`/vendor/leaflet-heat.js?v=${vendorVersion}`} defer />
             <script src="/map.js" defer />
-            <p class="muted">Tap a place on the map, or open one below, to see its promoters.</p>
+            <ul class="map-legend" aria-label="Promoters per place">
+              <li>Promoters per place:</li>
+              {tiers.map((t) => (
+                <li>
+                  <span class={`map-pin tier-${t.tier}`} aria-hidden="true" />
+                  {t.label}
+                </li>
+              ))}
+            </ul>
+            <p class="muted">Tap a place on the map, or open one below, to see its promoters. Nearby places share a pin when zoomed out.</p>
             <div class="map-places">
               {map.points.map((p) => (
                 <details class="map-place" data-place={p.label}>
                   <summary>
                     <span>{p.label}</span>
-                    <span class="map-count">{p.users.length}</span>
+                    <span class={`map-count tier-${tierOf(p.users.length)}`}>{p.users.length}</span>
                   </summary>
                   {people(p.users)}
                 </details>
