@@ -71,7 +71,7 @@ Every promoter has a public page at `<APP_URL>/p/<alias>`, like a link-in-bio pa
 - An event shows while it has one of the promoter's codes and leaves the page once it is over. Draft events are left out when the read-only role can read `events.status`; on a database set up before this, run `GRANT SELECT (status) ON events TO promoter_stats;` once (otherwise every event with a code shows, drafts included).
 - With Kutt, each page also gets a short link on the alias, like `outkzt.link/dj-max`, and the event buttons on it use the promoter's short links. Admins can give a page's short link another address on **Promoter pages** (**Change the Kutt link**): it is renamed in Kutt and keeps its clicks, the old address stops working, and the new one is kept when the link is updated or made again (another domain, or deleted in Kutt).
 - Pasted in a message or a post, the link shows the next event's cover and the promoter's name. Pages are marked `noindex` for search engines.
-- `<APP_URL>/p` lists every page that is not hidden, by name, each with its short link (or full link). To open it from the Kutt domain's own address (like `outkzt.link`), set that domain's homepage to `<APP_URL>/p` in Kutt (Settings → Domains).
+- `<APP_URL>/p` lists every page that is not hidden, by name, each with its short link (or full link).
 
 ### Short links (Kutt)
 

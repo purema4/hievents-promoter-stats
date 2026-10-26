@@ -445,7 +445,7 @@ app.get('/offline', (c) =>
 
 // --- Promoters' public pages: no sign-in, and nothing about sales ----------------------------------
 
-// Every promoter's page, with its link: the Kutt domain's homepage can point here.
+// Every promoter's page, with its link.
 app.get('/p', async (c) => {
   const promoters = listedPages();
   // At most a second for Kutt in all; a page without a short link yet shows its own address.
