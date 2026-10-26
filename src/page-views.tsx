@@ -196,6 +196,56 @@ export function PromoterPublicPage(props: { owner: User; events: PageEvent[]; sh
   );
 }
 
+// --- Every page, /p ---------------------------------------------------------------------------------
+
+/** A link as people type it: outkzt.link/dj-max. */
+const bareLink = (link: string) => link.replace(/^https?:\/\//, '');
+
+export function PromoterDirectoryPage(props: { promoters: { user: User; link: string }[] }) {
+  const brand = getBrand();
+  return (
+    <PublicLayout title={`${brand.name} · Promoters`} description={`Every ${brand.name} promoter's page, with their upcoming events and codes.`} url={`${config.appUrl}/p`}>
+      <div class="lp-backdrop plain" aria-hidden="true"></div>
+      <div class="lp-wrap">
+        <div class="lp-head">
+          <h1 class="lp-name">Promoters</h1>
+          <p class="lp-tagline">Pick your promoter to get your tickets with their code.</p>
+        </div>
+        {props.promoters.length ? (
+          <ul class="lp-people">
+            {props.promoters.map(({ user, link }) => {
+              const avatar = avatarOf(user);
+              return (
+                <li>
+                  <a class="lp-person" href={link} rel="noopener">
+                    {avatar ? (
+                      <img class="lp-person-avatar" src={`/p/${user.alias}/avatar?v=${avatar.version}`} alt="" loading="lazy" />
+                    ) : (
+                      <span class="lp-person-avatar lp-initials" aria-hidden="true">
+                        {initials(user.name)}
+                      </span>
+                    )}
+                    <span class="lp-person-text">
+                      <span class="lp-person-name">{user.name}</span>
+                      <span class="lp-person-link">{bareLink(link)}</span>
+                    </span>
+                    <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+                      <path fill="currentColor" d="M13.2 5.3 19.9 12l-6.7 6.7-1.4-1.4 4.3-4.3H4v-2h12.1l-4.3-4.3 1.4-1.4Z" />
+                    </svg>
+                  </a>
+                </li>
+              );
+            })}
+          </ul>
+        ) : (
+          <p class="lp-empty">No promoter pages right now. Check back soon.</p>
+        )}
+        <PageFooter />
+      </div>
+    </PublicLayout>
+  );
+}
+
 export function PageMissing() {
   return (
     <PublicLayout title="Page not found" description="This page does not exist.">

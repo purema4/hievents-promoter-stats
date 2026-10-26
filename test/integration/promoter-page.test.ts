@@ -53,6 +53,21 @@ describeIntegration("promoters' public pages", () => {
     for (const word of ['commission', 'tickets sold', '$', 'Payout']) expect(text(html)).not.toContain(word);
   });
 
+  test('/p lists every page with its link, but not hidden ones', async () => {
+    const res = await visitor.get('/p');
+    expect(res.status).toBe(200);
+    expect(res.headers.getSetCookie()).toEqual([]);
+    const html = await res.text();
+    expect(html).toContain(`<a class="lp-person" href="${server.url}/p/${alias}"`);
+    expect(html).toContain('Nova &lt;b&gt;Star&lt;/b&gt;');
+    expect(html).toContain(`src="/p/${alias}/avatar?v=`);
+    for (const word of ['commission', 'tickets sold', '$', '@']) expect(text(html)).not.toContain(word);
+
+    expect(location(await promoter.client.post('/page/visibility', { hidden: '1' }))).toBe('/page?ok=page_hidden');
+    expect(await visitor.page('/p')).not.toContain(`/p/${alias}"`);
+    expect(location(await promoter.client.post('/page/visibility', { hidden: '0' }))).toBe('/page?ok=page_shown');
+  });
+
   test('its pictures are public too, but only the ones it shows', async () => {
     const cover = await visitor.get(`/p/${alias}/cover/1`);
     expect(cover.status).toBe(200);

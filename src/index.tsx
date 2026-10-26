@@ -90,8 +90,8 @@ import {
 } from './rewards';
 import { describeProblem, isCustomized as isRulesCustomized, rewardRules, saveRewardRules, type LevelColor, type RewardRules, type Track } from './reward-rules';
 import { kuttDomains, kuttEnabled, pageClicks, pageShortLink, prepareShortLinks, renamePageLink, saveShortDomain, shortLinkStatus } from './short-links';
-import { MyPagePage, PageMissing, PromoterPublicPage } from './page-views';
-import { hiddenByTeam, pageEvents, pageOwner, setPageHidden } from './promoter-page';
+import { MyPagePage, PageMissing, PromoterDirectoryPage, PromoterPublicPage } from './page-views';
+import { hiddenByTeam, listedPages, pageEvents, pageOwner, setPageHidden } from './promoter-page';
 import { allEventRules, setEventRule } from './commission';
 import { allMediaDrives, parseMediaUrl, setMediaDrive } from './media-drives';
 import { filterCodes, parseCodeFilter } from './promo-code-list';
@@ -444,6 +444,15 @@ app.get('/offline', (c) =>
 );
 
 // --- Promoters' public pages: no sign-in, and nothing about sales ----------------------------------
+
+// Every promoter's page, with its link: the Kutt domain's homepage can point here.
+app.get('/p', async (c) => {
+  const promoters = listedPages();
+  // At most a second for Kutt in all; a page without a short link yet shows its own address.
+  await Promise.race([Promise.all(promoters.map((u) => prepareShortLinks(u, [], { waitMs: 1000, page: true }))), Bun.sleep(1000)]);
+  c.header('Cache-Control', 'public, max-age=60');
+  return c.html(<PromoterDirectoryPage promoters={promoters.map((u) => ({ user: u, link: pageShortLink(u) ?? pageLink(u)! }))} />);
+});
 
 app.get('/p/:alias', async (c) => {
   const alias = c.req.param('alias');

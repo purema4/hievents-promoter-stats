@@ -515,7 +515,17 @@ a.lp-event:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px
 .lp-footer { display: flex; align-items: center; justify-content: center; gap: 8px; color: var(--muted); font-size: 13px; font-weight: 600; }
 .lp-footer img { height: 22px; width: auto; border-radius: 4px; }
 .lp-missing { padding-top: 22vh; }
-@media (prefers-reduced-motion: reduce) { .lp-event { transition: none; } a.lp-event:hover, a.lp-event:active { transform: none; } }
+.lp-people { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.lp-person { display: flex; align-items: center; gap: 14px; padding: 12px 16px 12px 12px; color: var(--text); text-decoration: none; background: var(--surface); border: 1px solid color-mix(in srgb, var(--text) 10%, transparent); border-radius: 18px; box-shadow: 0 1px 2px rgb(0 0 0 / 0.06), 0 8px 24px rgb(0 0 0 / 0.08); transition: transform 0.18s ease; -webkit-tap-highlight-color: transparent; }
+.lp-person:hover { transform: translateY(-2px); }
+.lp-person:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+.lp-person > svg { flex: none; color: var(--muted); }
+.lp-person-avatar { flex: none; width: 48px; height: 48px; border-radius: 50%; object-fit: cover; }
+.lp-person-avatar.lp-initials { font-size: 18px; }
+.lp-person-text { flex: 1; min-width: 0; display: grid; gap: 2px; }
+.lp-person-name { font-weight: 800; overflow-wrap: anywhere; }
+.lp-person-link { font-size: 14px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (prefers-reduced-motion: reduce) { .lp-event, .lp-person { transition: none; } a.lp-event:hover, a.lp-event:active, .lp-person:hover { transform: none; } }
 ${chartCss}
 `;
 

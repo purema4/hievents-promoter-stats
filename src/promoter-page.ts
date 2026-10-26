@@ -1,6 +1,6 @@
 import { upcomingEventsForCodes, type PageEvent } from './hievents';
 import { aliasPattern } from './links';
-import { addColumn, codesFor, db, type User } from './local-db';
+import { addColumn, codesFor, db, listUsers, type User } from './local-db';
 
 /*
  * Each promoter's public page, /p/<alias>: like a link-in-bio page, it lists their upcoming events,
@@ -17,6 +17,11 @@ export function pageOwner(alias: string): User | null {
   if (!aliasPattern.test(alias)) return null;
   const user = db.query<User, [string]>('SELECT * FROM users WHERE lower(alias) = ?').get(alias);
   return user && !user.page_hidden_at ? user : null;
+}
+
+/** Every page that can be opened, by name: the list at /p. Admins only when they have codes, like on Promoter pages. */
+export function listedPages(): User[] {
+  return listUsers().filter((u) => u.alias && !u.page_hidden_at && (!u.is_admin || u.codes.length > 0)).sort((a, b) => a.name.localeCompare(b.name));
 }
 
 export function setPageHidden(userId: number, hidden: boolean, by: number = userId) {
