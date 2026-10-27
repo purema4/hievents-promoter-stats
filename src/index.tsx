@@ -1797,7 +1797,7 @@ async function renderTeam(c: Context<Env>, lead: User, basePath: string, memberH
 // Team leads: their team's sales, and each promoter's dashboard as an admin sees it. Nothing to act on.
 // A promoter on a team sees the team's tickets and sales, their team lead's included, but no
 // one's commission and no one else's dashboard.
-app.get('/team', (c) => {
+app.get('/team', async (c) => {
   const user = c.get('user');
   if (isTeamLead(user)) return renderTeam(c, user, '/team', (u) => `/team/${u.id}`);
   const lead = teamLeadOf(user);
