@@ -276,16 +276,8 @@ if (sortable) {
     window.scrollBy(0, scroll);
     requestAnimationFrame(autoScroll);
   };
-  sortable.addEventListener('pointerdown', (e) => {
-    const handle = e.target.closest('[data-drag-handle]');
-    if (!handle || e.button > 0) return;
-    e.preventDefault();
-    dragging = handle.closest('li');
-    dragging.classList.add('dragging');
-    handle.setPointerCapture(e.pointerId);
-  });
-  sortable.addEventListener('pointermove', (e) => {
-    if (!dragging) return;
+  // Moving the row in the page drops its pointer capture, so the pointer is followed on the whole document.
+  const move = (e) => {
     // Before the first row whose middle is below the pointer, or at the end.
     const before = [...sortable.children].find((row) => {
       if (row === dragging) return false;
@@ -300,16 +292,30 @@ if (sortable) {
     const next = e.clientY < edge ? -8 : e.clientY > window.innerHeight - edge ? 8 : 0;
     if (next && !scroll) requestAnimationFrame(autoScroll);
     scroll = next;
-  });
+  };
   const drop = () => {
-    if (!dragging) return;
+    document.removeEventListener('pointermove', move);
+    document.removeEventListener('pointerup', drop);
+    document.removeEventListener('pointercancel', drop);
     dragging.classList.remove('dragging');
+    document.body.classList.remove('sorting');
     dragging = null;
     scroll = 0;
     save();
   };
-  sortable.addEventListener('pointerup', drop);
-  sortable.addEventListener('pointercancel', drop);
+  sortable.addEventListener('pointerdown', (e) => {
+    const handle = e.target.closest('[data-drag-handle]');
+    if (!handle || e.button > 0 || dragging) return;
+    e.preventDefault();
+    dragging = handle.closest('li');
+    dragging.classList.add('dragging');
+    document.body.classList.add('sorting');
+    // A short buzz on phones that have it, so a finger feels the row was picked up.
+    if (e.pointerType === 'touch') navigator.vibrate?.(10);
+    document.addEventListener('pointermove', move);
+    document.addEventListener('pointerup', drop);
+    document.addEventListener('pointercancel', drop);
+  });
   sortable.addEventListener('keydown', (e) => {
     const handle = e.target.closest('[data-drag-handle]');
     if (!handle || (e.key !== 'ArrowUp' && e.key !== 'ArrowDown')) return;

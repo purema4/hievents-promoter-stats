@@ -149,7 +149,10 @@ a.template-item:hover { border-color: var(--accent); }
 .dir-row.off .dir-main > .who, .dir-row.off .dir-heading { opacity: 0.5; }
 .dir-row.heading { background: color-mix(in srgb, var(--accent) 7%, var(--surface)); }
 .dir-row.dragging { box-shadow: 0 10px 28px rgb(0 0 0 / 0.18); border-color: var(--accent); position: relative; z-index: 1; }
-.dir-handle { flex: none; display: grid; place-items: center; width: 32px; height: 36px; padding: 0; color: var(--muted); background: none; border-radius: 6px; cursor: grab; touch-action: none; }
+.dir-handle { flex: none; display: grid; place-items: center; width: 36px; height: 40px; margin: -2px 0; padding: 0; color: var(--muted); background: none; border-radius: 8px; cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+/* A finger needs a bigger target than a mouse. */
+@media (pointer: coarse) { .dir-handle { width: 44px; height: 44px; color: var(--text); background: var(--bg); } .dir-row { padding-left: 8px; } }
+body.sorting { user-select: none; -webkit-user-select: none; }
 .dir-handle:hover, .dir-handle:focus-visible { color: var(--text); background: var(--bg); }
 .dir-row.dragging .dir-handle { cursor: grabbing; }
 .dir-main { flex: 1; min-width: 0; display: grid; gap: 4px; padding-top: 4px; }
