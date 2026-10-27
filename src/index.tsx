@@ -107,6 +107,7 @@ import {
   setItemHidden,
   updateItem,
 } from './directory';
+import { directoryPreview, previewVersion } from './directory-preview';
 import { hiddenByTeam, pageEvents, pageOwner, setPageHidden } from './promoter-page';
 import { allEventRules, setEventRule } from './commission';
 import { allMediaDrives, parseMediaUrl, setMediaDrive } from './media-drives';
@@ -482,7 +483,25 @@ app.get('/p', async (c) => {
   );
   const settings = directorySettings();
   c.header('Cache-Control', 'public, max-age=60');
-  return c.html(<PromoterDirectoryPage title={settings.title} tagline={settings.tagline} stylesheet={`/directory.css?v=${directoryVersion()}`} entries={entries} />);
+  return c.html(
+    <PromoterDirectoryPage
+      title={settings.title}
+      tagline={settings.tagline}
+      stylesheet={`/directory.css?v=${directoryVersion()}`}
+      image={`${config.appUrl}/directory/preview.jpg?v=${previewVersion(promoters)}`}
+      entries={entries}
+    />,
+  );
+});
+
+// The picture for link previews (src/directory-preview.ts), of the promoters on the page right now.
+app.get('/directory/preview.jpg', async (c) => {
+  const promoters = publicDirectoryItems().flatMap((i) => (i.kind === 'promoter' ? [i.user] : []));
+  const bytes = await directoryPreview(promoters);
+  c.header('Content-Type', 'image/jpeg');
+  // Linked with its version, but apps fetch it once and keep it; an hour is plenty.
+  c.header('Cache-Control', 'public, max-age=3600');
+  return c.body(new Uint8Array(bytes));
 });
 
 app.get('/directory.css', (c) => {

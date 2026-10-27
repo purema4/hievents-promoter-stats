@@ -78,6 +78,7 @@ Every promoter has a public page at `<APP_URL>/p/<alias>`, like a link-in-bio pa
   - Set the title, the text under it, and the background: the brand colour (the default), one colour, a gradient, or a photo (darkened so the text reads on it).
   - Choose whether promoters who get a page are added at the end of the list or added hidden, to show when an admin chooses.
   - Visitors see changes within a minute (the page is cached briefly).
+  - Pasted in a message or a post, the link shows the title, the promoters' names and a picture made from the page's background, the logo and the first promoters' photos (up to 7).
 
 ### Short links (Kutt)
 

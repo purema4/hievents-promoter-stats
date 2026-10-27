@@ -104,6 +104,28 @@ describeIntegration('the index page', () => {
     expect(await shown()).not.toContain('Instagram');
   });
 
+  test('a pasted link shows the promoters: their names, and a picture with their photos', async () => {
+    const form = new FormData();
+    form.set('photo', new File([png], 'me.png', { type: 'image/png' }));
+    expect(location(await admin.request(`/admin/promoters/${ana.id}/photo`, { method: 'POST', body: form }))).toStartWith(`/admin/promoters/${ana.id}?ok=`);
+    const html = await visitor.page('/p');
+    expect(html).toMatch(new RegExp(`<meta property="og:description" content="[^"]*${ana.name}`));
+    const image = html.match(/<meta property="og:image" content="([^"]+)"/)![1]!;
+    expect(image).toStartWith(`${server.url}/directory/preview.jpg?v=`);
+    expect(html).toContain('<meta property="og:image:width" content="1200"/>');
+    expect(html).toContain('<meta name="twitter:card" content="summary_large_image"/>');
+    const res = await visitor.get(image.slice(server.url.length));
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toBe('image/jpeg');
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    expect([bytes[0], bytes[1]]).toEqual([0xff, 0xd8]);
+    // A new photo is a new picture, at a new address, so apps fetch it again.
+    const again = new FormData();
+    again.set('photo', new File([png], 'me.png', { type: 'image/png' }));
+    await admin.request(`/admin/promoters/${ana.id}/photo`, { method: 'POST', body: again });
+    expect((await visitor.page('/p')).match(/<meta property="og:image" content="([^"]+)"/)![1]).not.toBe(image);
+  });
+
   test('title, tagline and a colour background', async () => {
     expect(location(await saveLook({ title: 'Our <b>crew</b>', tagline: 'Tickets with our codes', background: 'gradient', color: '#FF0066', color2: '#220033' }))).toBe('/admin/pages/index?ok=index_saved');
     const html = await visitor.page('/p');

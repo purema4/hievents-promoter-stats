@@ -46,7 +46,7 @@ const instagramIcon = (
   </svg>
 );
 
-function PublicLayout(props: { title: string; description: string; image?: string; url?: string; stylesheet?: string; children: Child }) {
+function PublicLayout(props: { title: string; description: string; image?: string; imageSize?: { width: number; height: number }; url?: string; stylesheet?: string; children: Child }) {
   const brand = getBrand();
   return (
     <html lang="en">
@@ -63,6 +63,9 @@ function PublicLayout(props: { title: string; description: string; image?: strin
         <meta property="og:description" content={props.description} />
         {props.url && <meta property="og:url" content={props.url} />}
         {props.image && <meta property="og:image" content={props.image} />}
+        {props.imageSize && <meta property="og:image:width" content={String(props.imageSize.width)} />}
+        {props.imageSize && <meta property="og:image:height" content={String(props.imageSize.height)} />}
+        {props.image && <meta name="twitter:image" content={props.image} />}
         <meta name="twitter:card" content={props.image ? 'summary_large_image' : 'summary'} />
         <link rel="stylesheet" href={`/app.css?v=${cssVersion}`} />
         <link rel="stylesheet" href={`/brand.css?v=${brandVersion()}`} />
@@ -218,13 +221,24 @@ export const linkIcon = (
 
 export type DirectoryEntry = { kind: 'promoter'; user: User; link: string } | { kind: 'link'; title: string; url: string } | { kind: 'heading'; title: string };
 
-export function PromoterDirectoryPage(props: { title: string; tagline: string; stylesheet: string; entries: DirectoryEntry[] }) {
+/** "Ana, Ben, Cy and 4 more", for the link preview. */
+function namesLine(names: string[]): string {
+  if (names.length <= 1) return names.join('');
+  if (names.length <= 4) return `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`;
+  return `${names.slice(0, 3).join(', ')} and ${names.length - 3} more`;
+}
+
+export function PromoterDirectoryPage(props: { title: string; tagline: string; stylesheet: string; image: string; entries: DirectoryEntry[] }) {
   const brand = getBrand();
+  const names = props.entries.flatMap((e) => (e.kind === 'promoter' ? [e.user.name] : []));
+  const description = [props.tagline, names.length ? `${names.length === 1 ? 'Promoter' : 'Promoters'}: ${namesLine(names)}.` : ''].filter(Boolean).join(' ');
   return (
     <PublicLayout
       title={`${brand.name} · ${props.title}`}
-      description={props.tagline || `Every ${brand.name} promoter's page, with their upcoming events and codes.`}
+      description={description || `Every ${brand.name} promoter's page, with their upcoming events and codes.`}
       url={`${config.appUrl}/p`}
+      image={props.image}
+      imageSize={{ width: 1200, height: 630 }}
       stylesheet={props.stylesheet}
     >
       <div class="lp-dir">

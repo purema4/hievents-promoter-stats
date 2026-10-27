@@ -23,6 +23,11 @@ export function avatarOf(user: User): AvatarInfo {
   return user.avatar_type && fileKnown(keyOf(user)) ? { userId: user.id, version: user.avatar_checked_at ?? 0 } : null;
 }
 
+/** The photo itself, for building images from it (the index page's link preview). */
+export async function avatarBytes(user: User): Promise<Uint8Array | null> {
+  return avatarOf(user) ? getFile(keyOf(user)) : null;
+}
+
 /** The photo to send (or the CDN address to send the browser to). Callers check who may see it first. */
 export async function deliverAvatar(userId: number): Promise<Delivery | null> {
   const user = findUser(userId);
