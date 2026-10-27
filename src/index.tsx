@@ -90,8 +90,24 @@ import {
 } from './rewards';
 import { describeProblem, isCustomized as isRulesCustomized, rewardRules, saveRewardRules, type LevelColor, type RewardRules, type Track } from './reward-rules';
 import { kuttDomains, kuttEnabled, pageClicks, pageShortLink, prepareShortLinks, renamePageLink, saveShortDomain, shortLinkStatus } from './short-links';
-import { MyPagePage, PageMissing, PromoterDirectoryPage, PromoterPublicPage } from './page-views';
-import { hiddenByTeam, listedPages, pageEvents, pageOwner, setPageHidden } from './promoter-page';
+import { DirectoryEditorPage, MyPagePage, PageMissing, PromoterDirectoryPage, PromoterPublicPage, type DirectoryEntry } from './page-views';
+import {
+  addItem,
+  deliverBackgroundImage,
+  directoryCss,
+  directoryItems,
+  directorySettings,
+  directoryVersion,
+  publicDirectoryItems,
+  removeBackgroundImage,
+  removeItem,
+  reorderItems,
+  saveBackgroundImage,
+  saveDirectorySettings,
+  setItemHidden,
+  updateItem,
+} from './directory';
+import { hiddenByTeam, pageEvents, pageOwner, setPageHidden } from './promoter-page';
 import { allEventRules, setEventRule } from './commission';
 import { allMediaDrives, parseMediaUrl, setMediaDrive } from './media-drives';
 import { filterCodes, parseCodeFilter } from './promo-code-list';
@@ -250,6 +266,15 @@ const messages: Record<string, string> = {
   page_hidden: 'Your page is hidden.',
   page_shown: 'Your page is back.',
   page_saved: 'Saved. The page shows or hides right away.',
+  index_saved: 'Saved. Visitors see it within a minute.',
+  index_added: 'Added at the end of the list. Drag it where you want it.',
+  index_removed: 'Removed from the index page.',
+  index_no_title: 'Give it a text.',
+  index_bad_url: 'That link does not work. Use a web address (like instagram.com/…), an email (mailto:…) or a phone number (tel:…).',
+  index_no_image: 'Upload a photo to use one as the background.',
+  background_size: `The photo must be ${Math.round(maxUploadBytes / 1024 / 1024)} MB or less.`,
+  background_type: 'The photo must be a PNG, JPEG or WebP image.',
+  background_pixels: 'The photo is too large in pixels. Use a smaller one.',
   short_renamed: 'Kutt link changed. The old address no longer works.',
   short_taken: 'That address is already used in Kutt. Pick another.',
   short_invalid: 'Use letters, numbers, - or _ (64 at most), starting with a letter or number.',
@@ -385,6 +410,7 @@ const smallBodies = bodyLimit({ maxSize: 32 * 1024, onError: (c) => refuse(c, ()
 // a file far too big is sent back to its own form.
 function tooBig(path: string): string | null {
   if (path === '/admin/branding') return '/admin/branding?error=logo_size';
+  if (path === '/admin/pages/index') return '/admin/pages/index?error=background_size';
   if (path === '/account/profile') return '/account?error=photo_size';
   if (path === '/welcome/photo') return '/welcome?step=3&error=photo_size';
   const promoter = path.match(/^\/admin\/promoters\/(\d+)\/photo$/);
@@ -445,14 +471,26 @@ app.get('/offline', (c) =>
 
 // --- Promoters' public pages: no sign-in, and nothing about sales ----------------------------------
 
-// Every promoter's page, with its link.
+// The index page: every promoter's page and the team's own links, as admins arranged them.
 app.get('/p', async (c) => {
-  const promoters = listedPages();
+  const items = publicDirectoryItems();
+  const promoters = items.flatMap((i) => (i.kind === 'promoter' ? [i.user] : []));
   // At most a second for Kutt in all; a page without a short link yet shows its own address.
   await Promise.race([Promise.all(promoters.map((u) => prepareShortLinks(u, [], { waitMs: 1000, page: true }))), Bun.sleep(1000)]);
+  const entries: DirectoryEntry[] = items.map((i) =>
+    i.kind === 'promoter' ? { kind: 'promoter', user: i.user, link: pageShortLink(i.user) ?? pageLink(i.user)! } : i.kind === 'link' ? { kind: 'link', title: i.title, url: i.url } : { kind: 'heading', title: i.title },
+  );
+  const settings = directorySettings();
   c.header('Cache-Control', 'public, max-age=60');
-  return c.html(<PromoterDirectoryPage promoters={promoters.map((u) => ({ user: u, link: pageShortLink(u) ?? pageLink(u)! }))} />);
+  return c.html(<PromoterDirectoryPage title={settings.title} tagline={settings.tagline} stylesheet={`/directory.css?v=${directoryVersion()}`} entries={entries} />);
 });
+
+app.get('/directory.css', (c) => {
+  c.header('Content-Type', 'text/css; charset=utf-8');
+  c.header('Cache-Control', 'public, max-age=31536000, immutable');
+  return c.body(directoryCss());
+});
+app.get('/directory/background', async (c) => sendStored(c, await deliverBackgroundImage(), 'public, max-age=31536000, immutable'));
 
 app.get('/p/:alias', async (c) => {
   const alias = c.req.param('alias');
@@ -1646,6 +1684,88 @@ app.post('/admin/pages/:id/visibility', async (c) => {
   setPageHidden(promoter.id, hidden, c.get('user').id);
   audit(c, hidden ? 'admin.page_hidden' : 'admin.page_shown', { userId: promoter.id });
   return c.redirect('/admin/pages?ok=page_saved');
+});
+
+// --- The index page (/p), for admins ---------------------------------------------------------------------
+
+app.get('/admin/pages/index', async (c) => {
+  const items = directoryItems();
+  const promoters = items.flatMap((i) => (i.kind === 'promoter' && !i.user.page_hidden_at ? [i.user] : []));
+  await Promise.race([Promise.all(promoters.map((u) => prepareShortLinks(u, [], { page: true }))), Bun.sleep(2500)]);
+  return c.html(
+    <DirectoryEditorPage
+      user={c.get('user')}
+      settings={directorySettings()}
+      items={items}
+      links={new Map(promoters.map((u) => [u.id, pageShortLink(u) ?? pageLink(u)!]))}
+      version={directoryVersion()}
+      ok={flash(c.req.query('ok'))}
+      error={flash(c.req.query('error'))}
+    />,
+  );
+});
+
+app.post('/admin/pages/index', async (c) => {
+  const body = await c.req.parseBody();
+  const image = body.image;
+  if (image instanceof File && image.size > 0) {
+    if (!allowImageUpload(c.get('user').id)) return c.redirect('/admin/pages/index?error=photo_rate');
+    const clean = await processImage(new Uint8Array(await image.arrayBuffer()), 'background');
+    if (typeof clean === 'string') return c.redirect(`/admin/pages/index?error=background_${{ too_big: 'size', bad_type: 'type', too_many_pixels: 'pixels' }[clean]}`);
+    await saveBackgroundImage(clean.bytes, clean.type);
+  } else if (body.remove_image === '1') {
+    await removeBackgroundImage();
+  }
+  const uploaded = image instanceof File && image.size > 0;
+  const result = saveDirectorySettings({
+    title: String(body.title ?? ''),
+    tagline: String(body.tagline ?? ''),
+    // A new photo is meant to be the background.
+    background: uploaded ? 'image' : String(body.background ?? ''),
+    color: String(body.color ?? ''),
+    color2: String(body.color2 ?? ''),
+    newPromoters: String(body.new_promoters ?? ''),
+  });
+  if (result !== 'ok') return c.redirect(`/admin/pages/index?error=${result === 'bad_color' ? 'bad_color' : 'index_no_image'}`);
+  audit(c, 'admin.index_page_updated', { by: c.get('user').id, image: uploaded });
+  return c.redirect('/admin/pages/index?ok=index_saved');
+});
+
+app.post('/admin/pages/index/add', async (c) => {
+  const body = await c.req.parseBody();
+  const kind = body.kind === 'heading' ? 'heading' : 'link';
+  const result = addItem(kind, body.title, body.url);
+  if (result !== 'ok') return c.redirect(`/admin/pages/index?error=index_${result}`);
+  audit(c, 'admin.index_item_added', { by: c.get('user').id, kind });
+  return c.redirect('/admin/pages/index?ok=index_added');
+});
+
+// From the drag and drop (public/app.js): the ids in their new order.
+app.post('/admin/pages/index/order', async (c) => {
+  const order = String((await c.req.parseBody()).order ?? '');
+  const ids = order.split(',').map(Number).filter((id) => Number.isInteger(id) && id > 0).slice(0, 5000);
+  reorderItems(ids);
+  return c.json({ ok: true });
+});
+
+app.post('/admin/pages/index/:id/visibility', async (c) => {
+  const hidden = (await c.req.parseBody()).hidden === '1';
+  if (!setItemHidden(Number(c.req.param('id')), hidden)) return c.notFound();
+  return c.redirect(`/admin/pages/index?ok=index_saved`);
+});
+
+app.post('/admin/pages/index/:id/remove', (c) => {
+  if (!removeItem(Number(c.req.param('id')))) return c.notFound();
+  audit(c, 'admin.index_item_removed', { by: c.get('user').id, id: Number(c.req.param('id')) });
+  return c.redirect('/admin/pages/index?ok=index_removed');
+});
+
+app.post('/admin/pages/index/:id', async (c) => {
+  const body = await c.req.parseBody();
+  const result = updateItem(Number(c.req.param('id')), body.title, body.url);
+  if (result === 'missing') return c.notFound();
+  if (result !== 'ok') return c.redirect(`/admin/pages/index?error=index_${result}`);
+  return c.redirect('/admin/pages/index?ok=index_saved');
 });
 
 // --- Teams ----------------------------------------------------------------------------------------------

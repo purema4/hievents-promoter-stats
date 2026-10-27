@@ -9,7 +9,9 @@ import type { User } from './local-db';
 import { hiddenByTeam, instagramHandle } from './promoter-page';
 import { LinkField } from './promoter-views';
 import { shareLink } from './short-links';
-import { cssVersion, Flash, Layout } from './views';
+import type { DirectoryItem, DirectorySettings } from './directory';
+import { maxUploadBytes } from './images';
+import { Avatar, cssVersion, Flash, Layout, PagesTabs } from './views';
 
 // --- The public page, /p/<alias> -----------------------------------------------------------------
 
@@ -44,7 +46,7 @@ const instagramIcon = (
   </svg>
 );
 
-function PublicLayout(props: { title: string; description: string; image?: string; url?: string; children: Child }) {
+function PublicLayout(props: { title: string; description: string; image?: string; url?: string; stylesheet?: string; children: Child }) {
   const brand = getBrand();
   return (
     <html lang="en">
@@ -64,6 +66,7 @@ function PublicLayout(props: { title: string; description: string; image?: strin
         <meta name="twitter:card" content={props.image ? 'summary_large_image' : 'summary'} />
         <link rel="stylesheet" href={`/app.css?v=${cssVersion}`} />
         <link rel="stylesheet" href={`/brand.css?v=${brandVersion()}`} />
+        {props.stylesheet && <link rel="stylesheet" href={props.stylesheet} />}
         <link rel="icon" href={iconUrl('icon.svg')} type="image/svg+xml" />
         <link rel="apple-touch-icon" href={iconUrl('icon-180.png')} />
         <meta name="theme-color" content="#f6f6f4" media="(prefers-color-scheme: light)" />
@@ -199,48 +202,82 @@ export function PromoterPublicPage(props: { owner: User; events: PageEvent[]; sh
 // --- Every page, /p ---------------------------------------------------------------------------------
 
 /** A link as people type it: outkzt.link/dj-max. */
-const bareLink = (link: string) => link.replace(/^https?:\/\//, '');
+const bareLink = (link: string) => link.replace(/^(https?:\/\/|mailto:|tel:)/, '').replace(/\/$/, '');
 
-export function PromoterDirectoryPage(props: { promoters: { user: User; link: string }[] }) {
+const arrowIcon = (
+  <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+    <path fill="currentColor" d="M13.2 5.3 19.9 12l-6.7 6.7-1.4-1.4 4.3-4.3H4v-2h12.1l-4.3-4.3 1.4-1.4Z" />
+  </svg>
+);
+
+export const linkIcon = (
+  <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+    <path fill="currentColor" d="M10.6 13.4a1 1 0 0 1 0-1.4l3.5-3.5a1 1 0 1 1 1.4 1.4L12 13.4a1 1 0 0 1-1.4 0Zm-2.1 6.4a4.5 4.5 0 0 1-3.2-7.7l2.1-2.1a1 1 0 1 1 1.4 1.4l-2.1 2.1a2.5 2.5 0 0 0 3.5 3.5l2.1-2.1a1 1 0 1 1 1.4 1.4l-2.1 2.1a4.5 4.5 0 0 1-3.1 1.4Zm7.4-5.5a1 1 0 0 1-.7-1.7l2.1-2.1a2.5 2.5 0 0 0-3.5-3.5l-2.1 2.1a1 1 0 0 1-1.4-1.4l2.1-2.1a4.5 4.5 0 0 1 6.3 6.3l-2.1 2.1a1 1 0 0 1-.7.3Z" />
+  </svg>
+);
+
+export type DirectoryEntry = { kind: 'promoter'; user: User; link: string } | { kind: 'link'; title: string; url: string } | { kind: 'heading'; title: string };
+
+export function PromoterDirectoryPage(props: { title: string; tagline: string; stylesheet: string; entries: DirectoryEntry[] }) {
   const brand = getBrand();
   return (
-    <PublicLayout title={`${brand.name} · Promoters`} description={`Every ${brand.name} promoter's page, with their upcoming events and codes.`} url={`${config.appUrl}/p`}>
-      <div class="lp-backdrop plain" aria-hidden="true"></div>
-      <div class="lp-wrap">
-        <div class="lp-head">
-          <h1 class="lp-name">Promoters</h1>
-          <p class="lp-tagline">Pick your promoter to get your tickets with their code.</p>
-        </div>
-        {props.promoters.length ? (
-          <ul class="lp-people">
-            {props.promoters.map(({ user, link }) => {
-              const avatar = avatarOf(user);
-              return (
-                <li>
-                  <a class="lp-person" href={link} rel="noopener">
-                    {avatar ? (
-                      <img class="lp-person-avatar" src={`/p/${user.alias}/avatar?v=${avatar.version}`} alt="" loading="lazy" />
-                    ) : (
-                      <span class="lp-person-avatar lp-initials" aria-hidden="true">
-                        {initials(user.name)}
+    <PublicLayout
+      title={`${brand.name} · ${props.title}`}
+      description={props.tagline || `Every ${brand.name} promoter's page, with their upcoming events and codes.`}
+      url={`${config.appUrl}/p`}
+      stylesheet={props.stylesheet}
+    >
+      <div class="lp-dir">
+        <div class="lp-backdrop plain" aria-hidden="true"></div>
+        <div class="lp-wrap">
+          <div class="lp-head">
+            <h1 class="lp-name">{props.title}</h1>
+            {props.tagline && <p class="lp-tagline">{props.tagline}</p>}
+          </div>
+          {props.entries.length ? (
+            <ul class="lp-people">
+              {props.entries.map((entry) => {
+                if (entry.kind === 'heading') return <li class="lp-section">{entry.title}</li>;
+                if (entry.kind === 'link') {
+                  return (
+                    <li>
+                      <a class="lp-person" href={entry.url} rel="noopener">
+                        <span class="lp-person-avatar lp-link-icon">{linkIcon}</span>
+                        <span class="lp-person-text">
+                          <span class="lp-person-name">{entry.title}</span>
+                          <span class="lp-person-link">{bareLink(entry.url)}</span>
+                        </span>
+                        {arrowIcon}
+                      </a>
+                    </li>
+                  );
+                }
+                const avatar = avatarOf(entry.user);
+                return (
+                  <li>
+                    <a class="lp-person" href={entry.link} rel="noopener">
+                      {avatar ? (
+                        <img class="lp-person-avatar" src={`/p/${entry.user.alias}/avatar?v=${avatar.version}`} alt="" loading="lazy" />
+                      ) : (
+                        <span class="lp-person-avatar lp-initials" aria-hidden="true">
+                          {initials(entry.user.name)}
+                        </span>
+                      )}
+                      <span class="lp-person-text">
+                        <span class="lp-person-name">{entry.user.name}</span>
+                        <span class="lp-person-link">{bareLink(entry.link)}</span>
                       </span>
-                    )}
-                    <span class="lp-person-text">
-                      <span class="lp-person-name">{user.name}</span>
-                      <span class="lp-person-link">{bareLink(link)}</span>
-                    </span>
-                    <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
-                      <path fill="currentColor" d="M13.2 5.3 19.9 12l-6.7 6.7-1.4-1.4 4.3-4.3H4v-2h12.1l-4.3-4.3 1.4-1.4Z" />
-                    </svg>
-                  </a>
-                </li>
-              );
-            })}
-          </ul>
-        ) : (
-          <p class="lp-empty">No promoter pages right now. Check back soon.</p>
-        )}
-        <PageFooter />
+                      {arrowIcon}
+                    </a>
+                  </li>
+                );
+              })}
+            </ul>
+          ) : (
+            <p class="lp-empty">Nothing here right now. Check back soon.</p>
+          )}
+          <PageFooter />
+        </div>
       </div>
     </PublicLayout>
   );
@@ -365,6 +402,234 @@ export function MyPagePage(props: {
           </form>
         </>
       )}
+    </Layout>
+  );
+}
+
+// --- The index page's editor, Promoter pages → Index page ------------------------------------------
+
+function ItemEditor(props: { item: DirectoryItem }) {
+  const item = props.item;
+  if (item.kind === 'promoter') return null;
+  return (
+    <details class="dir-edit">
+      <summary>Edit</summary>
+      <form method="post" action={`/admin/pages/index/${item.id}`} class="dir-edit-form">
+        <label>
+          {item.kind === 'link' ? 'Text' : 'Section title'}
+          <input name="title" value={item.title} maxlength={80} required />
+        </label>
+        {item.kind === 'link' && (
+          <label>
+            Link
+            <input name="url" value={item.url} maxlength={2000} required />
+          </label>
+        )}
+        <div class="form-actions">
+          <button type="submit">Save</button>
+        </div>
+      </form>
+      <form method="post" action={`/admin/pages/index/${item.id}/remove`}>
+        <button type="submit" class="link danger-link">
+          Remove {item.kind === 'link' ? 'this link' : 'this section title'}
+        </button>
+      </form>
+    </details>
+  );
+}
+
+function ItemRow(props: { item: DirectoryItem; link: string | null }) {
+  const item = props.item;
+  const pageHidden = item.kind === 'promoter' && !!item.user.page_hidden_at;
+  const name = item.kind === 'promoter' ? item.user.name : item.title;
+  return (
+    <li class={`dir-row${item.hidden || pageHidden ? ' off' : ''}${item.kind === 'heading' ? ' heading' : ''}`} data-id={item.id}>
+      <button type="button" class="dir-handle" data-drag-handle aria-label={`Move ${name}: drag, or use the up and down arrow keys`}>
+        <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+          <path fill="currentColor" d="M9 5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0Zm0 7a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0Zm-1.5 8.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3ZM18 5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0Zm-1.5 8.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3ZM18 19a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0Z" />
+        </svg>
+      </button>
+      <div class="dir-main">
+        {item.kind === 'promoter' ? (
+          <span class="who">
+            <Avatar user={item.user} size="small" />
+            <span>
+              <strong>{item.user.name}</strong>
+              {props.link && <span class="muted dir-sub">{bareLink(props.link)}</span>}
+            </span>
+          </span>
+        ) : item.kind === 'link' ? (
+          <span class="who">
+            <span class="dir-link-icon">{linkIcon}</span>
+            <span>
+              <strong>{item.title}</strong>
+              <span class="muted dir-sub">{bareLink(item.url)}</span>
+            </span>
+          </span>
+        ) : (
+          <span class="dir-heading">{item.title}</span>
+        )}
+        <span class="dir-tags">
+          {item.kind === 'heading' && <span class="badge">Section title</span>}
+          {item.hidden && <span class="badge">Not on the page</span>}
+          {pageHidden && <span class="badge">{hiddenByTeam(item.user) ? 'Page hidden by an admin' : 'Page hidden by the promoter'}</span>}
+        </span>
+        <ItemEditor item={item} />
+      </div>
+      <form method="post" action={`/admin/pages/index/${item.id}/visibility`} class="dir-toggle">
+        <input type="hidden" name="hidden" value={item.hidden ? '0' : '1'} />
+        <button type="submit" class={item.hidden ? 'secondary' : 'link'}>
+          {item.hidden ? 'Show' : 'Hide'}
+        </button>
+      </form>
+    </li>
+  );
+}
+
+export function DirectoryEditorPage(props: {
+  user: User;
+  settings: DirectorySettings;
+  items: DirectoryItem[];
+  links: Map<number, string>;
+  version: string;
+  ok?: string;
+  error?: string;
+}) {
+  const s = props.settings;
+  const shown = props.items.filter((i) => !i.hidden && (i.kind !== 'promoter' || !i.user.page_hidden_at)).length;
+  return (
+    <Layout title="Index page" user={props.user}>
+      <h1>Promoter pages</h1>
+      <PagesTabs current="index" />
+      <p class="muted">
+        One page listing your promoters, with your own links and section titles in between, like a link-in-bio page for the
+        whole team. Anyone with the address can open it.
+      </p>
+      <Flash ok={props.ok} error={props.error} />
+      <div class="card dir-address">
+        <LinkField link={`${config.appUrl}/p`} label="Index page" />
+        <a class="button secondary" href={`/p?v=${props.version}`} target="_blank" rel="noopener">
+          Open the page
+        </a>
+      </div>
+
+      <h2>On the page</h2>
+      <p class="muted">
+        Drag the rows by their handle to change the order; it is saved right away. {shown === 1 ? '1 row shows' : `${shown} rows show`} on the page.
+        Promoters can only be hidden, not removed: they are on the list as long as they have a page.
+      </p>
+      {props.items.length ? (
+        <>
+          <ul class="dir-list" data-sortable="/admin/pages/index/order">
+            {props.items.map((item) => (
+              <ItemRow item={item} link={item.kind === 'promoter' ? (props.links.get(item.user.id) ?? null) : null} />
+            ))}
+          </ul>
+          <p class="muted dir-status" data-sort-status aria-live="polite"></p>
+        </>
+      ) : (
+        <div class="card muted">No promoters with a page yet.</div>
+      )}
+
+      <div class="two-col dir-add">
+        <form class="card stack-card" method="post" action="/admin/pages/index/add">
+          <h2 class="first">Add a link</h2>
+          <input type="hidden" name="kind" value="link" />
+          <label>
+            Text
+            <input name="title" maxlength={80} placeholder="Our Instagram" required />
+          </label>
+          <label>
+            Link
+            <input name="url" maxlength={2000} placeholder="instagram.com/…" required />
+          </label>
+          <div class="form-actions">
+            <button type="submit">Add the link</button>
+          </div>
+        </form>
+        <form class="card stack-card" method="post" action="/admin/pages/index/add">
+          <h2 class="first">Add a section title</h2>
+          <input type="hidden" name="kind" value="heading" />
+          <label>
+            Title
+            <input name="title" maxlength={80} placeholder="Montréal" required />
+          </label>
+          <p class="muted">Drag the promoters under it. A section title with nothing shown under it is left off the page.</p>
+          <div class="form-actions">
+            <button type="submit">Add the title</button>
+          </div>
+        </form>
+      </div>
+
+      <h2>Look</h2>
+      <form class="account-form" method="post" action="/admin/pages/index" enctype="multipart/form-data">
+        <div class="two-col">
+          <div class="card stack-card">
+            <h2 class="first">Text</h2>
+            <label>
+              Title
+              <input name="title" value={s.title} maxlength={60} required />
+            </label>
+            <label>
+              Under the title (leave empty for none)
+              <textarea name="tagline" maxlength={200}>
+                {s.tagline}
+              </textarea>
+            </label>
+            <fieldset class="dir-fieldset">
+              <legend>When a promoter gets a page</legend>
+              <label class="check">
+                <input type="radio" name="new_promoters" value="show" checked={s.newPromoters === 'show'} /> Add them to the end of the list
+              </label>
+              <label class="check">
+                <input type="radio" name="new_promoters" value="hide" checked={s.newPromoters === 'hide'} /> Add them hidden, to show when you choose
+              </label>
+            </fieldset>
+          </div>
+          <div class="card stack-card">
+            <h2 class="first">Background</h2>
+            <fieldset class="dir-fieldset" aria-label="Background">
+              <label class="check">
+                <input type="radio" name="background" value="brand" checked={s.background === 'brand'} /> The brand colour, fading out
+              </label>
+              <label class="check">
+                <input type="radio" name="background" value="color" checked={s.background === 'color'} /> One colour
+              </label>
+              <label class="check">
+                <input type="radio" name="background" value="gradient" checked={s.background === 'gradient'} /> A gradient between two colours
+              </label>
+              <label class="check">
+                <input type="radio" name="background" value="image" checked={s.background === 'image'} disabled={!s.imageKey} /> A photo
+                {!s.imageKey && <span class="muted"> (upload one below)</span>}
+              </label>
+            </fieldset>
+            <div class="swatch-row">
+              <label>
+                Colour (top of the gradient)
+                <input type="color" name="color" value={s.color} />
+              </label>
+              <label>
+                Bottom of the gradient
+                <input type="color" name="color2" value={s.color2} />
+              </label>
+            </div>
+            <label>
+              Photo (PNG, JPEG or WebP, up to {Math.round(maxUploadBytes / 1024 / 1024)} MB; darkened so the text reads on it)
+              <input type="file" name="image" accept="image/png,image/jpeg,image/webp" />
+            </label>
+            {s.imageKey && (
+              <>
+                <img class="dir-image-preview" src={`/directory/background?v=${s.updatedAt}`} alt="Current background photo" />
+                <label class="check">
+                  <input type="checkbox" name="remove_image" value="1" /> Remove the photo
+                </label>
+              </>
+            )}
+            <p class="muted">A new photo becomes the background as soon as it is saved.</p>
+          </div>
+        </div>
+        <button type="submit">Save the look</button>
+      </form>
     </Layout>
   );
 }

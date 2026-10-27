@@ -136,6 +136,37 @@ a.template-item { display: flex; gap: 12px; align-items: center; justify-content
 a.template-item:hover { border-color: var(--accent); }
 .badge { font-size: 12px; font-weight: 600; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); }
 .badge.edited { color: var(--accent); border-color: var(--accent); }
+/* Tabs above a page's content (Promoter pages → Index page) */
+.tabs { display: flex; gap: 4px; flex-wrap: wrap; border-bottom: 1px solid var(--border); margin: 0 0 16px; }
+.tabs a { padding: 8px 12px; margin-bottom: -1px; color: var(--muted); text-decoration: none; font-weight: 600; border-bottom: 2px solid transparent; }
+.tabs a:hover { color: var(--text); }
+.tabs a[aria-current] { color: var(--accent); border-bottom-color: var(--accent); }
+/* Index page editor: rows dragged by their handle (public/app.js) */
+.dir-address { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.dir-address > :first-child { flex: 1; min-width: 220px; }
+.dir-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.dir-row { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px 10px 6px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; }
+.dir-row.off .dir-main > .who, .dir-row.off .dir-heading { opacity: 0.5; }
+.dir-row.heading { background: color-mix(in srgb, var(--accent) 7%, var(--surface)); }
+.dir-row.dragging { box-shadow: 0 10px 28px rgb(0 0 0 / 0.18); border-color: var(--accent); position: relative; z-index: 1; }
+.dir-handle { flex: none; display: grid; place-items: center; width: 32px; height: 36px; padding: 0; color: var(--muted); background: none; border-radius: 6px; cursor: grab; touch-action: none; }
+.dir-handle:hover, .dir-handle:focus-visible { color: var(--text); background: var(--bg); }
+.dir-row.dragging .dir-handle { cursor: grabbing; }
+.dir-main { flex: 1; min-width: 0; display: grid; gap: 4px; padding-top: 4px; }
+.dir-sub { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dir-heading { font-weight: 800; text-transform: uppercase; letter-spacing: 0.06em; font-size: 13px; padding-top: 6px; }
+.dir-link-icon { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 50%; flex: none; background: color-mix(in srgb, var(--accent) 14%, var(--surface)); color: var(--accent); }
+.dir-tags { display: flex; gap: 6px; flex-wrap: wrap; }
+.dir-tags:empty { display: none; }
+.dir-edit summary { cursor: pointer; color: var(--accent); font-size: 13px; width: fit-content; }
+.dir-edit[open] { display: grid; gap: 10px; padding: 8px 0 4px; }
+.dir-edit-form { display: grid; gap: 10px; max-width: 480px; }
+.dir-toggle { flex: none; padding-top: 4px; }
+.dir-status { min-height: 1.4em; margin: 6px 0 0; }
+.dir-add { margin-top: 20px; }
+.dir-fieldset { border: 0; padding: 0; margin: 0; display: grid; gap: 8px; }
+.dir-fieldset legend { padding: 0; margin-bottom: 6px; font-size: 14px; }
+.dir-image-preview { max-width: 100%; max-height: 160px; border-radius: 8px; object-fit: cover; }
 .email-editor { display: grid; gap: 24px; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); align-items: start; }
 iframe.email-preview { width: 100%; height: 720px; border: 1px solid var(--border); border-radius: 10px; background: #f3f3f0; }
 .placeholders code { font-size: 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 0 5px; margin: 2px 2px 2px 0; display: inline-block; }
@@ -515,6 +546,9 @@ a.lp-event:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px
 .lp-footer { display: flex; align-items: center; justify-content: center; gap: 8px; color: var(--muted); font-size: 13px; font-weight: 600; }
 .lp-footer img { height: 22px; width: auto; border-radius: 4px; }
 .lp-missing { padding-top: 22vh; }
+.lp-section { margin: 14px 4px 0; font-size: 13px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.lp-section:first-child { margin-top: 0; }
+.lp-link-icon { display: grid; place-items: center; background: color-mix(in srgb, var(--accent) 16%, var(--surface)); color: var(--accent); }
 .lp-people { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
 .lp-person { display: flex; align-items: center; gap: 14px; padding: 12px 16px 12px 12px; color: var(--text); text-decoration: none; background: var(--surface); border: 1px solid color-mix(in srgb, var(--text) 10%, transparent); border-radius: 18px; box-shadow: 0 1px 2px rgb(0 0 0 / 0.06), 0 8px 24px rgb(0 0 0 / 0.08); transition: transform 0.18s ease; -webkit-tap-highlight-color: transparent; }
 .lp-person:hover { transform: translateY(-2px); }
@@ -1388,6 +1422,20 @@ function RenameShortLink(props: { promoter: User }) {
   );
 }
 
+/** The two tabs of Promoter pages: each promoter's page, and the index page listing them all (/p). */
+export function PagesTabs(props: { current: 'pages' | 'index' }) {
+  return (
+    <nav class="tabs" aria-label="Promoter pages">
+      <a href="/admin/pages" aria-current={props.current === 'pages' ? 'page' : undefined}>
+        Each promoter's page
+      </a>
+      <a href="/admin/pages/index" aria-current={props.current === 'index' ? 'page' : undefined}>
+        Index page
+      </a>
+    </nav>
+  );
+}
+
 export function AdminPagesPage(props: {
   user: User;
   promoters: User[];
@@ -1399,6 +1447,7 @@ export function AdminPagesPage(props: {
   return (
     <Layout title="Promoter pages" user={props.user}>
       <h1>Promoter pages</h1>
+      <PagesTabs current="pages" />
       <p class="muted">
         Each promoter's public page lists their upcoming events, with their code in each link.{' '}
         {props.kutt ? 'The second link is the Kutt short link.' : 'Short links show here once Kutt is set up (KUTT_URL and KUTT_API_KEY).'}

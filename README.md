@@ -71,7 +71,13 @@ Every promoter has a public page at `<APP_URL>/p/<alias>`, like a link-in-bio pa
 - An event shows while it has one of the promoter's codes and leaves the page once it is over. Draft events are left out when the read-only role can read `events.status`; on a database set up before this, run `GRANT SELECT (status) ON events TO promoter_stats;` once (otherwise every event with a code shows, drafts included).
 - With Kutt, each page also gets a short link on the alias, like `outkzt.link/dj-max`, and the event buttons on it use the promoter's short links. Admins can give a page's short link another address on **Promoter pages** (**Change the Kutt link**): it is renamed in Kutt and keeps its clicks, the old address stops working, and the new one is kept when the link is updated or made again (another domain, or deleted in Kutt).
 - Pasted in a message or a post, the link shows the next event's cover and the promoter's name. Pages are marked `noindex` for search engines.
-- `<APP_URL>/p` lists every page that is not hidden, by name, each with its short link (or full link).
+- `<APP_URL>/p` is the index page: every promoter's page with its short link (or full link), like a link-in-bio page for the whole team. Admins arrange it on **Promoter pages → Index page**:
+  - Drag the rows by their handle to change the order (with a mouse, a finger, or the arrow keys once the handle is focused). The order is saved as soon as a row is dropped.
+  - **Hide** or **Show** each promoter. Promoters are never removed, only hidden: they are on the list as long as they have a page. A promoter who hides their own page leaves the index page too, and comes back where they were when they show it again.
+  - Add links (a web address, `mailto:` or `tel:`) and section titles in between. A section title with nothing shown under it is left off.
+  - Set the title, the text under it, and the background: the brand colour (the default), one colour, a gradient, or a photo (darkened so the text reads on it).
+  - Choose whether promoters who get a page are added at the end of the list or added hidden, to show when an admin chooses.
+  - Visitors see changes within a minute (the page is cached briefly).
 
 ### Short links (Kutt)
 

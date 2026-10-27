@@ -240,3 +240,84 @@ if (accountMenu) {
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('/sw.js').catch(() => {});
 }
+
+// Index page editor: drag a row by its handle (mouse or finger), or focus the handle and use the up and
+// down arrow keys. The new order is saved as soon as the row is dropped.
+const sortable = document.querySelector('[data-sortable]');
+if (sortable) {
+  const status = document.querySelector('[data-sort-status]');
+  const orderOf = () => [...sortable.children].map((row) => row.dataset.id).join(',');
+  let saved = orderOf();
+  // One save at a time, each sending the order as it is by then, so quick moves cannot land out of order.
+  let queue = Promise.resolve();
+  const save = () => (queue = queue.then(send));
+  const send = async () => {
+    const order = orderOf();
+    if (order === saved) return;
+    status.textContent = 'Saving…';
+    try {
+      const res = await fetch(sortable.dataset.sortable, {
+        method: 'POST',
+        headers: { 'content-type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ order }),
+      });
+      if (!res.ok) throw new Error(String(res.status));
+      saved = order;
+      status.textContent = 'Order saved.';
+    } catch {
+      status.textContent = 'The order could not be saved. Reload the page and try again.';
+    }
+  };
+
+  let dragging = null;
+  let scroll = 0;
+  const autoScroll = () => {
+    if (!dragging || !scroll) return;
+    window.scrollBy(0, scroll);
+    requestAnimationFrame(autoScroll);
+  };
+  sortable.addEventListener('pointerdown', (e) => {
+    const handle = e.target.closest('[data-drag-handle]');
+    if (!handle || e.button > 0) return;
+    e.preventDefault();
+    dragging = handle.closest('li');
+    dragging.classList.add('dragging');
+    handle.setPointerCapture(e.pointerId);
+  });
+  sortable.addEventListener('pointermove', (e) => {
+    if (!dragging) return;
+    // Before the first row whose middle is below the pointer, or at the end.
+    const before = [...sortable.children].find((row) => {
+      if (row === dragging) return false;
+      const box = row.getBoundingClientRect();
+      return e.clientY < box.top + box.height / 2;
+    });
+    if (before) {
+      if (dragging.nextElementSibling !== before) sortable.insertBefore(dragging, before);
+    } else if (sortable.lastElementChild !== dragging) sortable.appendChild(dragging);
+    // Near the top or bottom of the screen, scroll so long lists can be reordered too.
+    const edge = 60;
+    const next = e.clientY < edge ? -8 : e.clientY > window.innerHeight - edge ? 8 : 0;
+    if (next && !scroll) requestAnimationFrame(autoScroll);
+    scroll = next;
+  });
+  const drop = () => {
+    if (!dragging) return;
+    dragging.classList.remove('dragging');
+    dragging = null;
+    scroll = 0;
+    save();
+  };
+  sortable.addEventListener('pointerup', drop);
+  sortable.addEventListener('pointercancel', drop);
+  sortable.addEventListener('keydown', (e) => {
+    const handle = e.target.closest('[data-drag-handle]');
+    if (!handle || (e.key !== 'ArrowUp' && e.key !== 'ArrowDown')) return;
+    e.preventDefault();
+    const row = handle.closest('li');
+    if (e.key === 'ArrowUp' && row.previousElementSibling) sortable.insertBefore(row, row.previousElementSibling);
+    else if (e.key === 'ArrowDown' && row.nextElementSibling) sortable.insertBefore(row.nextElementSibling, row);
+    handle.focus();
+    save();
+  });
+}

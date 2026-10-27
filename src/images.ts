@@ -22,9 +22,14 @@ export const maxUploadBytes = 15 * 1024 * 1024;
 export const maxImageSide = 12_000;
 export const maxImagePixels = 50_000_000;
 
-export type ImageKind = 'photo' | 'logo';
-// Profile photos are shown as circles of at most 120 px (on high-density screens too); the logo at 36 px high.
-const sizes = { photo: { width: 512, height: 512, fit: 'cover' }, logo: { width: 600, height: 300, fit: 'inside' } } as const;
+export type ImageKind = 'photo' | 'logo' | 'background';
+// Profile photos are shown as circles of at most 120 px (on high-density screens too); the logo at 36 px high;
+// the index page's background fills a screen.
+const sizes = {
+  photo: { width: 512, height: 512, fit: 'cover' },
+  logo: { width: 600, height: 300, fit: 'inside' },
+  background: { width: 2000, height: 2000, fit: 'inside' },
+} as const;
 
 // One image at a time: decoding a large photo takes memory, and uploads are rare.
 sharp.cache(false);
