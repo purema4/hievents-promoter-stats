@@ -130,7 +130,6 @@ import {
   isTeamLead,
   keepTeamHistory,
   leaveTeams,
-  sameTeam,
   setTeamCommission,
   setTeamLead,
   teamCommission,
@@ -1192,11 +1191,11 @@ app.post('/account/security/2fa/:action{off|new-codes}', async (c) => {
   return renderSecurity(c, { recoveryCodes: newRecoveryCodes(user.id) });
 });
 
-// Promoters see their own photo and their team's; admins see everyone's.
+// Promoters see their own photo, their team lead's and, for a team lead, their promoters'; admins see everyone's.
 app.get('/avatar/:userId', async (c) => {
   const viewer = c.get('user');
   const userId = Number(c.req.param('userId'));
-  if (viewer.id !== userId && !viewer.is_admin && !teamMember(viewer, userId) && !sameTeam(viewer, userId)) return c.notFound();
+  if (viewer.id !== userId && !viewer.is_admin && !teamMember(viewer, userId) && teamLeadOf(viewer)?.id !== userId) return c.notFound();
   return sendStored(c, await deliverAvatar(userId), 'private, max-age=604800');
 });
 
@@ -1814,8 +1813,8 @@ async function renderTeam(c: Context<Env>, lead: User, basePath: string, memberH
 }
 
 // Team leads: their team's sales, and each promoter's dashboard as an admin sees it. Nothing to act on.
-// A promoter on a team sees the team's tickets and sales, their team lead's included, but no
-// one's commission and no one else's dashboard.
+// A promoter on a team sees the team's total tickets and sales, their team lead's included, and their
+// own, but not who else is on the team or what they sold, no commission and no one else's dashboard.
 app.get('/team', async (c) => {
   const user = c.get('user');
   if (isTeamLead(user)) return renderTeam(c, user, '/team', (u) => `/team/${u.id}`);

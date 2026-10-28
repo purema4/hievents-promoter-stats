@@ -61,7 +61,7 @@ describeIntegration('teams', () => {
 
     // Everyone involved is told.
     expect(text(await lead.client.page('/notifications'))).toContain('You are a team lead');
-    expect(text(await ana.client.page('/notifications'))).toContain(`${lead.name} is your team lead and can now see your sales. Your team's tickets and sales are under My team.`);
+    expect(text(await ana.client.page('/notifications'))).toContain(`${lead.name} is your team lead and can now see your sales. Your team's total tickets and sales are under My team.`);
     expect(await lead.client.page('/')).toContain('<a href="/team">My team</a>');
   });
 
@@ -73,6 +73,7 @@ describeIntegration('teams', () => {
     const html = await lead.client.page('/team?range=all');
     expect(stats(html).get('Tickets sold by the team')).toBe('11');
     expect(stats(html).get('Promoters on the team')).toBe('2');
+    expect(html).toContain('class="leaderboard"'); // the team lead sees what each promoter sold
     expect(html).toContain(`href="/team/${ana.id}"`);
     expect(html).toContain(`href="/team/${ben.id}"`);
     expect(text(html)).not.toContain(outsider.name);
@@ -114,28 +115,33 @@ describeIntegration('teams', () => {
 
   });
 
-  test("promoters see their whole team's tickets and sales, team lead included, but no money", async () => {
+  test("promoters see their team's totals and their own sales, but not who else is on the team or what they sold", async () => {
     expect(await ana.client.page('/')).toContain('<a href="/team">My team</a>');
     const html = await ana.client.page('/team?range=all');
     expect(text(html)).toContain(`Sales by your team, ${lead.name} (your team lead) and you included, all time.`);
     expect(stats(html).get('Tickets sold by the team')).toBe('11');
     expect(stats(html).get('Tickets sold by you')).toBe('10');
-    expect(text(html)).toContain(ben.name);
+    expect(stats(html).has('Your sales at full price')).toBe(true);
+    expect(stats(html).get('Promoters on the team')).toBe('2');
     expect(text(html)).toContain(lead.name);
+    // Not who else is on the team, nor what anyone sold: no ranking, no list of who has not sold.
+    expect(text(html)).not.toContain(ben.name);
     expect(text(html)).not.toContain(outsider.name);
-    expect(html).toContain('<span class="lead-tag">Team lead</span>');
-    expect(html).toContain('<span class="lead-tag">You</span>');
+    expect(html).not.toContain('class="leaderboard"');
+    expect(text(html)).not.toContain('No codes yet');
+    expect(text(html)).not.toContain('Last sale');
     // No one's commission, team commission or dashboard.
     const main = html.slice(html.indexOf('<main>'));
     for (const word of ['Commission', 'commission', 'Owed']) expect(main).not.toContain(word);
     expect(main).not.toContain(`href="/team/`);
     expect(main).not.toContain('href="/admin');
-    // Sorting by commission is not offered, and asking for it sorts by tickets.
-    expect(await ana.client.page('/team?range=all&sort=commission')).toContain('aria-current="true">Tickets</a>');
+    // Nothing to sort by, and asking for it shows no ranking either.
+    expect(await ana.client.page('/team?range=all&sort=sales')).not.toContain('sort=');
     for (const path of [`/team/${ben.id}`, `/team/${ana.id}`, `/team/${ben.id}/events/1`]) expect((await ana.client.get(path)).status).toBe(403);
-    // Their teammates' and team lead's photos, but no one else's.
+    // Their team lead's photo, but not their teammates' (Ana has one) or anyone else's.
     await uploadPhoto(lead.client);
     expect((await ana.client.get(`/avatar/${lead.id}`)).status).toBe(200);
+    expect((await ben.client.get(`/avatar/${ana.id}`)).status).toBe(404);
     expect((await ana.client.get(`/avatar/${outsider.id}`)).status).toBe(404);
 
     // Someone on no team has no team page.

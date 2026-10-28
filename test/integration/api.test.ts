@@ -323,11 +323,16 @@ describeIntegration('API, MCP and connected apps', () => {
       const listed = (await json(await call(key, '/api/v1/promoters'))).promoters as Record<string, unknown>[];
       expect(listed.map((p) => p.id).sort()).toEqual([lead.id, member.id].sort());
       expect(listed.every((p) => !('email' in p) && !('commission' in p))).toBe(true);
-      // A promoter on the team sees the team board without anyone's commission.
+      // A promoter on the team sees the team's totals and their own row, not the team lead's or anyone's commission.
       const memberKey = await makeKey(member.client);
       const board = await json(await call(memberKey, '/api/v1/leaderboard?range=all&sort=commission'));
       expect(board).not.toHaveProperty('commission_cents');
+      expect(board).toHaveProperty('tickets');
+      expect(board.promoters.every((p: Record<string, unknown>) => p.promoter_id === member.id)).toBe(true);
       expect(board.promoters.every((p: Record<string, unknown>) => !('commission_cents' in p) && !('owed_cents' in p))).toBe(true);
+      // The team lead still sees everyone on their team.
+      const leadBoard = await json(await call(key, '/api/v1/leaderboard?range=all'));
+      expect(leadBoard).toHaveProperty('commission_cents');
     });
 
     test('API3: fields that are not offered (like is_admin) are refused, not ignored', async () => {

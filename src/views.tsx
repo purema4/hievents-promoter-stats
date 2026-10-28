@@ -2926,11 +2926,8 @@ function BoardTable(props: {
   sortHref: (s: Sort) => string;
   href?: (u: User) => string; // none: names are not links
   owed?: boolean;
-  commission?: boolean; // false: no money at all (a promoter looking at their team)
   leadId?: number; // tagged "Team lead" on team pages
-  youId?: number; // tagged "You"
 }) {
-  const money = props.commission !== false;
   const { board, sort, sortHref } = props;
   const cur = board.currency;
   return (
@@ -2946,11 +2943,9 @@ function BoardTable(props: {
             <th class="num">
               <a href={sortHref('sales')} aria-current={sort === 'sales' ? 'true' : undefined}>Sales</a>
             </th>
-            {money && (
-              <th class="num">
-                <a href={sortHref('commission')} aria-current={sort === 'commission' ? 'true' : undefined}>Commission</a>
-              </th>
-            )}
+            <th class="num">
+              <a href={sortHref('commission')} aria-current={sort === 'commission' ? 'true' : undefined}>Commission</a>
+            </th>
             {props.owed && <th class="num">Owed</th>}
             <th>Last sale</th>
           </tr>
@@ -2968,7 +2963,6 @@ function BoardTable(props: {
                         {e.user.name}
                         <LevelBadge level={e.level} tiny />
                         {e.user.id === props.leadId && <span class="lead-tag">Team lead</span>}
-                        {e.user.id === props.youId && <span class="lead-tag">You</span>}
                       </span>
                     </>
                   );
@@ -2983,7 +2977,7 @@ function BoardTable(props: {
               </td>
               <td class="num">{e.tickets}</td>
               <td class="num">{formatMoney(e.fullPrice, cur)}</td>
-              {money && <td class="num">{formatMoney(e.commission, cur)}</td>}
+              <td class="num">{formatMoney(e.commission, cur)}</td>
               {props.owed && <td class="num">{formatMoney(e.owed, cur)}</td>}
               <td class="muted">{e.lastSale ?? 'No sales yet'}</td>
             </tr>
@@ -3212,8 +3206,8 @@ export function AdminDashboardPage(props: { user: User; board: Leaderboard; team
 }
 
 // A team's sales, team lead included. Three views: the team lead's on /team (with their team
-// commission and each promoter's dashboard), a promoter's on /team (tickets and sales only, no one's
-// commission or dashboard), and an admin's on /admin/teams/:id. Nothing to act on.
+// commission and each promoter's dashboard), a promoter's on /team (the team's totals and their own,
+// but not who else is on the team or what they sold), and an admin's on /admin/teams/:id. Nothing to act on.
 export function TeamPage(props: {
   user: User;
   lead: User;
@@ -3237,7 +3231,7 @@ export function TeamPage(props: {
   const percent = teamCommissionPercentFor(props.lead);
   const team = props.team.find((t) => t.currency === cur) ?? { sales: 0, commission: 0 };
   const href = props.memberHref ? (u: User) => (u.id === props.lead.id && self ? '/' : props.memberHref!(u)) : undefined;
-  const yours = board.entries.find((e) => e.user.id === props.user.id)?.tickets ?? 0;
+  const yours = board.entries.find((e) => e.user.id === props.user.id) ?? { tickets: 0, fullPrice: 0 };
   const intro = {
     lead: 'Sales by your team, you included',
     member: `Sales by your team, ${props.lead.name} (your team lead) and you included`,
@@ -3265,7 +3259,7 @@ export function TeamPage(props: {
       <div class="grid">
         {mode === 'member' ? (
           <div class="card stat highlight">
-            <div class="value">{yours}</div>
+            <div class="value">{yours.tickets}</div>
             <div class="label">Tickets sold by you</div>
           </div>
         ) : (
@@ -3284,6 +3278,12 @@ export function TeamPage(props: {
           <div class="value">{formatMoney(board.totals.fullPrice, cur)}</div>
           <div class="label">Sales at full price</div>
         </div>
+        {mode === 'member' && (
+          <div class="card stat">
+            <div class="value">{formatMoney(yours.fullPrice, cur)}</div>
+            <div class="label">Your sales at full price</div>
+          </div>
+        )}
         <div class="card stat">
           <div class="value">{props.members.length}</div>
           <div class="label">{props.members.length === 1 ? 'Promoter' : 'Promoters'} on the team</div>
@@ -3307,20 +3307,21 @@ export function TeamPage(props: {
         ticketsOnly={mode === 'member'}
       />
 
-      <h2>{mine ? 'Your team' : 'The team'}</h2>
-      {props.members.length === 0 && <p class="muted">{self ? 'No promoters on your team yet. An admin adds them.' : 'No promoters on this team yet.'}</p>}
-      {board.entries.length > 0 && (
+      {mode !== 'member' && <h2>{mine ? 'Your team' : 'The team'}</h2>}
+      {props.members.length === 0 && mode !== 'member' && (
+        <p class="muted">{self ? 'No promoters on your team yet. An admin adds them.' : 'No promoters on this team yet.'}</p>
+      )}
+      {/* A promoter sees the team's totals, not who else is on it or what they sold: that is for the team lead. */}
+      {mode !== 'member' && board.entries.length > 0 && (
         <BoardTable
           board={board}
           sort={sort}
           sortHref={sortHref}
           href={href}
           leadId={props.lead.id}
-          youId={mode === 'member' ? props.user.id : undefined}
-          commission={mode !== 'member'}
         />
       )}
-      {notSelling.length > 0 && (
+      {mode !== 'member' && notSelling.length > 0 && (
         <p class="muted">
           No codes yet:{' '}
           {notSelling.map((m, i) => (
@@ -3666,8 +3667,8 @@ export function AdminTeamsPage(props: { user: User; leads: { lead: User; members
       <h1>Teams</h1>
       <p class="muted">
         A team lead sees the sales of the promoters on their team, and nothing else: payouts and rewards stay with each
-        promoter and the admins. Promoters are told when they join a team, and see their team's tickets and sales (not
-        commission) under My team. A team lead's team commission is paid on
+        promoter and the admins. Promoters are told when they join a team, and see their team's total tickets and sales
+        under My team, but not who else is on the team or what they sold. A team lead's team commission is paid on
         their promoters' full-price sales from the day each joined, on top of the promoters' own commission, and goes to
         the team lead's balance.
       </p>

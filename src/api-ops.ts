@@ -377,7 +377,7 @@ export const ops: Op[] = [
     name: 'get_leaderboard',
     title: 'Leaderboard',
     description:
-      'Promoters ranked for a period. Admins see everyone; team leads their team; promoters on a team see their team\'s tickets and sales (no commission).',
+      'Promoters ranked for a period. Admins see everyone; team leads their team; promoters on a team see their team\'s totals and only their own row (no commission).',
     method: 'GET',
     path: '/leaderboard',
     who: 'team',
@@ -390,6 +390,7 @@ export const ops: Op[] = [
     run: async ({ user }, input: { range: Range; sort: Sort }) => {
       const lead = isTeamLead(user) ? user : teamLeadOf(user);
       const withMoney = !!user.is_admin || isTeamLead(user);
+      // A promoter on a team gets the team's totals but not what anyone else sold.
       const sort = !withMoney && input.sort === 'commission' ? 'tickets' : input.sort;
       const board = await leaderboard(input.range, sort, user.is_admin ? undefined : [lead!, ...teamMembers(lead!.id)]);
       return {
@@ -399,7 +400,7 @@ export const ops: Op[] = [
         tickets: board.totals.tickets,
         full_price_cents: board.totals.fullPrice,
         ...(withMoney ? { commission_cents: board.totals.commission } : {}),
-        promoters: board.entries.map((e, i) => ({
+        promoters: board.entries.flatMap((e, i) => (withMoney || e.user.id === user.id ? [{
           rank: i + 1,
           promoter_id: e.user.id,
           name: e.user.name,
@@ -410,7 +411,7 @@ export const ops: Op[] = [
           last_sale: e.lastSale,
           level: e.level.name,
           tickets_sold_all_time: e.totalSold,
-        })),
+        }] : [])),
       };
     },
   },

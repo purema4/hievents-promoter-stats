@@ -127,13 +127,6 @@ export function teamLeadOf(user: User): User | null {
   return lead && isTeamLead(lead) ? lead : null;
 }
 
-/** True when the other person is on the same team as this promoter (their team lead included). */
-export function sameTeam(viewer: User, otherId: number): boolean {
-  const lead = teamLeadOf(viewer);
-  if (!lead || !Number.isInteger(otherId)) return false;
-  return otherId === lead.id || findUser(otherId)?.team_lead_id === lead.id;
-}
-
 export type TeamResult = 'ok' | 'team_admin' | 'team_not_lead' | 'team_is_lead' | 'team_self';
 
 /** Makes a promoter a team lead, or not. A new team lead leaves their own team; one who steps down leaves their team without a lead. */
@@ -187,7 +180,7 @@ export function assignTeam(user: User, leadId: number | null): TeamResult {
   // They are told who can see their sales.
   notify(user.id, {
     title: 'You joined a team',
-    body: `${lead.name} is your team lead and can now see your sales. Your team's tickets and sales are under My team.`,
+    body: `${lead.name} is your team lead and can now see your sales. Your team's total tickets and sales are under My team.`,
     link: '/team',
   });
   return 'ok';
