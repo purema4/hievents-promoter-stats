@@ -1,4 +1,4 @@
-FROM oven/bun:1.3.4-alpine
+FROM oven/bun:1.4.4-alpine
 
 # Pick up Alpine security fixes released after the base image was built.
 RUN apk upgrade --no-cache
