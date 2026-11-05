@@ -1,0 +1,62 @@
+# Demo environment: its own containers, database and fake inbox, next to the dev stack and separate from it.
+#   docker compose -p promoterstats-demo -f docker-compose.demo.yml up -d --build --wait
+# Then open http://127.0.0.1:3100 and pick a role in the bar at the bottom. Fake inbox: http://127.0.0.1:8028
+# Stop it with: docker compose -p promoterstats-demo -f docker-compose.demo.yml down -v
+# (-p is needed: COMPOSE_PROJECT_NAME in .env would otherwise put it in the dev project.)
+#
+# Anyone who reaches the app can become admin from that bar, so the ports only listen on this machine.
+# Do not publish them, and never point this at a real Hi.Events database: demo/guard.ts refuses to start.
+services:
+  demo-db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: hi-events
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      # The dev schema and read-only role; demo/seed.ts replaces the sample rows.
+      - ./dev/seed.sql:/docker-entrypoint-initdb.d/01-seed.sql:ro
+      - ./sql/readonly-role.sql:/docker-entrypoint-initdb.d/02-role.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "PGPASSWORD=change-me psql -h 127.0.0.1 -U promoter_stats -d hi-events -tAc 'SELECT 1 FROM promo_codes LIMIT 1'"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  demo-cdn:
+    image: nginx:1.29-alpine
+    volumes:
+      - ./dev/covers:/usr/share/nginx/html:ro
+
+  demo-mailpit:
+    image: axllent/mailpit:v1.27
+    ports:
+      - "127.0.0.1:8028:8025"
+
+  demo:
+    build:
+      context: .
+      dockerfile: demo/Dockerfile
+    image: promoter-stats-demo
+    # "Reset" in the bar ends the process, and every start seeds the data again.
+    restart: on-failure
+    environment:
+      APP_URL: http://127.0.0.1:3100
+      HIEVENTS_DATABASE_URL: postgres://promoter_stats:change-me@demo-db:5432/hi-events
+      DEMO_DATABASE_URL: postgres://postgres:postgres@demo-db:5432/hi-events
+      ADMIN_EMAIL: admin@example.com
+      ADMIN_PASSWORD: demo-password-123
+      COOKIE_SECURE: "false"
+      SMTP_HOST: demo-mailpit
+      SMTP_PORT: "1025"
+      MAIL_FROM: Demo Nights <promoters@example.com>
+      HIEVENTS_IMAGE_BASE_URL: http://demo-cdn
+    ports:
+      - "127.0.0.1:3100:3000"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/healthz"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    depends_on:
+      demo-db:
+        condition: service_healthy

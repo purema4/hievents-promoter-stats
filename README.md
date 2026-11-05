@@ -316,6 +316,22 @@ This uses `NGROK_AUTHTOKEN`, `NGROK_DOMAIN` and `NGROK_URL` from `~/hi.events/do
 
 The app is public while the tunnel runs: use a strong `ADMIN_PASSWORD`, never the sample one.
 
+## Demo environment
+
+For showing the app to someone: made-up promoters, teams, events and sales, plus a debug bar to change roles and make things happen in one click. It runs in its own containers, next to the dev stack if you like:
+
+```bash
+docker compose -p promoterstats-demo -f docker-compose.demo.yml up -d --build --wait
+```
+
+Open http://127.0.0.1:3100 and pick a role in the bar at the bottom of the page: admin, team lead, promoter on a team, promoter on their own, or a new promoter who has not done the welcome steps. Emails land in the fake inbox at http://127.0.0.1:8028. Stop it with `docker compose -p promoterstats-demo -f docker-compose.demo.yml down -v`. Keep the `-p`: `COMPOSE_PROJECT_NAME` in `.env` would otherwise put these containers in the dev project.
+
+**Actions** in the bar works for anyone on the list: sign in as them, add tickets, sell up to their next level, request a payout or a reward, or add a burst of random sales for everyone. Sales go into the demo's Hi.Events database and the milestone check runs right away, so notifications and admin alerts show up at once. **Réinitialiser la démo** restarts the app and seeds everything again in a few seconds.
+
+The data is rebuilt on every start, with dates relative to today, and the numbers are fixed so there is always something to show: Noah is 4 tickets from Platinum, Maya and Léa have payout requests waiting, Priya has a reward request waiting.
+
+None of it can reach production: everything is in `demo/`, which only `demo/Dockerfile` copies. The production `Dockerfile` copies `src` and `public`, nothing in `src` refers to the demo (`test/unit/demo-isolation.test.ts` checks both), and `demo/server.tsx` wraps the app rather than changing it. Anyone who reaches the demo can become admin, so its ports only listen on this machine, and `demo/guard.ts` refuses to start unless both database URLs point at the `demo-db` container. Do not publish those ports.
+
 ## File storage (S3 and CDN)
 
 Profile photos and the logo are kept in the `promoter-data` volume and served by the app, unless you set up a bucket:
