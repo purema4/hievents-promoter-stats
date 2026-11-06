@@ -674,7 +674,7 @@ export function EventPage(props: {
             <div class="muted">
               {rewardCount(reward, reward.earned)} earned{reward.used > 0 ? `, ${reward.used} requested` : ''}
               {reward.nextIn !== null ? ` · ${plural(reward.nextIn, 'more sale')} for the next one` : ''}
-              {reward.available > 0 ? ' · Use them here or roll them over to another event before this one is over.' : ''}
+              {reward.available > 0 ? ' · Use them here or put them in your bank before this one is over.' : ''}
             </div>
             {reward.nextIn !== null && <Progress percent={reward.progress} label={`Progress to the next: ${reward.type.label_en}`} />}
           </div>
@@ -804,7 +804,6 @@ function ShopItem(props: { t: TicketReward; ticketEvents: TicketEvent[] }) {
   const { t } = props;
   const key = `${t.event.id}.${t.type.key}`;
   const name = t.type.key === 'free_tickets' ? 'Free tickets' : t.type.label_en;
-  const others = props.ticketEvents.filter((e) => e.id !== t.event.id);
   const ready = t.available > 0;
   return (
     <div class={`card shop-item${ready ? '' : ' locked'}`} data-shop-item data-name={`${name} · ${t.event.title}`}>
@@ -835,17 +834,13 @@ function ShopItem(props: { t: TicketReward; ticketEvents: TicketEvent[] }) {
             Guest names <span class="muted">(optional, for the extras)</span>
             <input name={`guests.${key}`} maxlength={100} placeholder="Ana, Ben" />
           </label>
-          {others.length > 0 && (
-            <label>
-              Use them for
-              <select name={`for.${key}`}>
-                <option value="">{t.event.title}</option>
-                {others.map((e) => (
-                  <option value={String(e.id)}>Roll over to {e.title}</option>
-                ))}
-              </select>
-            </label>
-          )}
+          <label>
+            Use them for
+            <select name={`for.${key}`}>
+              <option value="">{t.event.title}</option>
+              <option value="bank">My bank, for a later event</option>
+            </select>
+          </label>
           <button type="button" class="secondary small" data-add hidden>
             Add to cart
           </button>
@@ -868,21 +863,82 @@ function ShopItem(props: { t: TicketReward; ticketEvents: TicketEvent[] }) {
  * per event, and merch); the promoter adds them to a cart and sends it in one request. Without scripts
  * the "How many" boxes are the cart.
  */
+/** Rewards in the bank: their type stays; they are asked for an upcoming event of the promoter's choice. */
+function BankItem(props: { b: Rewards['bank'][number]; ticketEvents: TicketEvent[] }) {
+  const { b } = props;
+  const key = `bank.${b.type.key}`;
+  const name = b.type.key === 'free_tickets' ? 'Free tickets' : b.type.label_en;
+  const ready = b.balance > 0 && props.ticketEvents.length > 0;
+  return (
+    <div class={`card shop-item bank-item${ready ? '' : ' locked'}`} data-shop-item data-name={`${name} · from my bank`}>
+      <div class="shop-item-head">
+        <span class="chip">{name}</span>
+        <span class="shop-count">
+          <span class="big">{b.balance}</span> <span class="muted">in the bank</span>
+        </span>
+      </div>
+      <div>
+        <strong>Your bank</strong>
+        <div class="muted">
+          Kept until you use them, on any upcoming event.
+          {b.pending > 0 && ` ${b.pending} more waiting for the team to bank.`}
+        </div>
+      </div>
+      {ready ? (
+        <>
+          <label>
+            For which event
+            <select name={`event.${key}`}>
+              {props.ticketEvents.map((e) => (
+                <option value={String(e.id)}>{e.title}</option>
+              ))}
+            </select>
+          </label>
+          <label>
+            How many
+            <select name={`qty.${key}`} data-qty>
+              {Array.from({ length: b.balance + 1 }, (_, n) => (
+                <option value={String(n)}>{n}</option>
+              ))}
+            </select>
+          </label>
+          <label class="check">
+            <input type="checkbox" name={`me.${key}`} value="1" checked /> One of them is for me
+          </label>
+          <label>
+            Guest names <span class="muted">(optional, for the extras)</span>
+            <input name={`guests.${key}`} maxlength={100} placeholder="Ana, Ben" />
+          </label>
+          <button type="button" class="secondary small" data-add hidden>
+            Add to cart
+          </button>
+        </>
+      ) : (
+        <p class="muted">{b.balance > 0 ? 'No upcoming event to use them for yet.' : 'Nothing in the bank yet.'}</p>
+      )}
+    </div>
+  );
+}
+
 function RewardsShop(props: { rewards: Rewards; ticketEvents: TicketEvent[] }) {
-  const { tickets, merch } = props.rewards;
+  const { tickets, merch, bank } = props.rewards;
   const rules = rewardRules();
   const showMerch = trackOn(rules.merch) || merch.earned > 0;
-  if (tickets.length === 0 && !showMerch) return null;
+  if (tickets.length === 0 && bank.length === 0 && !showMerch) return null;
   const order = [...tickets].sort((a, b) => Number(b.available > 0) - Number(a.available > 0));
   return (
     <section id="rewards">
       <h2>Rewards shop</h2>
       <p class="muted">
         What your sales earned. Add what you want to your cart and send it: the team confirms each item. Rewards for an
-        event are lost once it is over, so ask for them or roll them over to another event before then.
+        event are lost once it is over: ask for them, or put them in your bank before then. Banked rewards keep their type
+        and wait for any later event.
       </p>
       <form class="shop" method="post" action="/rewards/order" data-shop>
         <div class="shop-grid">
+          {bank.map((b) => (
+            <BankItem b={b} ticketEvents={props.ticketEvents} />
+          ))}
           {order.map((t) => (
             <ShopItem t={t} ticketEvents={props.ticketEvents} />
           ))}

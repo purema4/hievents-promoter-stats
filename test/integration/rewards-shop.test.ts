@@ -46,14 +46,14 @@ describeIntegration('rewards shop', () => {
     expect(text(page)).toContain('Your cart');
   });
 
-  test('a whole cart in one request: for me and a guest, rolled over, and merch', async () => {
+  test('a whole cart in one request: for me and a guest, into the bank, and merch', async () => {
     const res = await order({
       'qty.1.vip_tickets': '2',
       'me.1.vip_tickets': '1',
       'guests.1.vip_tickets': 'Ana',
       'qty.1.free_tickets': '1',
       'me.1.free_tickets': '1',
-      'for.1.free_tickets': '2', // rolled over to Winter Opening
+      'for.1.free_tickets': 'bank',
       'qty.merch': '1',
       'merch.details': 'Hoodie, size M',
     });
@@ -64,13 +64,13 @@ describeIntegration('rewards shop', () => {
       )
       .all();
     expect(rows).toEqual([
-      { kind: 'ticket', reward_type: null, event_title: 'Winter Opening', source_event_title: 'Warehouse Night', quantity: 1, details: maya.name },
+      { kind: 'ticket', reward_type: null, event_title: null, source_event_title: 'Warehouse Night', quantity: 1, details: maya.name },
       { kind: 'ticket', reward_type: 'vip_tickets', event_title: 'Warehouse Night', source_event_title: 'Warehouse Night', quantity: 2, details: `${maya.name} + 1 guest: Ana` },
       { kind: 'merch', reward_type: null, event_title: null, source_event_title: null, quantity: 1, details: 'Hoodie, size M' },
     ]);
     // One email to the admins for the whole cart.
     const mail = await waitForSubject(server.adminEmail, `Reward request from ${maya.name} (${maya.email})`);
-    expect(mail.Text).toContain('1 free ticket for Winter Opening, rolled over from Warehouse Night; 2 VIP for Warehouse Night; Merch');
+    expect(mail.Text).toContain('1 free ticket into the bank, from Warehouse Night; 2 VIP for Warehouse Night; Merch');
     // What was asked for is no longer ready.
     expect(text((await maya.client.page('/payouts')).split('data-name="VIP · Warehouse Night"')[1]!.split('data-shop-item')[0]!)).toContain('All 2 requested.');
   });
@@ -92,5 +92,42 @@ describeIntegration('rewards shop', () => {
     const before = requests();
     expect((await order({ 'qty.merch': '1', 'merch.details': '' })).status).toBe(400);
     expect(requests()).toBe(before);
+  });
+
+  test('the bank: accepted by the team, kept with its type, used on any upcoming event', async () => {
+    const queue = await admin.page('/admin/payouts');
+    expect(text(queue)).toContain('1 free ticket into the bank, from Warehouse Night');
+    // Waiting for the team: shown, not usable yet.
+    let page = await maya.client.page('/payouts');
+    expect(text(page)).toContain('1 more waiting for the team to bank');
+    expect(page).not.toContain('name="qty.bank.free_tickets"');
+
+    const id = queue.match(/1 free ticket into the bank[\s\S]*?action="\/admin\/rewards\/(\d+)\/fulfil"/)![1]!;
+    expect(location(await admin.post(`/admin/rewards/${id}/fulfil`, { admin_note: '' }))).toBe('/admin/payouts?ok=reward_fulfilled');
+    page = await maya.client.page('/payouts');
+    expect(text(page.slice(page.indexOf('data-name="Free tickets · from my bank"')).split('data-shop-item')[0]!)).toMatch(/1 in the bank/);
+
+    // Too many out of the bank: refused, nothing saved.
+    const before = requests();
+    expect((await order({ 'qty.bank.free_tickets': '2', 'event.bank.free_tickets': '2' })).status).toBe(400);
+    expect(requests()).toBe(before);
+    // Used for Winter Opening: still a free ticket.
+    expect(location(await order({ 'qty.bank.free_tickets': '1', 'event.bank.free_tickets': '2', 'me.bank.free_tickets': '1' }))).toBe('/payouts?ok=reward_ordered#rewards');
+    expect(text(await admin.page('/admin/payouts'))).toContain('1 free ticket for Winter Opening, from the bank');
+    expect(await maya.client.page('/payouts')).not.toContain('name="qty.bank.free_tickets"');
+    // An event that is over, or no event at all, cannot take banked rewards.
+    db.query("INSERT INTO reward_requests (user_id, promoter_name, promoter_email, kind, event_id, source_event_id, source_event_title, quantity, reward_type, reward_label, status) VALUES (?, 'x', 'x', 'ticket', NULL, 1, 'Warehouse Night', 1, 'ga_list', 'GA list', 'fulfilled')").run(maya.id);
+    expect((await order({ 'qty.bank.ga_list': '1', 'event.bank.ga_list': '4' })).status).toBe(400);
+    expect(text(await (await maya.client.page('/payouts')))).toMatch(/GA list[^]*?1 in the bank/);
+  });
+
+  test('a bank request the team declines goes back to its event', async () => {
+    // Winter Opening's free ticket, asked for the bank, then declined.
+    expect(location(await order({ 'qty.2.free_tickets': '1', 'for.2.free_tickets': 'bank' }))).toBe('/payouts?ok=reward_ordered#rewards');
+    const queue = await admin.page('/admin/payouts');
+    const id = queue.match(/1 free ticket into the bank, from Winter Opening[\s\S]*?action="\/admin\/rewards\/(\d+)\/reject"/)![1]!;
+    await admin.post(`/admin/rewards/${id}/reject`, { admin_note: 'Use it on Winter Opening' });
+    const page = await maya.client.page('/payouts');
+    expect(text(page.slice(page.indexOf('data-name="Free tickets · Winter Opening"')).split('data-shop-item')[0]!)).toMatch(/1 ready/);
   });
 });

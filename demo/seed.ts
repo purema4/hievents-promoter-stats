@@ -274,9 +274,8 @@ async function addHistory(adminId: number, ids: Map<string, number>, eventIds: n
   const kai = await promoterData(person('Kai'));
   const [first, second] = kai.rewards.tickets.filter((t) => t.available > 0);
   if (first) requestReward(person('Kai'), kai.rewards, { kind: 'ticket', eventId: first.event.id, quantity: 1, details: '' });
-  // A roll over for the admins to accept or decline.
-  const later = kai.ticketEvents.find((e) => e.id !== first?.event.id && e.id !== second?.event.id);
-  if (second && later) requestReward(person('Kai'), kai.rewards, { kind: 'ticket', eventId: second.event.id, useFor: later, quantity: 1, details: '' });
+  // Into the bank, for the admins to accept or decline.
+  if (second) requestReward(person('Kai'), kai.rewards, { kind: 'ticket', eventId: second.event.id, toBank: true, quantity: 1, details: '' });
 
   createInvite(admin, { label: 'Spring street team', teamLeadId: null, maxUses: 20, days: 30 });
   createInvite(person('Maya'), { label: 'Maya’s crew', teamLeadId: ids.get('Maya')!, maxUses: null, days: null });

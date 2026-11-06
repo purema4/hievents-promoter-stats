@@ -1124,16 +1124,31 @@ app.post('/rewards/order', async (c) => {
     const key = `${t.event.id}.${t.type.key}`;
     const quantity = Number(field(`qty.${key}`) || 0);
     if (!quantity) continue;
-    const useFor = rolloverTarget(data, body[`for.${key}`]);
-    if (useFor === null) return renderPayouts(c, messages.not_available);
+    // "Use them for": this event, or the bank (the team accepts it; then it keeps until asked for).
+    const toBank = field(`for.${key}`) === 'bank';
     items.push({
       kind: 'ticket',
       eventId: t.event.id,
       rewardType: t.type.key,
-      useFor,
+      toBank,
       quantity,
       details: ticketsFor(user, quantity, field(`me.${key}`) === '1', field(`guests.${key}`)),
       ruleVersions: data.percent.events.get(t.event.id)?.versionIds,
+    });
+  }
+  // Out of the bank, for an upcoming event of their choice; the type stays.
+  for (const b of data.rewards.bank) {
+    const key = `bank.${b.type.key}`;
+    const quantity = Number(field(`qty.${key}`) || 0);
+    if (!quantity) continue;
+    const event = data.ticketEvents.find((e) => e.id === Number(field(`event.${key}`)));
+    if (!event) return renderPayouts(c, 'Pick the event to use your banked rewards for.');
+    items.push({
+      kind: 'ticket',
+      rewardType: b.type.key,
+      fromBank: event,
+      quantity,
+      details: ticketsFor(user, quantity, field(`me.${key}`) === '1', field(`guests.${key}`)),
     });
   }
   const merch = Number(field('qty.merch') || 0);

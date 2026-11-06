@@ -220,15 +220,14 @@ describeIntegration('payouts, rewards and changes by hand', () => {
       expect(text(await p.client.page('/payouts'))).toContain('Given');
     });
 
+    // The shop offers the bank instead; rolling over to one event stays possible through this route (the API).
     test('rolled over to another upcoming event, for an admin to accept or decline', async () => {
       const p = await newPromoter(server, admin, { codes: 'LUNA' }); // only on Warehouse Night (event 1)
       const page = await p.client.page('/payouts');
       const at = page.indexOf('name="for.1.free_tickets"');
       const picker = text(page.slice(at, page.indexOf('</select>', at)));
       expect(picker).toContain('Warehouse Night');
-      expect(picker).toContain('Roll over to Winter Opening');
-      expect(picker).not.toContain('Summer Rooftop'); // over
-      expect(picker).not.toContain('Secret Afterparty'); // a draft
+      expect(picker).toContain('My bank, for a later event');
       expect(text(page)).toContain('lost once it is over');
       const roll = (useFor: string) => p.client.post('/rewards/ticket', { event_id: '1', use_for: useFor, quantity: '1', details: '' });
       for (const refused of ['4', '5', '999']) expect((await roll(refused)).status).toBe(400);

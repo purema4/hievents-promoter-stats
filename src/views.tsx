@@ -608,6 +608,7 @@ ${chartCss}
 .shop-grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 240px), 1fr)); }
 .shop-item { display: grid; gap: 10px; align-content: start; }
 .shop-item.locked { opacity: 0.7; }
+.bank-item { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 6%, var(--surface)); }
 .shop-item-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
 .shop-count .big { font-size: 24px; font-weight: 650; font-variant-numeric: tabular-nums; }
 .shop-item label { display: grid; gap: 4px; font-size: 14px; }
