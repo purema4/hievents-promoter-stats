@@ -339,10 +339,22 @@ export async function createPromoter(admin: Client, options: { name?: string; co
 
 /** Emails the promoter an invite from the admin page (not rate limited) and returns its link and code. */
 export async function sendInvite(admin: Client, promoter: Promoter): Promise<{ token: string; code: string }> {
-  const before = (await emailsTo(promoter.email)).length;
+  const before = new Set((await emailsTo(promoter.email)).map((m) => m.ID));
   const res = await admin.post(`/admin/promoters/${promoter.id}/invite`);
   if (location(res) !== `/admin/promoters/${promoter.id}?ok=link_sent`) throw new Error(`Invite answered ${res.status} ${location(res)}`);
-  return signInDetails(await waitForEmail(promoter.email, before + 1));
+  // The new sign-in email, by its id: counting emails, or taking the newest, can pick an earlier one when
+  // two arrive within the same moment (Mailpit sorts by date) or a notification sent in the background.
+  const deadline = Date.now() + 15_000;
+  while (Date.now() < deadline) {
+    for (const m of await emailsTo(promoter.email)) {
+      if (before.has(m.ID)) continue;
+      before.add(m.ID);
+      const mail = await readEmail(m.ID);
+      if (/\/login\/verify\?token=/.test(mail.Text)) return signInDetails(mail);
+    }
+    await Bun.sleep(100);
+  }
+  throw new Error(`No new sign-in email to ${promoter.email} within 15 s`);
 }
 
 /** Opens an emailed link the way a browser does: the confirm page, then its auto-submitted form. */
