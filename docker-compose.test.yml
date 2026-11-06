@@ -1,6 +1,6 @@
 # Test stack: the sandbox services from docker-compose.dev.yml on fixed localhost ports, for `bun test`.
 # Only ever used together with docker-compose.dev.yml:
-#   docker compose -p promoterstats-tests -f docker-compose.dev.yml -f docker-compose.test.yml up -d --wait hievents-db mailpit cdn s3
+#   docker compose -p promoterstats-tests -f docker-compose.dev.yml -f docker-compose.test.yml up -d --wait hievents-db mailpit cdn s3 rules-engine
 # The app itself is not started here: the integration tests run `bun src/index.tsx` against these services.
 services:
   hievents-db:
@@ -50,6 +50,11 @@ services:
       interval: 2s
       timeout: 10s
       retries: 30
+
+  # The rules engine, for the rule tests and the server they start.
+  rules-engine:
+    ports:
+      - "127.0.0.1:18090:8080"
 
   # Not needed by the tests; keep it off the dev port if someone starts the whole file.
   promoter-stats:

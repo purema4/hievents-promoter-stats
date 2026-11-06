@@ -32,6 +32,16 @@ services:
     ports:
       - "127.0.0.1:8028:8025"
 
+  # Checks and evaluates the promoter rules (CEL). No published port: only promoter-stats reaches it,
+  # on this network. Read-only, unprivileged, with no capabilities.
+  demo-rules-engine:
+    build: ./rules-engine
+    image: promoter-stats-demo-rules
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 256m
+
   demo:
     build:
       context: .
@@ -50,6 +60,7 @@ services:
       SMTP_PORT: "1025"
       MAIL_FROM: Demo Nights <promoters@example.com>
       HIEVENTS_IMAGE_BASE_URL: http://demo-cdn
+      RULES_ENGINE_URL: http://demo-rules-engine:8080
     ports:
       - "127.0.0.1:3100:3000"
     healthcheck:
@@ -60,3 +71,5 @@ services:
     depends_on:
       demo-db:
         condition: service_healthy
+      demo-rules-engine:
+        condition: service_started

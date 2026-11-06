@@ -27,6 +27,16 @@ services:
     ports:
       - "8027:8025"
 
+  # Checks and evaluates the promoter rules (CEL). No published port: only promoter-stats reaches it,
+  # on this network. Read-only, unprivileged, with no capabilities.
+  rules-engine:
+    build: ./rules-engine
+    image: hievents-promoter-stats-rules:latest
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 256m
+
   promoter-stats:
     build: .
     environment:
@@ -44,3 +54,5 @@ services:
     depends_on:
       hievents-db:
         condition: service_healthy
+      rules-engine:
+        condition: service_started

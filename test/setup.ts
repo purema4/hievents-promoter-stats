@@ -23,6 +23,8 @@ Object.assign(process.env, {
   APP_TIMEZONE: 'America/Toronto',
   HIEVENTS_PUBLIC_URL: 'https://tickets.example.com',
   TWO_FACTOR_KEY: Buffer.alloc(32, 7).toString('base64'),
+  // The test stack's rules engine (docker-compose.test.yml); rule tests skip without it, like integration tests.
+  RULES_ENGINE_URL: process.env.TEST_RULES_ENGINE_URL || 'http://127.0.0.1:18090',
 });
 for (const key of ['SMTP_HOST', 'HIEVENTS_ACCOUNT_IDS', 'ADMIN_EMAIL', 'ADMIN_PASSWORD', 'HIEVENTS_IMAGE_BASE_URL', 'CASH_METHOD', 'KUTT_URL', 'KUTT_API_KEY']) {
   delete process.env[key];

@@ -21,3 +21,17 @@ updates:
     directory: /
     schedule:
       interval: weekly
+
+  # The rules engine: cel-go and its Go dependencies, and its base images (golang, distroless).
+  - package-ecosystem: gomod
+    directory: /rules-engine
+    schedule:
+      interval: weekly
+    groups:
+      go:
+        patterns: ["*"]
+
+  - package-ecosystem: docker
+    directory: /rules-engine
+    schedule:
+      interval: weekly

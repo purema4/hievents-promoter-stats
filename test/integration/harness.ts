@@ -23,6 +23,7 @@ export const stack = {
   mailpitUrl: (process.env.TEST_MAILPIT_URL || 'http://127.0.0.1:18025').replace(/\/$/, ''),
   smtpPort: Number(process.env.TEST_SMTP_PORT || 11025),
   cdnUrl: (process.env.TEST_CDN_URL || 'http://127.0.0.1:18080').replace(/\/$/, ''),
+  rulesUrl: (process.env.TEST_RULES_ENGINE_URL || 'http://127.0.0.1:18090').replace(/\/$/, ''),
   // SeaweedFS, for S3_BUCKET and CDN_URL.
   s3: {
     endpoint: (process.env.TEST_S3_URL || 'http://127.0.0.1:19000').replace(/\/$/, ''),
@@ -33,7 +34,7 @@ export const stack = {
 };
 
 const START_HINT =
-  'Start it with: docker compose -p promoterstats-tests -f docker-compose.dev.yml -f docker-compose.test.yml up -d --wait hievents-db mailpit cdn s3';
+  'Start it with: docker compose -p promoterstats-tests -f docker-compose.dev.yml -f docker-compose.test.yml up -d --wait hievents-db mailpit cdn s3 rules-engine';
 
 function tcpOpen(host: string, port: number, timeoutMs: number): Promise<boolean> {
   return new Promise((done) => {
@@ -69,6 +70,12 @@ async function probeStack(): Promise<string | null> {
     if (!res.ok) return `Cover CDN at ${stack.cdnUrl} answered ${res.status}`;
   } catch (err) {
     return `Cover CDN not reachable at ${stack.cdnUrl} (${(err as Error).message})`;
+  }
+  try {
+    const res = await fetch(`${stack.rulesUrl}/health`, { signal: AbortSignal.timeout(3000) });
+    if (!res.ok) return `Rules engine at ${stack.rulesUrl} answered ${res.status}`;
+  } catch (err) {
+    return `Rules engine not reachable at ${stack.rulesUrl} (${(err as Error).message})`;
   }
   // SeaweedFS answers before it can store anything: wait (up to 30 s) until a test file can be written.
   const s3 = new URL(stack.s3.endpoint);
@@ -154,6 +161,7 @@ export async function startServer(extraEnv: Record<string, string> = {}): Promis
     HIEVENTS_ACCOUNT_IDS: '',
     HIEVENTS_PUBLIC_URL: '',
     HIEVENTS_IMAGE_BASE_URL: stack.cdnUrl,
+    RULES_ENGINE_URL: stack.rulesUrl,
     SMTP_HOST: '127.0.0.1',
     SMTP_PORT: String(stack.smtpPort),
     SMTP_SECURE: 'false',

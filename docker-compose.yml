@@ -1,4 +1,15 @@
 services:
+  # Checks and evaluates the promoter rules (CEL). No published port: only promoter-stats reaches it,
+  # on this network. Read-only, unprivileged, with no capabilities.
+  rules-engine:
+    build: ./rules-engine
+    image: hievents-promoter-stats-rules:latest
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 256m
+
   promoter-stats:
     build: .
     image: hievents-promoter-stats:latest
@@ -9,6 +20,9 @@ services:
     volumes:
       # Holds promoter logins and code assignments. Back it up; do not prune it.
       - promoter-data:/data
+    depends_on:
+      # Started first, but the app also runs without it: it then shows the last results and holds payouts.
+      - rules-engine
 
 volumes:
   promoter-data:
