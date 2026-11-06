@@ -110,6 +110,7 @@ import {
 import { directoryPreview, previewVersion } from './directory-preview';
 import { hiddenByTeam, pageEvents, pageOwner, setPageHidden } from './promoter-page';
 import { allEventRules, setEventRule } from './commission';
+import { migrateToRules } from './rules';
 import { allEventBanners, generalBanner, parseBanner, setEventBanner, setGeneralBanner } from './banners';
 import { allMediaDrives, parseMediaUrl, setMediaDrive } from './media-drives';
 import { filterCodes, parseCodeFilter } from './promo-code-list';
@@ -2227,6 +2228,8 @@ if (config.adminEmail && config.adminPassword && !findUserByEmail(config.adminEm
 }
 
 ensureAliases();
+// Once: the rates and free-ticket track used before rules become rules, with the same results.
+migrateToRules();
 purgeExpiredSessions();
 // With S3 set up: check the bucket answers, then move files still on disk to it. Then, once, shrink the
 // photos and logo stored before uploads were shrunk.

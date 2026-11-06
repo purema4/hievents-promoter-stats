@@ -2,6 +2,8 @@ import { afterAll, expect, test } from 'bun:test';
 import { config } from '../../src/config';
 import { checkRule, evaluateRules, rulesEngineUp } from '../../src/rules-engine';
 import { emptyInputs } from '../../src/rule-variables';
+import { earnedOn, type Track } from '../../src/reward-rules';
+import { trackExpression } from '../../src/rules';
 import { describeIntegration, uid } from './harness';
 
 /* The app's side of the rules engine, against the test stack's engine (docker-compose.test.yml). */
@@ -80,5 +82,21 @@ describeIntegration('rules engine', () => {
     config.rulesEngineUrl = url;
     expect(await rulesEngineUp()).toBe(true);
     expect((await evaluateRules(rule, [{ subject, variables: inputs(20) }])).results.get(subject)!.outputs.commission).toBe(100);
+  });
+
+  test('free-ticket tracks become expressions with the same counts', async () => {
+    const tracks: Track[] = [
+      { milestones: [{ at: 1, count: 1, label: '' }], every: 5, count: 1, label: '' },
+      { milestones: [{ at: 2, count: 3, label: '' }, { at: 10, count: 1, label: '' }], every: 4, count: 2, label: '' },
+      { milestones: [], every: 7, count: 1, label: '' },
+      { milestones: [{ at: 3, count: 2, label: '' }], every: 0, count: 1, label: '' },
+    ];
+    for (const [i, track] of tracks.entries()) {
+      const version = `track-${i}-${uid()}`;
+      const lines = [{ line: 1, name: 'free_tickets', expr: trackExpression(track) }];
+      const sold = Array.from({ length: 61 }, (_, n) => n);
+      const { results } = await evaluateRules({ version, lines }, sold.map((n) => ({ subject: `${version}:${n}`, variables: inputs(n) })));
+      expect(sold.map((n) => results.get(`${version}:${n}`)!.outputs.free_tickets)).toEqual(sold.map((n) => earnedOn(track, n)));
+    }
   });
 });
