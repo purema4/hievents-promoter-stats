@@ -49,6 +49,8 @@ services:
       SMTP_PORT: "1025"
       MAIL_FROM: Promoter stats <promoters@example.com>
       HIEVENTS_IMAGE_BASE_URL: http://cdn
+      # From .env, never written here: turns on "Write it for me" on the rule editor.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
     ports:
       - "3000:3000"
     depends_on:
