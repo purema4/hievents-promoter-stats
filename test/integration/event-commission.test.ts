@@ -80,9 +80,15 @@ describeIntegration('commission per event', () => {
     const dashboard = await admin.page('/admin/dashboard?range=all');
     const row = dashboard.slice(dashboard.indexOf(maya.name));
     expect(text(row.slice(0, row.indexOf('</tr>')))).toContain('$34.50');
-    // The chart's days add up to the same commission (the last 90 days hold every sale but Summer Rooftop's).
-    const chart = await maya.client.page('/?range=90');
-    const days = [...chart.matchAll(/<td class="num">\$([0-9.]+)<\/td><\/tr>/g)].reduce((sum, m) => sum + Number(m[1]), 0);
+    // The event charts' days add up to the same commission (the last 90 days hold every sale but Summer Rooftop's).
+    const home = await maya.client.page('/');
+    const events = [...new Set([...home.matchAll(/href="\/events\/(\d+)"/g)].map((m) => m[1]))];
+    let days = 0;
+    for (const id of events) {
+      const chart = await maya.client.page(`/events/${id}?range=90`);
+      const table = chart.slice(chart.indexOf('class="table-view"'));
+      days += [...table.slice(0, table.indexOf('</details>')).matchAll(/<td class="num">\$([0-9.]+)<\/td><\/tr>/g)].reduce((sum, m) => sum + Number(m[1]), 0);
+    }
     expect(days.toFixed(2)).toBe('34.50');
   });
 

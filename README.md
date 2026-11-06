@@ -24,9 +24,9 @@ Add-on products (non-ticket items) are not counted as tickets, but they are incl
 
 ## What promoters see
 
-- **Dashboard:** commission earned, what is available to request, full-price sales and tickets, a tickets-per-day chart (7 / 30 / 90 days / all time), then their events split into upcoming and past.
+- **Dashboard:** their upcoming events first, each on a card with its own small dashboard: tickets sold, commission, tickets in the last 7 days and a chart of the last 30. Below that, their totals (commission earned, what is available to request, full-price sales and tickets), then their past events. Each event opens to its own page with the full tickets-per-day chart (7 / 30 / 90 days / all time).
 - **Event page:** the same numbers for one event, its own chart, a breakdown per code when they have several, and previous / next links to move between events.
-- **Payouts:** their balance (earned − paid − requested), a form to request a payout with how they want to be paid, and the history of requests. When money or rewards are waiting, the dashboard opens with the amount and big **Request my payout** / **Claim rewards** buttons, and the menu always has a **Request payout** button.
+- **Payouts:** their balance (earned − paid − requested), a form to request a payout with how they want to be paid, and the history of requests. When money or rewards are waiting, the dashboard shows the amount under the events with big **Request my payout** / **Claim rewards** buttons, and the menu always has a **Request payout** button.
 
 Admins see any promoter's dashboard exactly as they do from the promoter's page (**Open … dashboard**).
 
@@ -56,7 +56,7 @@ Admins set them on **Levels & rewards**; changes apply to everyone at once, coun
 
 Leaving every milestone empty with "every" at 0 turns free tickets or merch off. Promoters see the rules in words, a progress bar to their next level and reward, and get a notification when they reach one.
 
-Promoters request rewards on **Payouts & rewards** (with a guest-list name, or the merch item and size). Admins see them under **Requests**, then **Mark given** or **Decline** with a reason; the promoter is emailed. A declined reward can be requested again. Free tickets for past events are not offered.
+Promoters request rewards on **Payouts & rewards** (with a guest-list name, or the merch item and size). Free tickets are earned on one event and asked for that event, or rolled over: asked for another published event that is not over, even one they have no code on. Admins see them under **Requests** (a roll over reads "rolled over from …"), then **Mark given** or **Decline** with a reason; the promoter is emailed. A declined reward can be requested again while its event is not over. Free tickets not requested by the end of their event are lost.
 
 ## Event links
 
@@ -104,6 +104,8 @@ On **Promoters → Invite links**, admins make links to share (a group chat, a f
 **Promoters → Commissions** lists every event that is not over (drafts included) with the promoters who have one of its codes. For each promoter and event, choose **Usual rate** (their own %), **% of sales** (another percentage) or **per ticket** (a flat amount for each ticket sold). Like the usual rate, a change applies to all their sales for that event, earlier ones too, and stays when the event is over. Promoters see the commission amounts, never a rate, since it can differ per event; a flat amount replaces the percentage on that event, it is not added to it. Their balance, payouts, charts and the admin dashboard all use it. A team lead's team commission stays a percentage of their promoters' sales.
 
 **Promoters → Media drives** lists the drafts and events that are not over with promoter codes, soonest first (like Commissions). Paste a link to a public folder (Google Drive, Dropbox…, `https://` only) with the event's photos, videos and flyers: the promoters with a code on the event get a **Media drive** button on their dashboard's event card and on the event page. Save an empty link to remove it.
+
+**Promoters → Banners** holds notices for promoters, in plain text, up to 500 characters. **All promoters** shows at the top of every promoter page, right under the menu. Each draft or event that is not over can have its own, shown on its dashboard card and event page to the promoters with a code on it, until the event is over. Admins see both when they open a promoter's dashboard. Save an empty banner to remove it.
 
 ## Changes by hand
 

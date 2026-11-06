@@ -110,6 +110,7 @@ import {
 import { directoryPreview, previewVersion } from './directory-preview';
 import { hiddenByTeam, pageEvents, pageOwner, setPageHidden } from './promoter-page';
 import { allEventRules, setEventRule } from './commission';
+import { allEventBanners, generalBanner, parseBanner, setEventBanner, setGeneralBanner } from './banners';
 import { allMediaDrives, parseMediaUrl, setMediaDrive } from './media-drives';
 import { filterCodes, parseCodeFilter } from './promo-code-list';
 import {
@@ -180,6 +181,7 @@ import {
   AdminTeamsPage,
   AdminCodesPage,
   AdminCommissionsPage,
+  AdminBannersPage,
   AdminMediaPage,
   InvitesPage,
   JoinPage,
@@ -231,7 +233,6 @@ const messages: Record<string, string> = {
   undone: 'Change undone.',
   adjust_reason: 'Give a reason: the promoter sees it.',
   adjust_amount: 'Enter an amount like 50 or -12.50, and whole numbers for tickets and merch (not 0).',
-  adjust_event: 'Pick one of their upcoming events.',
   code_wrong: 'That code did not work. Use the newest 6-digit code from your authenticator app.',
   device_out: 'That device is signed out.',
   others_out: 'All your other devices are signed out.',
@@ -304,6 +305,9 @@ const messages: Record<string, string> = {
   media_removed: 'Media drive removed.',
   media_url: 'The media drive must be a link starting with https://.',
   media_event: 'Pick one of the events listed: drafts and events that are not over.',
+  adjust_event: 'Pick one of their upcoming events.',
+  banner_saved: 'Banner saved. Promoters see it now.',
+  banner_removed: 'Banner removed.',
   api_removed: 'Removed. It stops working right away.',
   api_removed_all: 'Their API keys and connected apps are removed and stop working right away.',
   api_too_many: `You can have up to ${MAX_KEYS} keys. Remove one to make another.`,
@@ -806,7 +810,7 @@ async function renderDashboard(c: Context<Env>, promoter: User, basePath: string
       rewards={data.rewards}
       percent={data.percent}
       media={data.media}
-      range={parseRange(c.req.query('range'), '30')}
+      banners={data.banners}
       pageLink={withPage ? (pageShortLink(promoter) ?? pageLink(promoter)) : null}
     />,
   );
@@ -830,6 +834,7 @@ async function renderEvent(c: Context<Env>, promoter: User, basePath: string) {
       rewards={data.rewards}
       percent={data.percent}
       media={data.media.get(eventId) ?? null}
+      banner={data.banners.get(eventId) ?? null}
       range={parseRange(c.req.query('range'), 'all')}
     />,
   );
@@ -1020,6 +1025,13 @@ app.post('/page/visibility', async (c) => {
   return c.redirect(`/page?ok=${hidden ? 'page_hidden' : 'page_shown'}`);
 });
 
+/** Where free tickets go when not on the event they were earned on: a published event that is not over. */
+function rolloverTarget(data: { ticketEvents: { id: number; title: string }[] }, raw: unknown): { id: number; title: string } | undefined | null {
+  const text = String(raw ?? '').trim();
+  if (text === '') return undefined;
+  return data.ticketEvents.find((e) => e.id === Number(text)) ?? null;
+}
+
 async function renderPayouts(c: Context<Env>, error?: string) {
   const user = c.get('user');
   const data = await promoterData(user);
@@ -1029,6 +1041,7 @@ async function renderPayouts(c: Context<Env>, error?: string) {
       balances={data.balances}
       payouts={payoutsFor(user.id)}
       rewards={data.rewards}
+      ticketEvents={data.ticketEvents}
       rewardRequests={rewardRequestsFor(user.id)}
       adjustments={adjustmentsFor(user.id)}
       ok={flash(c.req.query('ok'))}
@@ -1071,9 +1084,12 @@ app.post('/rewards/:kind{ticket|merch}', async (c) => {
   const body = await c.req.parseBody();
   const kind = c.req.param('kind') as 'ticket' | 'merch';
   const data = await promoterData(user);
+  // An event to roll them over to that is not open to it any more: refused, not used on the first one.
+  if (kind === 'ticket' && rolloverTarget(data, body.use_for) === null) return renderPayouts(c, messages.not_available);
   const result = requestReward(user, data.rewards, {
     kind,
     eventId: kind === 'ticket' ? Number(body.event_id) : undefined,
+    useFor: kind === 'ticket' ? (rolloverTarget(data, body.use_for) ?? undefined) : undefined,
     quantity: kind === 'ticket' ? Number(body.quantity ?? 1) : 1,
     details: String(body.details ?? '').slice(0, 120),
   });
@@ -1634,6 +1650,39 @@ app.post('/admin/media', async (c) => {
   setMediaDrive(eventId, url, c.get('user').id);
   audit(c, 'admin.media_drive_changed', { by: c.get('user').id, eventId, url });
   return c.redirect(`/admin/media?ok=${url ? 'media_saved' : 'media_removed'}${hash}`);
+});
+
+// --- Banners for promoters ---------------------------------------------------------------------------
+
+app.get('/admin/banners', async (c) =>
+  c.html(
+    <AdminBannersPage
+      user={c.get('user')}
+      general={generalBanner()}
+      events={await commissionEvents()}
+      banners={allEventBanners()}
+      ok={flash(c.req.query('ok'))}
+      error={flash(c.req.query('error'))}
+    />,
+  ),
+);
+
+app.post('/admin/banners/general', async (c) => {
+  const message = parseBanner((await c.req.parseBody()).message);
+  setGeneralBanner(message);
+  audit(c, 'admin.banner_changed', { by: c.get('user').id, message });
+  return c.redirect(`/admin/banners?ok=${message ? 'banner_saved' : 'banner_removed'}#general`);
+});
+
+app.post('/admin/banners/event', async (c) => {
+  const body = await c.req.parseBody();
+  const eventId = Number(body.event_id);
+  // Only for a draft or upcoming event that promoters see (one of them has a code on it).
+  if (!(await commissionEvents()).some((e) => e.id === eventId)) return c.redirect('/admin/banners?error=media_event');
+  const message = parseBanner(body.message);
+  setEventBanner(eventId, message, c.get('user').id);
+  audit(c, 'admin.banner_changed', { by: c.get('user').id, eventId, message });
+  return c.redirect(`/admin/banners?ok=${message ? 'banner_saved' : 'banner_removed'}#event-${eventId}`);
 });
 
 // --- Promoters' public pages, for admins -------------------------------------------------------------

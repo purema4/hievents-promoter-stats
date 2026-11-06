@@ -10,6 +10,7 @@ import { config } from '../src/config';
 import { createInvite } from '../src/invites';
 import { defaultTemplate, ensureAliases, saveLinkSettings } from '../src/links';
 import { createUser, db, findUser, findUserByEmail, markAppInstalled, markOnboarded, normalizeCodes, setCodes, updateProfile, type User } from '../src/local-db';
+import { setEventBanner, setGeneralBanner } from '../src/banners';
 import { setMediaDrive } from '../src/media-drives';
 import { checkAllMilestones } from '../src/milestones';
 import { notify } from '../src/notifications';
@@ -251,6 +252,9 @@ async function addHistory(adminId: number, ids: Map<string, number>, eventIds: n
   setEventRule(ids.get('Noah')!, eventIds[3]!, { kind: 'percent', value: 15 });
   setMediaDrive(eventIds[3]!, 'https://drive.example.com/warehouse-night', adminId);
   setMediaDrive(eventIds[4]!, 'https://drive.example.com/winter-opening', adminId);
+  setGeneralBanner('Payouts for last month go out this Friday. Send your request before Thursday at noon.');
+  setEventBanner(eventIds[3]!, 'Early bird tickets end Sunday. Push your link this week!', adminId);
+  setEventBanner(eventIds[4]!, 'New venue: doors open at 9 pm at the Old Port.', adminId);
   setPageHidden(ids.get('Sofia')!, true, adminId);
 
   // Money already paid out, then requests waiting for the admin.
@@ -267,8 +271,11 @@ async function addHistory(adminId: number, ids: Map<string, number>, eventIds: n
   const priya = await promoterData(person('Priya'));
   requestReward(person('Priya'), priya.rewards, { kind: 'merch', quantity: 1, details: 'Hoodie, size M' });
   const kai = await promoterData(person('Kai'));
-  const ticket = kai.rewards.tickets[0];
-  if (ticket) requestReward(person('Kai'), kai.rewards, { kind: 'ticket', eventId: ticket.event.id, quantity: 1, details: '' });
+  const [first, second] = kai.rewards.tickets.filter((t) => t.available > 0);
+  if (first) requestReward(person('Kai'), kai.rewards, { kind: 'ticket', eventId: first.event.id, quantity: 1, details: '' });
+  // A roll over for the admins to accept or decline.
+  const later = kai.ticketEvents.find((e) => e.id !== first?.event.id && e.id !== second?.event.id);
+  if (second && later) requestReward(person('Kai'), kai.rewards, { kind: 'ticket', eventId: second.event.id, useFor: later, quantity: 1, details: '' });
 
   createInvite(admin, { label: 'Spring street team', teamLeadId: null, maxUses: 20, days: 30 });
   createInvite(person('Maya'), { label: 'Maya’s crew', teamLeadId: ids.get('Maya')!, maxUses: null, days: null });

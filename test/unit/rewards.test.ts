@@ -4,6 +4,8 @@ import {
   freeTicketsEarned,
   levelFor,
   merchEarned,
+  describeReward,
+  isRollover,
   requestReward,
   rewardRequestsFor,
   rewardsFor,
@@ -147,5 +149,38 @@ describe('rewardsFor and requestReward', () => {
     expect(rewardsFor(user.id, events).tickets[0]).toMatchObject({ earned: 3, bonus: 2, available: 3 });
     addAdjustment(admin, user.id, { kind: 'free_tickets', quantity: -10, eventId: 7, label: 'Mistake' });
     expect(rewardsFor(user.id, events).tickets[0]).toMatchObject({ earned: 0, available: 0 });
+  });
+
+  test('rolled over: they come out of the event they were earned on, and declining gives them back', async () => {
+    const user = await newUser();
+    const admin = await newUser('Admin', true);
+    const events = [event(1, 6, 10, 'Warehouse Night'), event(2, 1, 20, 'Winter Opening')];
+    const later = { id: 3, title: 'Midnight Market' };
+    expect(requestReward(user, rewardsFor(user.id, events), { kind: 'ticket', eventId: 1, useFor: later, quantity: 2, details: '' })).toBe('ok');
+    const [request] = rewardRequestsFor(user.id);
+    expect(request).toMatchObject({ event_id: 3, event_title: 'Midnight Market', source_event_id: 1, source_event_title: 'Warehouse Night' });
+    expect(isRollover(request!)).toBe(true);
+    expect(describeReward(request!)).toBe('2 free tickets for Midnight Market, rolled over from Warehouse Night');
+    const after = rewardsFor(user.id, events);
+    expect(after.tickets.map((t) => [t.event.id, t.available])).toEqual([
+      [1, 0],
+      [2, 1],
+    ]);
+    // Rolled over to an event they also earn on: still taken from where they were earned.
+    expect(requestReward(user, after, { kind: 'ticket', eventId: 2, useFor: { id: 1, title: 'Warehouse Night' }, quantity: 1, details: '' })).toBe('ok');
+    expect(rewardsFor(user.id, events).tickets.map((t) => t.available)).toEqual([0, 0]);
+
+    expect(settleReward(request!.id, admin.id, 'rejected', 'Sold out')).toBe(true);
+    expect(rewardsFor(user.id, events).tickets[0]!.available).toBe(2);
+    // Asked for the event itself, it is not a roll over.
+    expect(requestReward(user, rewardsFor(user.id, events), { kind: 'ticket', eventId: 1, useFor: { id: 1, title: 'Warehouse Night' }, quantity: 1, details: '' })).toBe('ok');
+    expect(isRollover(rewardRequestsFor(user.id)[0]!)).toBe(false);
+  });
+
+  test('once the event is over, its free tickets cannot be requested or rolled over', async () => {
+    const user = await newUser();
+    const rewards = rewardsFor(user.id, [event(1, 6, -10)]);
+    expect(rewards.tickets).toEqual([]);
+    expect(requestReward(user, rewards, { kind: 'ticket', eventId: 1, useFor: { id: 2, title: 'Later' }, quantity: 1, details: '' })).toBe('not_available');
   });
 });

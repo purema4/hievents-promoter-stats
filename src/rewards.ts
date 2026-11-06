@@ -24,6 +24,10 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS reward_requests_user ON reward_requests (user_id, kind, status);
 `);
 addColumn('reward_requests', 'details', 'TEXT');
+// Free tickets are earned on one event. Asked for another event, they are rolled over: event_id is where
+// they are used, source_event_id where they were earned. NULL for older requests, earned where used.
+addColumn('reward_requests', 'source_event_id', 'INTEGER');
+addColumn('reward_requests', 'source_event_title', 'TEXT');
 
 export type RewardRequest = {
   id: number;
@@ -35,6 +39,8 @@ export type RewardRequest = {
   event_title: string | null;
   quantity: number;
   details: string | null;
+  source_event_id: number | null;
+  source_event_title: string | null;
   status: 'pending' | 'fulfilled' | 'rejected';
   admin_note: string | null;
   created_at: string;
@@ -86,7 +92,7 @@ const isUpcoming = (e: EventSummary) => !e.end || e.end.getTime() >= Date.now();
 export function rewardsFor(userId: number, events: EventSummary[]): Rewards {
   const used = db
     .query<{ kind: string; event_id: number | null; n: number }, [number]>(
-      "SELECT kind, event_id, sum(quantity) AS n FROM reward_requests WHERE user_id = ? AND status <> 'rejected' GROUP BY kind, event_id",
+      "SELECT kind, coalesce(source_event_id, event_id) AS event_id, sum(quantity) AS n FROM reward_requests WHERE user_id = ? AND status <> 'rejected' GROUP BY 1, 2",
     )
     .all(userId);
   const usedTickets = (eventId: number) => used.find((u) => u.kind === 'ticket' && u.event_id === eventId)?.n ?? 0;
@@ -134,12 +140,14 @@ export type RewardResult = 'ok' | 'not_available' | 'missing_details';
 export function requestReward(
   user: User,
   rewards: Rewards,
-  input: { kind: 'ticket' | 'merch'; eventId?: number; quantity: number; details: string },
+  // eventId: the event the free tickets were earned on. useFor: another upcoming event to roll them over to.
+  input: { kind: 'ticket' | 'merch'; eventId?: number; useFor?: { id: number; title: string }; quantity: number; details: string },
 ): RewardResult {
   const details = input.details.trim();
   if (input.kind === 'merch' && !details) return 'missing_details';
   const ticket = input.kind === 'ticket' ? rewards.tickets.find((t) => t.event.id === input.eventId) : undefined;
   if (input.kind === 'ticket' && !ticket) return 'not_available';
+  const target = ticket && input.useFor && input.useFor.id !== ticket.event.id ? input.useFor : null;
   if (!Number.isInteger(input.quantity) || input.quantity < 1) return 'not_available';
   // Re-counted inside the transaction so two quick submits cannot claim the same reward twice.
   return db.transaction((): RewardResult => {
@@ -147,16 +155,18 @@ export function requestReward(
     const available = input.kind === 'ticket' ? (fresh.tickets[0]?.available ?? 0) : Math.max(0, rewards.merch.earned - fresh.merch.used);
     if (input.quantity > available) return 'not_available';
     db.query(
-      'INSERT INTO reward_requests (user_id, promoter_name, promoter_email, kind, event_id, event_title, quantity, details) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      'INSERT INTO reward_requests (user_id, promoter_name, promoter_email, kind, event_id, event_title, quantity, details, source_event_id, source_event_title) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
     ).run(
       user.id,
       user.name,
       user.email,
       input.kind,
-      ticket?.event.id ?? null,
-      ticket?.event.title ?? null,
+      target?.id ?? ticket?.event.id ?? null,
+      target?.title ?? ticket?.event.title ?? null,
       input.quantity,
       details || null,
+      ticket?.event.id ?? null,
+      ticket?.event.title ?? null,
     );
     return 'ok';
   })();
@@ -191,6 +201,11 @@ export function settleReward(id: number, adminId: number, status: 'fulfilled' | 
   );
 }
 
+/** Free tickets asked for another event than the one they were earned on. */
+export const isRollover = (r: RewardRequest) => r.kind === 'ticket' && r.source_event_id !== null && r.source_event_id !== r.event_id;
+
 export function describeReward(r: RewardRequest): string {
-  return r.kind === 'merch' ? 'Merch' : `${r.quantity} free ${r.quantity === 1 ? 'ticket' : 'tickets'} for ${r.event_title}`;
+  if (r.kind === 'merch') return 'Merch';
+  const tickets = `${r.quantity} free ${r.quantity === 1 ? 'ticket' : 'tickets'}`;
+  return isRollover(r) ? `${tickets} for ${r.event_title}, rolled over from ${r.source_event_title}` : `${tickets} for ${r.event_title}`;
 }

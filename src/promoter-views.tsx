@@ -1,13 +1,13 @@
-import { parseRange, SalesChart, type Range } from './chart';
+import { MiniChart, parseRange, recentTickets, SalesChart, type Range } from './chart';
 import { config } from './config';
-import type { CodeStats, DailySales } from './hievents';
+import type { CodeStats, DailySales, TicketEvent } from './hievents';
 import type { User } from './local-db';
 import { commissionOn, formatMoney, toCents, totalsByCurrency, type Rate, type Totals } from './money';
 import { cashAvailable, type Balance, type PayoutRequest } from './payouts';
 import { describeReward, levelFor, type RewardRequest, type Rewards } from './rewards';
 import { describeTrack, rewardRules, trackOn } from './reward-rules';
 import { describeAdjustment, type Adjustment } from './adjustments';
-import { Avatar, Flash, formatDate, Layout, LevelBadge } from './views';
+import { Avatar, Banner, Flash, formatDate, Layout, LevelBadge } from './views';
 import { avatarOf } from './avatars';
 import { eventLink } from './links';
 import { linkClicks, shareLink } from './short-links';
@@ -352,54 +352,62 @@ function EventCard(props: {
   link?: string | null;
   copyCodes?: boolean;
   media?: string;
+  banner?: string;
+  daily?: DailySales[]; // this event's sales; past events do without the recent ones
 }) {
   const e = props.event;
   return (
     <div class="card event-card">
-    <a class="event-card-main" href={props.href}>
-      <span class="event-main">
-      {e.hasCover && <img class="cover-thumb" src={`/event-image/${e.id}`} alt="" loading="lazy" />}
-      <span class="event">
-        <strong>{e.title}</strong>
-        <span class="muted">{eventDate(e)}</span>
-        <span>
-          {e.codes.map((c) => (
-            <span class="code">{c}</span>
-          ))}
-          {!!props.freeTickets && <span class="chip">{plural(props.freeTickets, 'free ticket')} ready</span>}
-        </span>
-      </span>
-      </span>
-      <span class="numbers">
-        <span>
-          <span class="big">{e.tickets}</span>
-          <span class="muted">
-            {e.tickets === 1 ? 'ticket' : 'tickets'}
-            {e.pending > 0 && <span class="pending"> +{e.pending} pending</span>}
+      {props.banner && <Banner text={props.banner} label={`Notice for ${e.title}`} />}
+      <a class="event-card-main" href={props.href}>
+        <span class="event-main">
+          {e.hasCover && <img class="cover-thumb" src={`/event-image/${e.id}`} alt="" loading="lazy" />}
+          <span class="event">
+            <strong>{e.title}</strong>
+            <span class="muted">{eventDate(e)}</span>
+            <span>
+              {!props.copyCodes && e.codes.map((c) => <span class="code">{c}</span>)}
+              {!!props.freeTickets && <span class="chip">{plural(props.freeTickets, 'free ticket')} ready</span>}
+            </span>
           </span>
         </span>
-        <span>
-          <span class="big">{formatMoney(e.commission, e.currency)}</span>
-          <span class="muted">commission</span>
+        <span class="event-stats">
+          <span class="primary">
+            <span class="big">{e.tickets}</span>
+            <span class="muted">
+              {e.tickets === 1 ? 'ticket sold' : 'tickets sold'}
+              {e.pending > 0 && <span class="pending"> +{e.pending} pending</span>}
+            </span>
+          </span>
+          <span>
+            <span class="big">{formatMoney(e.commission, e.currency)}</span>
+            <span class="muted">commission</span>
+          </span>
+          {props.daily && (
+            <span>
+              <span class="big">{recentTickets(props.daily, '7')}</span>
+              <span class="muted">last 7 days</span>
+            </span>
+          )}
         </span>
-      </span>
-    </a>
-    {(props.link || props.copyCodes || props.media) && (
-      <div class="card-actions">
-        {props.link && (
-          <button type="button" class="secondary small" data-copy-text={props.link}>
-            Copy my link
-          </button>
-        )}
-        {props.copyCodes && e.codes.map((code) => <CodeCopy code={code} />)}
-        {props.link && (
-          <button type="button" class="secondary small" data-share data-share-url={props.link} data-share-title={e.title} hidden>
-            Share
-          </button>
-        )}
-        {props.media && <MediaButton url={props.media} />}
-      </div>
-    )}
+        {props.daily && <MiniChart daily={props.daily} />}
+      </a>
+      {(props.link || props.copyCodes || props.media) && (
+        <div class="card-actions">
+          {props.link && (
+            <button type="button" class="secondary small" data-copy-text={props.link}>
+              Copy my link
+            </button>
+          )}
+          {props.copyCodes && e.codes.map((code) => <CodeCopy code={code} />)}
+          {props.link && (
+            <button type="button" class="secondary small" data-share data-share-url={props.link} data-share-title={e.title} hidden>
+              Share
+            </button>
+          )}
+          {props.media && <MediaButton url={props.media} />}
+        </div>
+      )}
     </div>
   );
 }
@@ -415,19 +423,19 @@ export function DashboardPage(props: {
   rewards: Rewards;
   percent: Rate | number;
   media: Map<number, string>;
-  range: Range;
+  banners: Map<number, string>;
   pageLink?: string | null; // the promoter's public page (short link when there is one); none when hidden
 }) {
   const events = summarizeEvents(props.rows, props.percent);
-  const freeFor = (e: EventSummary) => props.rewards.tickets.find((t) => t.event.id === e.id)?.available ?? 0;
   const upcoming = events.filter((e) => !isPast(e));
   const past = events.filter(isPast).reverse();
   const totals = totalsByCurrency(props.rows, props.percent);
   const self = props.basePath === '';
   const eventHref = (e: EventSummary) => `${props.basePath}/events/${e.id}`;
+  const freeFor = (e: EventSummary) => props.rewards.tickets.find((t) => t.event.id === e.id)?.available ?? 0;
 
   return (
-    <Layout title="My sales" user={props.viewer}>
+    <Layout title="My sales" user={props.viewer} promoterView>
       {!self &&
         (props.basePath.startsWith('/team/') ? (
           <p class="muted">
@@ -444,13 +452,38 @@ export function DashboardPage(props: {
         <h1>{self ? `Hi ${props.promoter.name}` : `${props.promoter.name}'s dashboard`}</h1>
       </div>
       <p class="muted">Live from the ticketing system.</p>
-      {self && <PhotoCallout promoter={props.promoter} />}
-      {self && <CityCallout promoter={props.promoter} />}
 
       {props.codes.length === 0 && props.balances.length === 0 && props.rewards.outsideSold === 0 ? (
-        <div class="card muted">No promo codes are assigned to this account yet.</div>
+        <>
+          {self && <PhotoCallout promoter={props.promoter} />}
+          {self && <CityCallout promoter={props.promoter} />}
+          <div class="card muted">No promo codes are assigned to this account yet.</div>
+        </>
       ) : (
         <>
+          <h2>Upcoming events</h2>
+          {upcoming.length === 0 ? (
+            <p class="muted">No upcoming events with your codes.</p>
+          ) : (
+            <div class="event-grid">
+              {upcoming.map((e) => (
+                <EventCard
+                  event={e}
+                  href={eventHref(e)}
+                  freeTickets={freeFor(e)}
+                  link={shareLink(props.promoter, { id: e.id, title: e.title }, e.codes[0]!)}
+                  copyCodes
+                  media={props.media.get(e.id)}
+                  banner={props.banners.get(e.id)}
+                  daily={props.daily.filter((d) => d.event_id === e.id)}
+                />
+              ))}
+            </div>
+          )}
+
+          <h2>My totals</h2>
+          {self && <PhotoCallout promoter={props.promoter} />}
+          {self && <CityCallout promoter={props.promoter} />}
           {self && <PayoutCallout balances={props.balances} rewards={props.rewards} />}
           <SummaryCards
             totals={totals}
@@ -461,37 +494,11 @@ export function DashboardPage(props: {
           <LevelCard rewards={props.rewards} rewardsHref={self ? '/payouts#rewards' : undefined} />
           {self && props.pageLink && <PageCard link={props.pageLink} />}
           {props.codes.length > 0 && <CodesCard codes={props.codes} rows={props.rows} upcoming={upcoming} />}
-          <SalesChart
-            title="Tickets sold per day"
-            daily={props.daily}
-            percent={props.percent}
-            range={props.range}
-            basePath={props.basePath || '/'}
-            currency={totals[0]?.currency ?? 'CAD'}
-          />
-
-          <h2>Upcoming events</h2>
-          {upcoming.length === 0 ? (
-            <p class="muted">No upcoming events with your codes.</p>
-          ) : (
-            <div class="rows">
-              {upcoming.map((e) => (
-                <EventCard
-                  event={e}
-                  href={eventHref(e)}
-                  freeTickets={freeFor(e)}
-                  link={shareLink(props.promoter, { id: e.id, title: e.title }, e.codes[0]!)}
-                  copyCodes
-                  media={props.media.get(e.id)}
-                />
-              ))}
-            </div>
-          )}
 
           {past.length > 0 && (
             <>
               <h2>Past events</h2>
-              <div class="rows">
+              <div class="event-grid">
                 {past.map((e) => (
                   <EventCard event={e} href={eventHref(e)} media={props.media.get(e.id)} />
                 ))}
@@ -516,6 +523,7 @@ export function EventPage(props: {
   rewards: Rewards;
   percent: Rate | number;
   media: string | null;
+  banner: string | null;
   range: Range;
 }) {
   const events = summarizeEvents(props.rows, props.percent);
@@ -530,7 +538,7 @@ export function EventPage(props: {
   const end = isPast(e) && e.end ? new Intl.DateTimeFormat('en-CA', { timeZone: e.timezone ?? 'UTC' }).format(e.end) : undefined;
 
   return (
-    <Layout title={e.title} user={props.viewer}>
+    <Layout title={e.title} user={props.viewer} promoterView>
       <nav class="crumbs muted">
         <a href={props.basePath || '/'}>All events</a>
         <span class="prev-next">
@@ -544,6 +552,7 @@ export function EventPage(props: {
         {eventDate(e)}
         {isPast(e) ? ' · Past event' : ''}
       </p>
+      {props.banner && !isPast(e) && <Banner text={props.banner} label={`Notice for ${e.title}`} />}
 
       <div class="grid">
         <div class="card stat highlight">
@@ -619,6 +628,7 @@ export function EventPage(props: {
             <div class="muted">
               {plural(reward.earned, 'free ticket')} earned{reward.used > 0 ? `, ${reward.used} requested` : ''}
               {reward.nextIn !== null ? ` · ${plural(reward.nextIn, 'more sale')} for the next one` : ''}
+              {reward.available > 0 ? ' · Use them here or roll them over to another event before this one is over.' : ''}
             </div>
             {reward.nextIn !== null && <Progress percent={reward.progress} label="Progress to the next free ticket" />}
           </div>
@@ -743,7 +753,7 @@ function RewardHistory(props: { requests: RewardRequest[] }) {
   );
 }
 
-function RewardsSection(props: { rewards: Rewards }) {
+function RewardsSection(props: { rewards: Rewards; ticketEvents: TicketEvent[] }) {
   const { tickets, merch } = props.rewards;
   const rules = rewardRules();
   const showTickets = trackOn(rules.tickets) || tickets.some((t) => t.earned > 0);
@@ -757,35 +767,50 @@ function RewardsSection(props: { rewards: Rewards }) {
           <div class="card">
             <h3>Free tickets</h3>
             <p class="muted">For each event: {lowerFirst(describeTrack(rules.tickets, 'ticket'))}</p>
+            <p class="muted">
+              Use them on that event, or ask to roll them over to another upcoming event; the team accepts or declines.
+              Free tickets not requested are lost once their event is over.
+            </p>
             {tickets.length === 0 ? (
               <p class="muted">No upcoming events with your codes.</p>
             ) : (
               <div class="reward-list">
-                {tickets.map((t) => (
-                  <div class="reward-row">
-                    <div>
-                      <strong>{t.event.title}</strong>
-                      <div class="muted">
-                        {plural(t.event.tickets, 'sale')} · {plural(t.earned, 'free ticket')} earned
-                        {t.bonus !== 0 ? ` (${t.bonus > 0 ? '+' : ''}${t.bonus} from the team)` : ''}
-                        {t.used > 0 ? `, ${t.used} requested` : ''}
-                        {t.nextIn !== null ? ` · next in ${plural(t.nextIn, 'sale')}` : ''}
+                {tickets.map((t) => {
+                  const others = props.ticketEvents.filter((e) => e.id !== t.event.id);
+                  return (
+                    <div class="reward-row">
+                      <div>
+                        <strong>{t.event.title}</strong>
+                        <div class="muted">
+                          {plural(t.event.tickets, 'sale')} · {plural(t.earned, 'free ticket')} earned
+                          {t.bonus !== 0 ? ` (${t.bonus > 0 ? '+' : ''}${t.bonus} from the team)` : ''}
+                          {t.used > 0 ? `, ${t.used} requested` : ''}
+                          {t.nextIn !== null ? ` · next in ${plural(t.nextIn, 'sale')}` : ''}
+                        </div>
                       </div>
+                      {t.available > 0 && (
+                        <form class="reward-form" method="post" action="/rewards/ticket">
+                          <input type="hidden" name="event_id" value={String(t.event.id)} />
+                          <select name="use_for" aria-label="Use them for">
+                            <option value="">For {t.event.title}</option>
+                            {others.map((e) => (
+                              <option value={String(e.id)}>Roll over to {e.title}</option>
+                            ))}
+                          </select>
+                          <select name="quantity" aria-label="How many">
+                            {Array.from({ length: t.available }, (_, i) => (
+                              <option value={String(i + 1)}>{plural(i + 1, 'ticket')}</option>
+                            ))}
+                          </select>
+                          <input class="wide" name="details" placeholder="Name for the guest list (optional)" maxlength={120} />
+                          <button class="wide" type="submit">
+                            Request
+                          </button>
+                        </form>
+                      )}
                     </div>
-                    {t.available > 0 && (
-                      <form class="reward-form" method="post" action="/rewards/ticket">
-                        <input type="hidden" name="event_id" value={String(t.event.id)} />
-                        <select name="quantity" aria-label="How many">
-                          {Array.from({ length: t.available }, (_, i) => (
-                            <option value={String(i + 1)}>{plural(i + 1, 'ticket')}</option>
-                          ))}
-                        </select>
-                        <input name="details" placeholder="Name for the guest list (optional)" maxlength={120} />
-                        <button type="submit">Request</button>
-                      </form>
-                    )}
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
@@ -829,6 +854,7 @@ export function PayoutsPage(props: {
   balances: Balance[];
   payouts: PayoutRequest[];
   rewards: Rewards;
+  ticketEvents: TicketEvent[];
   rewardRequests: RewardRequest[];
   adjustments: Adjustment[];
   error?: string;
@@ -938,7 +964,7 @@ export function PayoutsPage(props: {
         );
       })}
 
-      <RewardsSection rewards={props.rewards} />
+      <RewardsSection rewards={props.rewards} ticketEvents={props.ticketEvents} />
 
       {props.adjustments.length > 0 && (
         <>

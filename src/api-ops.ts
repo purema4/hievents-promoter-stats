@@ -13,7 +13,7 @@ import { commissionOn, describeRate, describeRule, formatMoney, toCents, totalsB
 import { findPayout, listPayouts, payoutsFor, requestPayout, type PayoutRequest, type RequestResult } from './payouts';
 import { filterCodes } from './promo-code-list';
 import { summarizeEvents } from './promoter-views';
-import { findRewardRequest, levelFor, listRewardRequests, requestReward, rewardRequestsFor, type RewardRequest, type RewardResult } from './rewards';
+import { findRewardRequest, isRollover, levelFor, listRewardRequests, requestReward, rewardRequestsFor, type RewardRequest, type RewardResult } from './rewards';
 import { pageShortLink, prepareShortLinks, shareLink } from './short-links';
 import { isTeamLead, teamLeadOf, teamMember, teamMembers } from './teams';
 
@@ -156,6 +156,8 @@ const rewardOut = (r: RewardRequest) => ({
   kind: r.kind,
   event_id: r.event_id,
   event_title: r.event_title,
+  // Set when the free tickets were rolled over from the event they were earned on.
+  rolled_over_from: isRollover(r) ? { event_id: r.source_event_id, event_title: r.source_event_title } : null,
   quantity: r.quantity,
   details: r.details,
   status: r.status === 'fulfilled' ? 'given' : r.status === 'rejected' ? 'declined' : r.status,
@@ -266,6 +268,8 @@ export const ops: Op[] = [
             used: t.used,
             sales_to_next: t.nextIn,
           })),
+          // Events free tickets can be rolled over to (use_for_event_id when requesting them).
+          rollover_events: data.ticketEvents.map((e) => ({ event_id: e.id, event_title: e.title })),
           merch: {
             available: data.rewards.merch.available,
             earned: data.rewards.merch.earned,
@@ -528,24 +532,32 @@ export const ops: Op[] = [
   {
     name: 'request_reward',
     title: 'Request a reward',
-    description: 'Asks for free tickets to an upcoming event, or a merch item, that your sales earned. The admins are told.',
+    description: 'Asks for free tickets your sales earned on an upcoming event, for that event or rolled over to another one, or a merch item. The admins are told.',
     method: 'POST',
     path: '/rewards',
     write: true,
     input: {
       properties: {
         kind: { type: 'string', enum: ['ticket', 'merch'], description: 'Free tickets or merch.' },
-        event_id: { type: 'integer', minimum: 1, description: 'For tickets: which event.' },
+        event_id: { type: 'integer', minimum: 1, description: 'For tickets: the event they were earned on.' },
+        use_for_event_id: {
+          type: 'integer',
+          minimum: 1,
+          description: 'For tickets: to roll them over to another upcoming event (from rewards.rollover_events). Admins accept or decline.',
+        },
         quantity: { type: 'integer', minimum: 1, maximum: 50, description: 'For tickets: how many (1 if left out).' },
         details: { type: 'string', maxLength: 120, description: 'For merch: which item and size. For tickets: an optional note.' },
       },
       required: ['kind'],
     },
-    run: async ({ user, c }, input: { kind: 'ticket' | 'merch'; event_id?: number; quantity?: number; details?: string }) => {
+    run: async ({ user, c }, input: { kind: 'ticket' | 'merch'; event_id?: number; use_for_event_id?: number; quantity?: number; details?: string }) => {
       const data = await promoterData(user);
+      const useFor = input.kind === 'ticket' && input.use_for_event_id !== undefined ? data.ticketEvents.find((e) => e.id === input.use_for_event_id) : undefined;
+      if (input.kind === 'ticket' && input.use_for_event_id !== undefined && !useFor) throw new ApiError(400, 'not_available', rewardProblem.not_available);
       const result = requestReward(user, data.rewards, {
         kind: input.kind,
         eventId: input.kind === 'ticket' ? input.event_id : undefined,
+        useFor,
         quantity: input.kind === 'ticket' ? (input.quantity ?? 1) : 1,
         details: input.details ?? '',
       });

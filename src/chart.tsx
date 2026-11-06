@@ -29,6 +29,10 @@ export const chartCss = `
 .col:hover .tip { display: block; }
 .x-axis { grid-column: 2; display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); }
 .chart-empty { height: 180px; display: grid; place-items: center; color: var(--muted); font-size: 13px; border: 1px dashed var(--border); border-radius: 8px; }
+.mini-chart { display: grid; gap: 4px; }
+.mini-bars { display: flex; align-items: flex-end; gap: 2px; height: 44px; }
+.mini-bars span { flex: 1 1 0; background: var(--chart); border-radius: 2px 2px 0 0; min-height: 2px; }
+.mini-bars span.h-0 { min-height: 1px; background: var(--border); }
 details.table-view { margin-top: 12px; font-size: 13px; }
 details.table-view summary { cursor: pointer; color: var(--muted); }
 ${Array.from({ length: 101 }, (_, i) => `.h-${i}{height:${i}%}.b-${i}{bottom:${i}%}.w-${i}{width:${i}%}`).join('')}
@@ -111,6 +115,31 @@ export function RangeLinks(props: { current: Range; basePath: string }) {
         </a>
       ))}
     </nav>
+  );
+}
+
+/** Tickets sold over the last few days, today included. */
+export function recentTickets(daily: DailySales[], range: '7' | '30'): number {
+  const { from } = rangeBounds(range, daily);
+  return daily.reduce((sum, d) => (d.day >= from ? sum + d.tickets : sum), 0);
+}
+
+/** One event's last 30 days at a glance, for its card. Inline elements, since the card is a link. */
+export function MiniChart(props: { daily: DailySales[] }) {
+  const { from, to } = rangeBounds('30', props.daily);
+  const buckets = buildBuckets(props.daily, 0, from, to);
+  const max = Math.max(0, ...buckets.map((b) => b.tickets));
+  const total = recentTickets(props.daily, '30');
+  const caption = total === 0 ? 'No sales in the last 30 days' : `${total} ${total === 1 ? 'ticket' : 'tickets'} in the last 30 days`;
+  return (
+    <span class="mini-chart">
+      <span class="mini-bars" role="img" aria-label={caption}>
+        {buckets.map((b) => (
+          <span class={`h-${max > 0 ? Math.round((b.tickets / max) * 100) : 0}`} />
+        ))}
+      </span>
+      <span class="muted">{caption}</span>
+    </span>
   );
 }
 

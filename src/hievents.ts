@@ -236,6 +236,25 @@ export async function currentEventCodes(): Promise<EventCode[]> {
   `.then((rows) => rows.sort((a, b) => (a.start?.getTime() ?? Infinity) - (b.start?.getTime() ?? Infinity) || a.event_id - b.event_id));
 }
 
+export type TicketEvent = { id: number; title: string; start: Date | null; timezone: string | null };
+
+/** Every published event that is not over, soonest first: the ones free tickets can be used on. */
+export async function publishedUpcomingEvents(): Promise<TicketEvent[]> {
+  const live = (await canReadStatus()) ? sql`AND e.status = 'LIVE'` : sql``;
+  return sql<TicketEvent[]>`
+    SELECT
+      e.id::int AS id,
+      e.title,
+      coalesce(occ.first_start, e.start_date) AT TIME ZONE 'UTC' AS "start",
+      e.timezone
+    FROM events e
+    ${eventDates()}
+    WHERE e.deleted_at IS NULL ${accountFilter()} ${live}
+      AND (coalesce(occ.last_end, occ.first_start, e.start_date) IS NULL
+           OR coalesce(occ.last_end, occ.first_start, e.start_date) >= (now() AT TIME ZONE 'UTC'))
+  `.then((rows) => rows.sort((a, b) => (a.start?.getTime() ?? Infinity) - (b.start?.getTime() ?? Infinity) || a.id - b.id));
+}
+
 export async function upcomingEventsForCodes(codes: string[]): Promise<PageEvent[]> {
   if (codes.length === 0) return [];
   const live = (await canReadStatus()) ? sql`AND e.status = 'LIVE'` : sql``;

@@ -46,7 +46,7 @@ describeIntegration('sales numbers from the seeded Hi.Events database', () => {
   test('promo codes are one click to copy: on the dashboard, the event cards and the event page', async () => {
     const both = await newPromoter(server, admin, { codes: 'djmax, GHOST' });
     const html = await both.client.page('/');
-    const card = html.slice(html.indexOf('class="card codes-card"'), html.indexOf('Tickets sold per day'));
+    const card = html.slice(html.indexOf('class="card codes-card"'), html.indexOf('Past events'));
     expect(text(card)).toContain('Your promo codes');
     // Spelled as in Hi.Events, with the upcoming events it works on.
     expect(card).toContain('data-copy-text="DJMAX"');
@@ -54,7 +54,7 @@ describeIntegration('sales numbers from the seeded Hi.Events database', () => {
     expect(card).toContain('data-copy-text="ghost"');
     expect(text(card)).toContain('Not in the ticketing system yet');
     // Upcoming event cards carry a copy button for their code; past ones do not.
-    const upcoming = html.slice(html.indexOf('Upcoming events'), html.indexOf('Past events'));
+    const upcoming = html.slice(html.indexOf('Upcoming events'), html.indexOf('My totals'));
     const past = html.slice(html.indexOf('Past events'));
     // (One seeded event spells it "djmax": each card shows Hi.Events' spelling.)
     expect(upcoming.match(/class="secondary small code-copy" data-copy-text="djmax"/gi)?.length).toBe(3);
@@ -94,12 +94,6 @@ describeIntegration('sales numbers from the seeded Hi.Events database', () => {
 
   test('the chart counts completed tickets by the day they were ordered', async () => {
     const chartTotal = (html: string) => html.match(/<h2>Tickets sold per day<\/h2><span class="muted">(\d+) tickets?/)?.[1];
-    expect(chartTotal(await promoter.client.page('/?range=all'))).toBe('10');
-    // Last 7 days: 1 yesterday (Winter Opening), 2 four days ago (other account), 1 today.
-    expect(chartTotal(await promoter.client.page('/?range=7'))).toBe('4');
-    // 30 days adds the two orders from 9 and 12 days ago; the 85-day-old one needs 90 days.
-    expect(chartTotal(await promoter.client.page('/?range=30'))).toBe('7');
-    expect(chartTotal(await promoter.client.page('/?range=90'))).toBe('10');
     // An event page's chart covers that event only.
     expect(chartTotal(await promoter.client.page('/events/1?range=all'))).toBe('4');
   });

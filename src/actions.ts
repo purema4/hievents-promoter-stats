@@ -4,9 +4,10 @@ import { audit } from './audit';
 import { createLoginToken } from './auth';
 import { rateFor } from './commission';
 import { config } from './config';
-import { currentEventCodes, statsForCodes } from './hievents';
+import { currentEventCodes, publishedUpcomingEvents, statsForCodes } from './hievents';
 import { codesFor, listUsers, type User } from './local-db';
 import { sendEmail } from './mail';
+import { allEventBanners } from './banners';
 import { allMediaDrives } from './media-drives';
 import { formatMoney, totalsByCurrency } from './money';
 import { notify } from './notifications';
@@ -37,7 +38,11 @@ export async function emailLoginLink(
 export async function promoterData(promoter: User) {
   const codes = codesFor(promoter.id);
   const percent = rateFor(promoter);
-  const [rows, team] = await Promise.all([statsForCodes(codes), hadTeam(promoter.id) ? teamCommission(promoter) : []]);
+  const [rows, team, ticketEvents] = await Promise.all([
+    statsForCodes(codes),
+    hadTeam(promoter.id) ? teamCommission(promoter) : [],
+    publishedUpcomingEvents(),
+  ]);
   return {
     codes,
     percent,
@@ -45,7 +50,9 @@ export async function promoterData(promoter: User) {
     team,
     balances: balances(promoter.id, totalsByCurrency(rows, percent), team),
     rewards: rewardsFor(promoter.id, summarizeEvents(rows, percent)),
+    ticketEvents,
     media: allMediaDrives(),
+    banners: allEventBanners(),
   };
 }
 

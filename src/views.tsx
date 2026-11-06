@@ -19,6 +19,7 @@ import { pageShortLink, shortDomain } from './short-links';
 import { hiddenByTeam } from './promoter-page';
 import { rateFor } from './commission';
 import { findInvite, inviteState, type InviteLink } from './invites';
+import { BANNER_MAX_LENGTH, generalBanner } from './banners';
 import { isTeamLead, teamCommissionPercentFor, type TeamCommission } from './teams';
 import { codesHref, codesPerPage, type CodeFilter, type CodePage } from './promo-code-list';
 import { usualRuleFor, type User } from './local-db';
@@ -311,14 +312,25 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .inline { margin: 0; }
 .codes-line { margin-bottom: 12px; }
 h2.first, p.first { margin-top: 0; }
-.event-card { display: grid; gap: 12px; }
+.event-grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 330px), 1fr)); }
+.event-card { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 .event-card:hover { border-color: var(--accent); }
-a.event-card-main { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; color: inherit; text-decoration: none; }
-a.event-card-main .event-main { flex: 1 1 260px; min-width: 0; display: flex; gap: 12px; align-items: center; }
+a.event-card-main { display: grid; gap: 14px; color: inherit; text-decoration: none; }
+a.event-card-main .event-main { min-width: 0; display: flex; gap: 12px; align-items: center; }
+.event-card .card-actions { margin-top: auto; }
+.event-stats { display: flex; flex-wrap: wrap; gap: 8px; font-variant-numeric: tabular-nums; }
+.event-stats > span { flex: 1 1 auto; display: grid; align-content: start; gap: 2px; padding: 10px; border-radius: 8px; background: var(--bg); }
+.event-stats .big { font-size: 19px; white-space: nowrap; }
+.event-stats .primary { background: color-mix(in srgb, var(--accent) 12%, var(--surface)); }
+.event-stats .primary .big { color: var(--accent); font-size: 28px; line-height: 1.1; }
+.banner { display: flex; gap: 10px; align-items: flex-start; margin: 0 0 16px; padding: 10px 12px; border: 1px solid var(--warn); border-left-width: 4px; border-radius: 8px; background: color-mix(in srgb, var(--warn) 10%, var(--surface)); font-size: 14px; }
+.banner p { margin: 0; min-width: 0; white-space: pre-line; overflow-wrap: anywhere; }
+.banner svg { flex: none; margin-top: 1px; color: var(--warn); }
+.event-card .banner { margin: 0; }
+.banner-form { display: grid; gap: 8px; justify-items: start; margin: 0; }
+.banner-form textarea { font: inherit; min-height: 0; }
 a.event-card-main .event { flex: 1; min-width: 0; display: grid; gap: 2px; }
 a.event-card-main .event strong { overflow-wrap: anywhere; }
-a.event-card-main .numbers { display: flex; gap: 20px; margin-left: auto; font-variant-numeric: tabular-nums; }
-a.event-card-main .numbers > span { display: grid; text-align: right; }
 a.event-card-main .big { font-size: 22px; font-weight: 650; }
 .crumbs { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
 .prev-next { display: flex; gap: 16px; margin-left: auto; }
@@ -379,9 +391,11 @@ h3 { font-size: 15px; margin: 0 0 12px; }
 .chip { display: inline-block; font-size: 12px; font-weight: 600; padding: 1px 8px; margin: 2px 0; border-radius: 999px; color: var(--ok); border: 1px solid var(--ok); }
 .reward-card { display: flex; gap: 16px; align-items: center; justify-content: space-between; margin-bottom: 20px; }
 .reward-card > div { flex: 1; }
-.reward-list { display: grid; gap: 14px; }
+.reward-list { display: grid; gap: 18px; }
 .reward-row { display: grid; gap: 8px; }
-.reward-form { display: grid; gap: 8px; grid-template-columns: auto 1fr auto; }
+.reward-form { display: grid; gap: 8px; grid-template-columns: 1fr auto; margin: 0; }
+.reward-form .wide { grid-column: 1 / -1; }
+.reward-form button { justify-self: start; }
 @media (max-width: 480px) { .reward-form { grid-template-columns: 1fr; } }
 .account-form { display: grid; gap: 16px; margin-bottom: 8px; }
 .stack-card { display: grid; gap: 12px; align-content: start; }
@@ -619,8 +633,27 @@ export function ReadOnlyPage(props: { user: User }) {
   );
 }
 
-export function Layout(props: { title: string; user?: User; children: Child; hideInstallBanner?: boolean }) {
+/** A notice from the team, kept as they typed it: the text is escaped and its line breaks kept. */
+export function Banner(props: { text: string; label: string }) {
+  return (
+    <div class="banner" role="note" aria-label={props.label}>
+      <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+        <path fill="currentColor" d="M12 2 1 21h22L12 2Zm-1 7h2v6h-2V9Zm0 8h2v2h-2v-2Z" />
+      </svg>
+      <p>{props.text}</p>
+    </div>
+  );
+}
+
+export function Layout(props: {
+  title: string;
+  user?: User;
+  children: Child;
+  hideInstallBanner?: boolean;
+  promoterView?: boolean; // an admin seeing a promoter's page gets its banner too
+}) {
   const brand = getBrand();
+  const notice = props.user && (!props.user.is_admin || props.promoterView) ? generalBanner() : '';
   return (
     <html lang="en" data-theme={props.user?.theme === 'light' || props.user?.theme === 'dark' ? props.user.theme : undefined}>
       <head>
@@ -665,6 +698,7 @@ export function Layout(props: { title: string; user?: User; children: Child; hid
             <a class="nav-overlay" href="#" aria-label="Close the menu" tabindex={-1}></a>
             <div>
               <main>
+                {notice && <Banner text={notice} label="Notice for all promoters" />}
                 {!props.user.app_installed_at && !props.user.impersonator && !props.hideInstallBanner && <InstallBanner brand={brand} />}
                 {props.children}
               </main>
@@ -833,6 +867,7 @@ function Sidebar(props: { user: User }) {
             <a href="/admin/teams">Teams</a>
             <a href="/admin/commissions">Commissions</a>
             <a href="/admin/media">Media drives</a>
+            <a href="/admin/banners">Banners</a>
             <a href="/admin/invites">Invite links</a>
             <a href="/admin/pages">Promoter pages</a>
           </NavGroup>
@@ -2812,8 +2847,9 @@ export function AdminRewardsPage(props: { user: User; rules: RewardRules; saved:
         <div class="card stack-card">
           <h2 class="first">Free tickets</h2>
           <p class="muted">
-            Counted per event, from the promoter's sales for that event. Only upcoming events offer them. Clear a row to remove
-            it; leave every row empty and "every" at 0 to turn free tickets off.
+            Counted per event, from the promoter's sales for that event. They use them on that event or ask to roll them
+            over to another upcoming one; you accept or decline each request. Unrequested ones are lost when the event is
+            over. Clear a row to remove it; leave every row empty and "every" at 0 to turn free tickets off.
           </p>
           <MilestoneRows prefix="ticket" track={rules.tickets} unit="sales" />
           <RepeatRow prefix="ticket" track={rules.tickets} unit="sales" />
@@ -3650,6 +3686,65 @@ export function AdminMediaPage(props: {
               </button>
             </form>
             {url && <p class="muted">Empty the link and save to remove it.</p>}
+          </div>
+        );
+      })}
+    </Layout>
+  );
+}
+
+export function AdminBannersPage(props: {
+  user: User;
+  general: string;
+  events: { id: number; title: string; start: Date | null; timezone: string | null; promoters: User[] }[];
+  banners: Map<number, string>;
+  ok?: string;
+  error?: string;
+}) {
+  return (
+    <Layout title="Banners" user={props.user}>
+      <h1>Banners</h1>
+      <p class="muted">
+        Notices for promoters, in plain text, up to {BANNER_MAX_LENGTH} characters. Empty a banner and save to remove it.
+      </p>
+      <Flash error={props.error} ok={props.ok} />
+      <div class="card rate-card" id="general">
+        <h2 class="first">All promoters</h2>
+        <p class="muted">Shown at the top of every promoter page, right under the menu.</p>
+        {props.general && <Banner text={props.general} label="Current notice for all promoters" />}
+        <form class="banner-form" method="post" action="/admin/banners/general">
+          <textarea name="message" rows={3} maxlength={BANNER_MAX_LENGTH} aria-label="Banner for all promoters">
+            {props.general}
+          </textarea>
+          <button class="secondary" type="submit">
+            Save
+          </button>
+        </form>
+      </div>
+      <h2>Per event</h2>
+      <p class="muted">
+        Shown on the event's card and event page to the promoters with a code on it, until the event is over. Only
+        drafts and events that are not over are listed.
+      </p>
+      {props.events.length === 0 && <p class="muted">No upcoming events with promoter codes.</p>}
+      {props.events.map((e) => {
+        const message = props.banners.get(e.id) ?? '';
+        return (
+          <div class="card rate-card" id={`event-${e.id}`}>
+            <h2 class="first">{e.title}</h2>
+            <p class="muted">
+              {formatDate(e.start, e.timezone)} · {e.promoters.length} {e.promoters.length === 1 ? 'promoter' : 'promoters'}
+            </p>
+            {message && <Banner text={message} label={`Current notice for ${e.title}`} />}
+            <form class="banner-form" method="post" action="/admin/banners/event">
+              <input type="hidden" name="event_id" value={String(e.id)} />
+              <textarea name="message" rows={2} maxlength={BANNER_MAX_LENGTH} aria-label={`Banner for ${e.title}`}>
+                {message}
+              </textarea>
+              <button class="secondary" type="submit">
+                Save
+              </button>
+            </form>
           </div>
         );
       })}

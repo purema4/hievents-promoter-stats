@@ -220,6 +220,28 @@ describeIntegration('payouts, rewards and changes by hand', () => {
       expect(text(await p.client.page('/payouts'))).toContain('Given');
     });
 
+    test('rolled over to another upcoming event, for an admin to accept or decline', async () => {
+      const p = await newPromoter(server, admin, { codes: 'LUNA' }); // only on Warehouse Night (event 1)
+      const page = await p.client.page('/payouts');
+      const picker = text(page.slice(page.indexOf('name="use_for"'), page.indexOf('</select>', page.indexOf('name="use_for"'))));
+      expect(picker).toContain('For Warehouse Night');
+      expect(picker).toContain('Roll over to Winter Opening');
+      expect(picker).not.toContain('Summer Rooftop'); // over
+      expect(picker).not.toContain('Secret Afterparty'); // a draft
+      expect(text(page)).toContain('lost once their event is over');
+      const roll = (useFor: string) => p.client.post('/rewards/ticket', { event_id: '1', use_for: useFor, quantity: '1', details: '' });
+      for (const refused of ['4', '5', '999']) expect((await roll(refused)).status).toBe(400);
+      expect(location(await roll('2'))).toBe('/payouts?ok=reward_requested#rewards');
+      const mail = await waitForSubject(server.adminEmail, `Reward request from ${p.name} (${p.email})`);
+      expect(mail.Text).toContain('Reward: 1 free ticket for Winter Opening, rolled over from Warehouse Night');
+      const queue = await admin.page('/admin/payouts');
+      expect(text(queue)).toContain('rolled over from Warehouse Night');
+      const id = queue.match(new RegExp(`${p.name}[\\s\\S]*?action="/admin/rewards/(\\d+)/reject"`))![1]!;
+      expect(location(await admin.post(`/admin/rewards/${id}/reject`, { admin_note: 'Use it on Warehouse Night' }))).toBe('/admin/payouts?ok=reward_rejected');
+      // Declined: back on Warehouse Night.
+      expect(location(await roll(''))).toBe('/payouts?ok=reward_requested#rewards');
+    });
+
     test('merch needs the item and size, and an unlocked item', async () => {
       const p = await newPromoter(server, admin);
       let res = await p.client.post('/rewards/merch', { details: '' });
