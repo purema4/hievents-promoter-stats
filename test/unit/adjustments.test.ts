@@ -40,7 +40,7 @@ describe('adjustments', () => {
     expect(outsideTickets(user.id, today(), today())).toBe(10);
     expect(outsideTickets(user.id, '2000-01-01', '2000-12-31')).toBe(0);
     expect(moneyAdjustmentsBetween(user.id, today(), today())).toBe(3950);
-    expect(freeTicketBonus(user.id)).toEqual(new Map([[7, 1], [8, 1]]));
+    expect(freeTicketBonus(user.id)).toEqual(new Map([['7:free_tickets', 1], ['8:free_tickets', 1]]));
     expect(merchBonus(user.id)).toBe(1);
     expect(adjustmentsByDay(user.id)).toEqual([{ day: today(), tickets: 10, cents: 3950 }]);
   });

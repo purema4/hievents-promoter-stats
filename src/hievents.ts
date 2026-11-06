@@ -236,6 +236,21 @@ export async function currentEventCodes(): Promise<EventCode[]> {
   `.then((rows) => rows.sort((a, b) => (a.start?.getTime() ?? Infinity) - (b.start?.getTime() ?? Infinity) || a.event_id - b.event_id));
 }
 
+export type EventCodeTickets = { event_id: number; code: string | null; tickets: number };
+
+/** Tickets sold for whole events, by promo code (null: no code), with the same definition as the stats. */
+export async function ticketsByEventAndCode(eventIds: number[]): Promise<EventCodeTickets[]> {
+  if (eventIds.length === 0) return [];
+  return sql<EventCodeTickets[]>`
+    SELECT o.event_id::int AS event_id, lower(pc.code) AS code, count(a.id)::int AS tickets
+    FROM orders o
+    JOIN attendees a ON a.order_id = o.id AND a.deleted_at IS NULL AND a.status <> 'CANCELLED'
+    LEFT JOIN promo_codes pc ON pc.id = o.promo_code_id
+    WHERE o.event_id = ANY(${eventIds}) AND o.deleted_at IS NULL AND o.status = 'COMPLETED'
+    GROUP BY 1, 2
+  `;
+}
+
 export type TicketEvent = { id: number; title: string; start: Date | null; timezone: string | null };
 
 /** Every published event that is not over, soonest first: the ones free tickets can be used on. */

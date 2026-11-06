@@ -27,5 +27,6 @@ export function event(id: number, tickets: number, daysFromNow: number, title = 
     fullPrice: tickets * 2500,
     paid: tickets * 2250,
     commission: tickets * 250,
+    bonus: 0,
   };
 }

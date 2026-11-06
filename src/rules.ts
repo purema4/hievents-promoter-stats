@@ -103,6 +103,30 @@ export function endRulesOf(userId: number, by: number | null) {
   for (const r of rows) saveRuleVersion(r.scope, { userId, eventId: r.event_id }, '', by);
 }
 
+/**
+ * Sets one line of a rule (`line` is the whole "name = expression"), or removes it with null, keeping
+ * the rule's other lines. Used by the forms that still set a rate: the usual rate, Commissions, and the
+ * free-ticket track of Levels & rewards.
+ */
+export function setRuleLine(scope: RuleScope, target: RuleTarget, name: string, line: string | null, by: number | null): number {
+  const text = currentRule(scope, target)?.text ?? '';
+  const kept = text.split('\n').filter((l) => {
+    const m = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=(?!=)/.exec(l);
+    return !m || m[1] !== name;
+  });
+  const next = [...kept, ...(line ? [line] : [])].join('\n').trim();
+  // Only comments left: the rule is removed.
+  const meaningful = next.split('\n').some((l) => l.trim() !== '' && !l.trim().startsWith('#'));
+  return saveRuleVersion(scope, target, meaningful ? next : '', by);
+}
+
+/** A promoter's usual rate, as their rule's commission line (none: the default rule's applies). */
+export function setUsualRule(userId: number, commission: { percent: number | null; flatCents: number | null }, by: number | null) {
+  const rule: EventRule | null =
+    commission.flatCents != null ? { kind: 'flat', value: commission.flatCents } : commission.percent != null ? { kind: 'percent', value: commission.percent } : null;
+  return setRuleLine('promoter', { userId }, 'commission', rule ? commissionLine(rule) : null, by);
+}
+
 // --- What applies ------------------------------------------------------------------------------------
 
 export type AppliedRule = {

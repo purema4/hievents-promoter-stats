@@ -1,8 +1,8 @@
+import { earningsFor } from './earnings';
 import type { Context } from 'hono';
 import { alertAdmins } from './alert-prefs';
 import { audit } from './audit';
 import { createLoginToken } from './auth';
-import { rateFor } from './commission';
 import { config } from './config';
 import { currentEventCodes, publishedUpcomingEvents, statsForCodes } from './hievents';
 import { codesFor, listUsers, type User } from './local-db';
@@ -37,19 +37,22 @@ export async function emailLoginLink(
 // Everything a promoter's pages need; admins load the same data to see exactly what a promoter sees.
 export async function promoterData(promoter: User) {
   const codes = codesFor(promoter.id);
-  const percent = rateFor(promoter);
   const [rows, team, ticketEvents] = await Promise.all([
     statsForCodes(codes),
     hadTeam(promoter.id) ? teamCommission(promoter) : [],
     publishedUpcomingEvents(),
   ]);
+  // What the rules give on each event; `percent` keeps its old name across the pages.
+  const percent = await earningsFor(promoter, rows, { next: true });
   return {
     codes,
     percent,
+    /** The rules engine was down: the numbers are the last ones known. */
+    stale: percent.stale,
     rows,
     team,
     balances: balances(promoter.id, totalsByCurrency(rows, percent), team),
-    rewards: rewardsFor(promoter.id, summarizeEvents(rows, percent)),
+    rewards: rewardsFor(promoter.id, summarizeEvents(rows, percent), percent),
     ticketEvents,
     media: allMediaDrives(),
     banners: allEventBanners(),

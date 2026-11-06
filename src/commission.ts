@@ -1,5 +1,6 @@
+import { commissionLine, setRuleLine } from './rules';
 import { db, usualRuleFor, type User } from './local-db';
-import type { EventRule, Rate } from './money';
+import type { EventRule, LegacyRate } from './money';
 
 /*
  * Commission set by admins for one promoter on one event (on Promoters → Commissions): another
@@ -17,7 +18,7 @@ db.exec(`
 `);
 
 /** A promoter's usual rate and their event rates. */
-export function rateFor(user: User): Rate {
+export function rateFor(user: User): LegacyRate {
   const rows = db
     .query<{ event_id: number } & EventRule, [number]>('SELECT event_id, kind, value FROM event_commissions WHERE user_id = ?')
     .all(user.id);
@@ -31,7 +32,9 @@ export function allEventRules(): Map<string, EventRule> {
 }
 
 /** Sets a promoter's rate for an event, or back to their usual rate with null. */
-export function setEventRule(userId: number, eventId: number, rule: EventRule | null) {
+export function setEventRule(userId: number, eventId: number, rule: EventRule | null, by: number | null = null) {
+  // The rule is what counts; this table only remembers how the rate was entered.
+  setRuleLine('promoter_event', { userId, eventId }, 'commission', rule ? commissionLine(rule) : null, by);
   if (!rule) {
     db.query('DELETE FROM event_commissions WHERE user_id = ? AND event_id = ?').run(userId, eventId);
     return;

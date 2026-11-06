@@ -30,8 +30,15 @@ for (const id of ids) {
   const user = findUser(id)!;
   for (const codes of codeSets) {
     const rows = await statsForCodes(codes);
-    for (const e of summarizeEvents(rows, rateFor(user))) {
-      before.push({ user: user.name, id, codes: codes.join('+'), event: e.id, codesOnEvent: e.rows.length, tickets: e.tickets, fullPrice: e.fullPrice, commission: e.commission, free: freeTicketsEarned(e.tickets) });
+    // The commission as the code before rules worked it out: each code's row on its own, at the event's rate.
+    const rate = rateFor(user);
+    const oldCommission = (r: (typeof rows)[number]) => {
+      const rule = rate.events.get(r.event_id) ?? rate.usual;
+      return rule.kind === 'flat' ? Math.round(rule.value) * r.tickets_sold : Math.round(Number(r.full_price) * rule.value);
+    };
+    for (const e of summarizeEvents(rows, 0)) {
+      const commission = e.rows.reduce((sum, r) => sum + oldCommission(r), 0);
+      before.push({ user: user.name, id, codes: codes.join('+'), event: e.id, codesOnEvent: e.rows.length, tickets: e.tickets, fullPrice: e.fullPrice, commission, free: freeTicketsEarned(e.tickets) });
     }
   }
 }

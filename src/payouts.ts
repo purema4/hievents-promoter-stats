@@ -27,6 +27,8 @@ db.exec(`
 addColumn('users', 'payout_method', 'TEXT');
 addColumn('users', 'payout_details', 'TEXT');
 addColumn('payout_requests', 'details', 'TEXT');
+// The rule versions the balance was worked out with, as JSON: a past payout can always be explained.
+addColumn('payout_requests', 'rule_versions', 'TEXT');
 
 export type PayoutRequest = {
   id: number;
@@ -38,6 +40,7 @@ export type PayoutRequest = {
   method: string;
   details: string | null;
   note: string | null;
+  rule_versions: string | null;
   status: 'pending' | 'paid' | 'rejected';
   admin_note: string | null;
   created_at: string;
@@ -48,8 +51,9 @@ export type Balance = {
   currency: string;
   fromSales: number; // commission on Hi.Events sales
   fromTeam: number; // team leads: their share of their promoters' sales
+  bonus: number; // bonuses the rules give, kept apart from commission
   added: number; // money added (or removed) by admins
-  earned: number; // fromSales + fromTeam + added
+  earned: number; // fromSales + fromTeam + bonus + added
   paidOut: number;
   pending: number;
   available: number;
@@ -92,10 +96,11 @@ export function balances(userId: number, totals: Totals[], team: { currency: str
     const fromSales = totals.find((t) => t.currency === currency)?.commission ?? 0;
     const fromTeam = team.find((t) => t.currency === currency)?.commission ?? 0;
     const extra = added.get(currency) ?? 0;
-    const earned = fromSales + fromTeam + extra;
+    const bonus = totals.find((t) => t.currency === currency)?.bonus ?? 0;
+    const earned = fromSales + fromTeam + bonus + extra;
     const paidOut = rows.find((r) => r.currency === currency && r.status === 'paid')?.cents ?? 0;
     const pending = rows.find((r) => r.currency === currency && r.status === 'pending')?.cents ?? 0;
-    return { currency, fromSales, fromTeam, added: extra, earned, paidOut, pending, available: earned - paidOut - pending };
+    return { currency, fromSales, fromTeam, bonus, added: extra, earned, paidOut, pending, available: earned - paidOut - pending };
   });
 }
 
@@ -109,7 +114,7 @@ export function cashAvailable(balance: Balance): number {
 export function requestPayout(
   user: User,
   balance: Balance,
-  input: { amountCents: number; method: string; details: string; note: string },
+  input: { amountCents: number; method: string; details: string; note: string; ruleVersions?: number[] },
 ): RequestResult {
   if (!config.payoutMethods.includes(input.method)) return 'missing_method';
   if (!Number.isInteger(input.amountCents) || input.amountCents <= 0) return 'invalid_amount';
@@ -124,8 +129,18 @@ export function requestPayout(
     if (open > 0) return 'already_pending';
     if (input.amountCents > balance.available) return 'too_much';
     db.query(
-      'INSERT INTO payout_requests (user_id, promoter_name, promoter_email, amount_cents, currency, method, details, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-    ).run(user.id, user.name, user.email, input.amountCents, balance.currency, input.method, input.details.trim() || null, input.note.trim() || null);
+      'INSERT INTO payout_requests (user_id, promoter_name, promoter_email, amount_cents, currency, method, details, note, rule_versions) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    ).run(
+      user.id,
+      user.name,
+      user.email,
+      input.amountCents,
+      balance.currency,
+      input.method,
+      input.details.trim() || null,
+      input.note.trim() || null,
+      input.ruleVersions?.length ? JSON.stringify(input.ruleVersions) : null,
+    );
     db.query('UPDATE users SET payout_method = ?, payout_details = ? WHERE id = ?').run(input.method, input.details.trim() || null, user.id);
     return 'ok';
   })();

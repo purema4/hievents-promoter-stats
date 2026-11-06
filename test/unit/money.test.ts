@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import type { CodeStats } from '../../src/hievents';
-import { commissionCents, commissionOn, describeRate, formatMoney, formatPercent, toCents, totalsByCurrency, usualCommissionOn, type Rate } from '../../src/money';
+import { commissionCents, describeRate, formatMoney, formatPercent, splitCents, splitCommission, toCents, totalsByCurrency, usualCommissionOn, type EventEarning, type LegacyRate, type Rate } from '../../src/money';
 
 function row(overrides: Partial<CodeStats>): CodeStats {
   return {
@@ -52,7 +52,7 @@ describe('totalsByCurrency', () => {
       ],
       10,
     );
-    expect(totals).toEqual([{ currency: 'CAD', fullPrice: 11000, paid: 9900, commission: 1100, tickets: 5, pending: 1, orders: 4 }]);
+    expect(totals).toEqual([{ currency: 'CAD', fullPrice: 11000, paid: 9900, commission: 1100, bonus: 0, tickets: 5, pending: 1, orders: 4 }]);
   });
 
   test('keeps currencies apart', () => {
@@ -102,23 +102,46 @@ describe('formatting', () => {
   });
 });
 
+const earning = (commission: number, bonus = 0): EventEarning => ({ commission, bonus, merch: 0, rewards: {}, next: {}, versionIds: [1], errors: [] });
+const rules = (events: [number, EventEarning][]): Rate => ({ events: new Map(events), stale: false, versionIds: [1] });
+
+describe('with rules: each event gets what its rule gives', () => {
+  test('totals add up the events, bonus kept apart', () => {
+    const rate = rules([[1, earning(6000, 500)], [2, earning(0)]]);
+    const totals = totalsByCurrency(
+      [row({ event_id: 1, code: 'a', full_price: '100.00', tickets_sold: 10 }), row({ event_id: 1, code: 'b', full_price: '20.00', tickets_sold: 2 }), row({ event_id: 2, full_price: '10.00', tickets_sold: 1 })],
+      rate,
+    );
+    expect(totals).toEqual([{ currency: 'CAD', fullPrice: 13000, paid: 0, commission: 6000, bonus: 500, tickets: 13, pending: 0, orders: 0 }]);
+  });
+
+  test("an event's commission is split over its codes or days to the cent", () => {
+    const rate = rules([[1, earning(1000)], [2, earning(100)]]);
+    const parts = splitCommission(rate, [
+      { event_id: 1, full_price: '10.00', tickets: 1 },
+      { event_id: 1, full_price: '10.00', tickets: 1 },
+      { event_id: 1, full_price: '10.00', tickets: 1 },
+      { event_id: 2, full_price: '0.00', tickets: 3 },
+      { event_id: 2, full_price: '0.00', tickets: 0 },
+    ]);
+    expect(parts.slice(0, 3).reduce((a, b) => a + b, 0)).toBe(1000);
+    expect(parts.slice(0, 3)).toEqual([334, 333, 333]);
+    // No sales at full price (free tickets): split by tickets.
+    expect(parts.slice(3)).toEqual([100, 0]);
+    // A bare percentage keeps rounding each part on its own, like before rules.
+    expect(splitCommission(10, [{ full_price: '0.15', tickets: 1 }])).toEqual([2]);
+  });
+
+  test('splitCents', () => {
+    expect(splitCents(10, [1, 1, 1])).toEqual([4, 3, 3]);
+    expect(splitCents(0, [5, 5])).toEqual([0, 0]);
+    expect(splitCents(7, [0, 0])).toEqual([4, 3]);
+    expect(splitCents(5, [])).toEqual([]);
+  });
+});
+
 describe('usual rate: a percentage or a flat amount per ticket', () => {
-  const flat: Rate = { usual: { kind: 'flat', value: 200 }, events: new Map() };
-
-  test('a flat usual rate pays per ticket, never a percentage on top', () => {
-    expect(commissionOn(flat, 1, '100.00', 4)).toBe(800);
-    expect(commissionOn(flat, undefined, '100.00', 4)).toBe(800);
-    expect(totalsByCurrency([row({ event_id: 1, tickets_sold: 4, full_price: '100.00' })], flat)[0]!.commission).toBe(800);
-  });
-
-  test('an event rate replaces the usual one, either way round', () => {
-    const mixed: Rate = { usual: { kind: 'flat', value: 200 }, events: new Map([[1, { kind: 'percent', value: 10 }]]) };
-    expect(commissionOn(mixed, 1, '100.00', 4)).toBe(1000);
-    expect(commissionOn(mixed, 2, '100.00', 4)).toBe(800);
-    const percent: Rate = { usual: { kind: 'percent', value: 10 }, events: new Map([[1, { kind: 'flat', value: 300 }]]) };
-    expect(commissionOn(percent, 1, '100.00', 4)).toBe(1200);
-    expect(commissionOn(percent, 2, '100.00', 4)).toBe(1000);
-  });
+  const flat: LegacyRate = { usual: { kind: 'flat', value: 200 }, events: new Map() };
 
   test('sales outside Hi.Events: tickets × the flat amount, or the sales total × the percentage', () => {
     expect(usualCommissionOn({ kind: 'flat', value: 250 }, 30_000, 12)).toBe(3000);
@@ -129,7 +152,7 @@ describe('usual rate: a percentage or a flat amount per ticket', () => {
 
   test('described for admins', () => {
     expect(describeRate(flat)).toBe('$2.00 per ticket');
-    expect(describeRate(10)).toBe('10%');
+    expect(describeRate({ usual: { kind: 'percent', value: 10 }, events: new Map() })).toBe('10%');
     expect(describeRate({ ...flat, events: new Map([[1, { kind: 'percent', value: 5 }]]) })).toBe('$2.00 per ticket, other rates on some events');
   });
 });

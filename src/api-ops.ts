@@ -1,3 +1,5 @@
+import { setUsualRule } from './rules';
+import { rulesEngineUp } from './rules-engine';
 import type { Context } from 'hono';
 import { announcePayoutRequest, announceRewardRequest, commissionEvents, emailLoginLink, finishPayout, finishReward, promoterData } from './actions';
 import { audit } from './audit';
@@ -5,11 +7,12 @@ import type { ApiToken } from './api-tokens';
 import { rangeBounds, today, type Range } from './chart';
 import { rateFor, setEventRule } from './commission';
 import { config } from './config';
-import { allPromoCodes, dailyForCodes } from './hievents';
+import { allPromoCodes, dailyForCodes, statsForCodes } from './hievents';
 import { leaderboard, type Sort } from './leaderboard';
 import { pageLink, setAlias, suggestAlias } from './links';
 import { codeOwners, codesFor, createUser, findUser, findUserByEmail, listUsers, normalizeCodes, setCodes, usualRuleFor, type User } from './local-db';
-import { commissionOn, describeRate, describeRule, formatMoney, toCents, totalsByCurrency, type EventRule } from './money';
+import { describeRate, describeRule, formatMoney, splitCommission, toCents, totalsByCurrency, type EventRule } from './money';
+import { earningsFor } from './earnings';
 import { findPayout, listPayouts, payoutsFor, requestPayout, type PayoutRequest, type RequestResult } from './payouts';
 import { filterCodes } from './promo-code-list';
 import { summarizeEvents } from './promoter-views';
@@ -27,7 +30,7 @@ export type Call = { user: User; token: ApiToken; c: Context };
 
 export class ApiError extends Error {
   constructor(
-    public status: 400 | 403 | 404 | 409 | 429,
+    public status: 400 | 403 | 404 | 409 | 429 | 503,
     public code: string,
     message: string,
   ) {
@@ -219,7 +222,7 @@ export const ops: Op[] = [
       return {
         promoter: { id: p.id, name: p.name },
         codes: data.codes,
-        commission: describeRate(data.percent),
+        commission: describeRate(rateFor(p)),
         totals: totalsByCurrency(data.rows, data.percent).map((t) => ({
           currency: t.currency,
           tickets_sold: t.tickets,
@@ -228,6 +231,7 @@ export const ops: Op[] = [
           full_price_cents: t.fullPrice,
           paid_cents: t.paid,
           commission_cents: t.commission,
+          bonus_cents: t.bonus,
         })),
         tickets_sold_all_time: data.rewards.totalSold,
         tickets_sold_outside_hievents: data.rewards.outsideSold,
@@ -256,13 +260,16 @@ export const ops: Op[] = [
           full_price_cents: e.fullPrice,
           paid_cents: e.paid,
           commission_cents: e.commission,
-          commission_rate: describeRule(data.percent.events.get(e.id) ?? data.percent.usual, e.currency),
+          bonus_cents: e.bonus,
+          commission_rate: ((rate) => describeRule(rate.events.get(e.id) ?? rate.usual, e.currency))(rateFor(p)),
           media_drive: data.media.get(e.id) ?? null,
         })),
         rewards: {
           free_tickets: data.rewards.tickets.map((t) => ({
             event_id: t.event.id,
             event_title: t.event.title,
+            reward_type: t.type.key,
+            reward: t.type.label_en,
             available: t.available,
             earned: t.earned,
             used: t.used,
@@ -292,18 +299,21 @@ export const ops: Op[] = [
     },
     run: async ({ user }, input: { promoter_id?: number; event_id?: number; range: Range }) => {
       const p = promoterFor(user, input.promoter_id);
-      const rate = rateFor(p);
-      const days = await dailyForCodes(codesFor(p.id), input.event_id);
+      const codes = codesFor(p.id);
+      const [days, stats] = await Promise.all([dailyForCodes(codes, input.event_id), statsForCodes(codes)]);
+      // Each event's commission from its rules, spread over its days.
+      const split = splitCommission(await earningsFor(p, stats), days);
       const { from, to } = rangeBounds(input.range, days, today());
       const rows = days
-        .filter((d) => d.day >= from && d.day <= to)
-        .map((d) => ({
+        .map((d, i) => ({ d, commission: split[i]! }))
+        .filter(({ d }) => d.day >= from && d.day <= to)
+        .map(({ d, commission }) => ({
           day: d.day,
           event_id: d.event_id,
           currency: d.currency,
           tickets: d.tickets,
           full_price_cents: toCents(d.full_price),
-          commission_cents: commissionOn(rate, d.event_id, d.full_price, d.tickets),
+          commission_cents: commission,
         }));
       return {
         from,
@@ -522,7 +532,7 @@ export const ops: Op[] = [
       const method = input.method ?? user.payout_method ?? (config.payoutMethods.length === 1 ? config.payoutMethods[0]! : '');
       const details = (input.details ?? user.payout_details ?? '').slice(0, 200);
       const note = input.note ?? '';
-      const result = requestPayout(user, balance, { amountCents: input.amount_cents, method, details, note });
+      const result = requestPayout(user, balance, { amountCents: input.amount_cents, method, details, note, ruleVersions: data.percent.versionIds });
       if (result !== 'ok') throw new ApiError(400, result, payoutProblem[result]);
       audit(c, 'payout.requested', { userId: user.id, amountCents: input.amount_cents, currency: balance.currency, via: 'api' });
       announcePayoutRequest(user, { amountCents: input.amount_cents, currency: balance.currency, method, details, note });
@@ -540,6 +550,7 @@ export const ops: Op[] = [
       properties: {
         kind: { type: 'string', enum: ['ticket', 'merch'], description: 'Free tickets or merch.' },
         event_id: { type: 'integer', minimum: 1, description: 'For tickets: the event they were earned on.' },
+        reward_type: { type: 'string', maxLength: 40, description: 'For tickets: which reward, like vip_tickets (see rewards.free_tickets in your stats). Plain free tickets if left out.' },
         use_for_event_id: {
           type: 'integer',
           minimum: 1,
@@ -550,13 +561,15 @@ export const ops: Op[] = [
       },
       required: ['kind'],
     },
-    run: async ({ user, c }, input: { kind: 'ticket' | 'merch'; event_id?: number; use_for_event_id?: number; quantity?: number; details?: string }) => {
+    run: async ({ user, c }, input: { kind: 'ticket' | 'merch'; event_id?: number; reward_type?: string; use_for_event_id?: number; quantity?: number; details?: string }) => {
       const data = await promoterData(user);
       const useFor = input.kind === 'ticket' && input.use_for_event_id !== undefined ? data.ticketEvents.find((e) => e.id === input.use_for_event_id) : undefined;
       if (input.kind === 'ticket' && input.use_for_event_id !== undefined && !useFor) throw new ApiError(400, 'not_available', rewardProblem.not_available);
       const result = requestReward(user, data.rewards, {
         kind: input.kind,
         eventId: input.kind === 'ticket' ? input.event_id : undefined,
+        rewardType: input.kind === 'ticket' ? input.reward_type : undefined,
+        ruleVersions: input.kind === 'ticket' && input.event_id ? data.percent.events.get(input.event_id)?.versionIds : undefined,
         useFor,
         quantity: input.kind === 'ticket' ? (input.quantity ?? 1) : 1,
         details: input.details ?? '',
@@ -585,11 +598,14 @@ export const ops: Op[] = [
       },
       required: ['payout_id', 'action'],
     },
-    run: ({ user, c }, input: { payout_id: number; action: 'paid' | 'decline'; note?: string }) => {
+    run: async ({ user, c }, input: { payout_id: number; action: 'paid' | 'decline'; note?: string }) => {
       const payout = findPayout(input.payout_id);
       if (!payout) throw new ApiError(404, 'not_found', 'No payout request with that id.');
       const note = (input.note ?? '').trim();
       if (input.action === 'decline' && !note) throw new ApiError(400, 'invalid_input', 'Give the reason in note: the promoter sees it.');
+      if (input.action === 'paid' && !(await rulesEngineUp())) {
+        throw new ApiError(503, 'rules_down', 'The rules engine is not available, so the numbers may be out of date. Approve payouts once it is back.');
+      }
       if (!finishPayout(c, user, payout, input.action === 'paid' ? 'paid' : 'rejected', note, 'api')) {
         throw new ApiError(409, 'already_handled', 'That request was already handled.');
       }
@@ -654,6 +670,7 @@ export const ops: Op[] = [
       if (findUserByEmail(email)) throw new ApiError(409, 'exists', 'Another account already uses that email.');
       const commission = { percent: input.commission_percent ?? null, flatCents: input.commission_cents_per_ticket ?? null };
       const id = await createUser({ name, email, isAdmin: false, commission });
+      setUsualRule(id, commission, user.id);
       setCodes(id, normalizeCodes((input.codes ?? []).join(' ')));
       setAlias(id, suggestAlias(name, id));
       audit(c, 'admin.promoter_created', { by: user.id, userId: id, isAdmin: false, commission, via: 'api' });
@@ -723,7 +740,7 @@ export const ops: Op[] = [
         if (input.cents_per_ticket === undefined) throw new ApiError(400, 'invalid_input', 'Give cents_per_ticket.');
         rule = { kind: 'flat', value: input.cents_per_ticket };
       }
-      setEventRule(input.promoter_id, input.event_id, rule);
+      setEventRule(input.promoter_id, input.event_id, rule, user.id);
       audit(c, 'admin.event_commission_changed', { by: user.id, userId: input.promoter_id, eventId: input.event_id, rule, via: 'api' });
       const rate = rateFor(findUser(input.promoter_id)!);
       return { promoter_id: input.promoter_id, event_id: input.event_id, commission: describeRule(rate.events.get(input.event_id) ?? rate.usual, event.currency) };

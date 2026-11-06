@@ -2,8 +2,8 @@ import { rangeBounds, today, type Range } from './chart';
 import { dailyForCodes, statsForCodes, type DailySales } from './hievents';
 import { adjustmentsByDay, hasAdjustments, moneyAdjustments, moneyAdjustmentsBetween, outsideTickets } from './adjustments';
 import { codesFor, listUsers, type User } from './local-db';
-import { commissionOn, toCents, totalsByCurrency } from './money';
-import { rateFor } from './commission';
+import { splitCommission, toCents, totalsByCurrency } from './money';
+import { earningsFor } from './earnings';
 import { balances, countPendingPayouts } from './payouts';
 import { countPendingRewards, levelFor, type Level } from './rewards';
 import { hadTeam, teamCommission } from './teams';
@@ -27,6 +27,8 @@ export type Leaderboard = {
   // the commission and the chart is drawn at 100%.
   daily: DailySales[];
   currency: string;
+  /** The rules engine was down for some promoters: their numbers are the last ones known. */
+  stale: boolean;
   totals: { tickets: number; fullPrice: number; commission: number; owed: number; pending: number };
 };
 
@@ -35,13 +37,18 @@ export async function leaderboard(range: Range, sort: Sort, users: User[] = list
   const entries: Entry[] = [];
   const daily = new Map<string, { tickets: number; commission: number }>();
   let currency = 'CAD';
+  let stale = false;
   for (const user of users) {
     const codes = codesFor(user.id);
     // Promoters with only sales entered by hand (events outside Hi.Events) are ranked too.
     if (codes.length === 0 && !hasAdjustments(user.id)) continue;
-    const percent = rateFor(user);
     const [rows, days] = await Promise.all([statsForCodes(codes), dailyForCodes(codes)]);
+    const percent = await earningsFor(user, rows);
+    stale ||= percent.stale;
     const totals = totalsByCurrency(rows, percent);
+    // Each event's commission spread over its days, so a period gets its share.
+    const split = splitCommission(percent, days);
+    const byDay = new Map(days.map((d, i) => [d, split[i]!]));
     currency = totals[0]?.currency ?? currency;
     const totalSold = totals.reduce((sum, t) => sum + t.tickets, 0);
     const allSold = totalSold + outsideTickets(user.id);
@@ -51,7 +58,7 @@ export async function leaderboard(range: Range, sort: Sort, users: User[] = list
     let fullPrice = 0;
     let commission = 0;
     for (const d of inRange) {
-      const c = commissionOn(percent, d.event_id, d.full_price, d.tickets);
+      const c = byDay.get(d)!;
       tickets += d.tickets;
       fullPrice += toCents(d.full_price);
       commission += c;
@@ -98,6 +105,7 @@ export async function leaderboard(range: Range, sort: Sort, users: User[] = list
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([day, v]) => ({ day, currency, tickets: v.tickets, full_price: (v.commission / 100).toFixed(2) })),
     currency,
+    stale,
     totals: {
       tickets: entries.reduce((s, e) => s + e.tickets, 0),
       fullPrice: entries.reduce((s, e) => s + e.fullPrice, 0),

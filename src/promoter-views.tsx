@@ -2,9 +2,9 @@ import { MiniChart, parseRange, recentTickets, SalesChart, type Range } from './
 import { config } from './config';
 import type { CodeStats, DailySales, TicketEvent } from './hievents';
 import type { User } from './local-db';
-import { commissionOn, formatMoney, toCents, totalsByCurrency, type Rate, type Totals } from './money';
+import { eventBonus, eventCommission, formatMoney, splitCommission, toCents, totalsByCurrency, type Rate, type Totals } from './money';
 import { cashAvailable, type Balance, type PayoutRequest } from './payouts';
-import { describeReward, levelFor, type RewardRequest, type Rewards } from './rewards';
+import { describeReward, levelFor, type RewardRequest, type Rewards, type TicketReward } from './rewards';
 import { describeTrack, rewardRules, trackOn } from './reward-rules';
 import { describeAdjustment, type Adjustment } from './adjustments';
 import { Avatar, Banner, Flash, formatDate, Layout, LevelBadge } from './views';
@@ -29,6 +29,7 @@ export type EventSummary = {
   fullPrice: number;
   paid: number;
   commission: number;
+  bonus: number; // cents, given by the event's rule on top of the commission
 };
 
 // The stats query returns one row per code and event; pages work per event.
@@ -52,6 +53,7 @@ export function summarizeEvents(rows: CodeStats[], rate: Rate | number): EventSu
       fullPrice: 0,
       paid: 0,
       commission: 0,
+      bonus: 0,
     };
     e.codes.push(r.code);
     e.rows.push(r);
@@ -60,11 +62,27 @@ export function summarizeEvents(rows: CodeStats[], rate: Rate | number): EventSu
     e.orders += r.orders;
     e.fullPrice += toCents(r.full_price);
     e.paid += toCents(r.paid);
-    e.commission += commissionOn(rate, r.event_id, r.full_price, r.tickets_sold);
     events.set(r.event_id, e);
+  }
+  for (const e of events.values()) {
+    e.commission = eventCommission(rate, e.id, e.rows);
+    e.bonus = eventBonus(rate, e.id);
   }
   // Chronological, oldest first; pages re-sort as they need.
   return [...events.values()].sort((a, b) => (a.start?.getTime() ?? Infinity) - (b.start?.getTime() ?? Infinity));
+}
+
+/** "1 free ticket", "2 VIP": a count of one reward type. */
+export function rewardCount(t: TicketReward, n: number): string {
+  return t.type.key === 'free_tickets' ? plural(n, 'free ticket') : `${n} ${t.type.label_en}`;
+}
+
+/** What is ready to request on one event, like "2 VIP + 1 GA list"; '' when nothing is. */
+function readyOn(rewards: Rewards, eventId: number): string {
+  return rewards.tickets
+    .filter((t) => t.event.id === eventId && t.available > 0)
+    .map((t) => rewardCount(t, t.available))
+    .join(' + ');
 }
 
 const isPast = (e: EventSummary) => !!e.end && e.end.getTime() < Date.now();
@@ -106,6 +124,7 @@ function SummaryCards(props: {
               Commission earned
               {b && b.added !== 0 && <> · incl. {b.added > 0 ? '+' : '−'}{formatMoney(Math.abs(b.added), cur)} from the team</>}
               {b && b.fromTeam !== 0 && <> · incl. {formatMoney(b.fromTeam, cur)} team commission</>}
+              {b && b.bonus !== 0 && <> · incl. {formatMoney(b.bonus, cur)} bonus</>}
             </div>
           </div>
         );
@@ -237,6 +256,7 @@ function LevelCard(props: { rewards: Rewards; rewardsHref?: string }) {
   const rules = rewardRules();
   const { level, next, progress } = levelFor(totalSold);
   const freeTickets = props.rewards.tickets.reduce((sum, t) => sum + t.available, 0);
+  const onlyPlain = props.rewards.tickets.every((t) => t.type.key === 'free_tickets');
   return (
     <div class="card level-card">
       <div class="level-head">
@@ -248,7 +268,7 @@ function LevelCard(props: { rewards: Rewards; rewardsHref?: string }) {
       <ul class="unlocks">
         {(trackOn(rules.tickets) || freeTickets > 0) && (
           <li class={freeTickets > 0 ? 'ready' : ''}>
-            {freeTickets > 0 ? `${plural(freeTickets, 'free ticket')} ready to request` : `Free tickets for each event: ${lowerFirst(describeTrack(rules.tickets, 'ticket'))}`}
+            {freeTickets > 0 ? `${plural(freeTickets, onlyPlain ? 'free ticket' : 'reward')} ready to request` : `Free tickets for each event: ${lowerFirst(describeTrack(rules.tickets, 'ticket'))}`}
           </li>
         )}
         {(trackOn(rules.merch) || merch.available > 0) && (
@@ -348,7 +368,7 @@ function MediaButton(props: { url: string }) {
 function EventCard(props: {
   event: EventSummary;
   href: string;
-  freeTickets?: number;
+  ready?: string; // rewards ready to request on this event, like "2 VIP + 1 GA list"
   link?: string | null;
   copyCodes?: boolean;
   media?: string;
@@ -367,7 +387,7 @@ function EventCard(props: {
             <span class="muted">{eventDate(e)}</span>
             <span>
               {!props.copyCodes && e.codes.map((c) => <span class="code">{c}</span>)}
-              {!!props.freeTickets && <span class="chip">{plural(props.freeTickets, 'free ticket')} ready</span>}
+              {!!props.ready && <span class="chip">{props.ready} ready</span>}
             </span>
           </span>
         </span>
@@ -381,7 +401,7 @@ function EventCard(props: {
           </span>
           <span>
             <span class="big">{formatMoney(e.commission, e.currency)}</span>
-            <span class="muted">commission</span>
+            <span class="muted">commission{e.bonus > 0 && ` + ${formatMoney(e.bonus, e.currency)} bonus`}</span>
           </span>
           {props.daily && (
             <span>
@@ -432,7 +452,7 @@ export function DashboardPage(props: {
   const totals = totalsByCurrency(props.rows, props.percent);
   const self = props.basePath === '';
   const eventHref = (e: EventSummary) => `${props.basePath}/events/${e.id}`;
-  const freeFor = (e: EventSummary) => props.rewards.tickets.find((t) => t.event.id === e.id)?.available ?? 0;
+
 
   return (
     <Layout title="My sales" user={props.viewer} promoterView>
@@ -470,7 +490,7 @@ export function DashboardPage(props: {
                 <EventCard
                   event={e}
                   href={eventHref(e)}
-                  freeTickets={freeFor(e)}
+                  ready={readyOn(props.rewards, e.id)}
                   link={shareLink(props.promoter, { id: e.id, title: e.title }, e.codes[0]!)}
                   copyCodes
                   media={props.media.get(e.id)}
@@ -528,13 +548,15 @@ export function EventPage(props: {
 }) {
   const events = summarizeEvents(props.rows, props.percent);
   const index = events.findIndex((e) => e.id === props.eventId);
-  const reward = props.rewards.tickets.find((t) => t.event.id === props.eventId);
+  const rewardsHere = props.rewards.tickets.filter((t) => t.event.id === props.eventId);
   const self = props.basePath === '';
   const e = events[index];
   const previous = events[index - 1];
   const next = events[index + 1];
   const href = (id: number) => `${props.basePath}/events/${id}`;
   // Sales stop when the event is over, so a past event's chart ends on its last date.
+  // The event's commission spread over its codes, adding up to it exactly.
+  const byCode = splitCommission(props.percent, e.rows.map((r) => ({ event_id: r.event_id, full_price: r.full_price, tickets: r.tickets_sold })));
   const end = isPast(e) && e.end ? new Intl.DateTimeFormat('en-CA', { timeZone: e.timezone ?? 'UTC' }).format(e.end) : undefined;
 
   return (
@@ -559,6 +581,12 @@ export function EventPage(props: {
           <div class="value">{formatMoney(e.commission, e.currency)}</div>
           <div class="label">Commission</div>
         </div>
+        {e.bonus > 0 && (
+          <div class="card stat highlight">
+            <div class="value">{formatMoney(e.bonus, e.currency)}</div>
+            <div class="label">Bonus</div>
+          </div>
+        )}
         <div class="card stat">
           <div class="value">{e.tickets}</div>
           <div class="label">
@@ -619,22 +647,24 @@ export function EventPage(props: {
         </div>
       )}
 
-      {reward && (
+      {rewardsHere.map((reward) => (
         <div class="card reward-card">
           <div>
             <strong>
-              {reward.available > 0 ? `${plural(reward.available, 'free ticket')} ready for this event` : 'Free tickets for this event'}
+              {reward.available > 0
+                ? `${rewardCount(reward, reward.available)} ready for this event`
+                : `${reward.type.key === 'free_tickets' ? 'Free tickets' : reward.type.label_en} for this event`}
             </strong>
             <div class="muted">
-              {plural(reward.earned, 'free ticket')} earned{reward.used > 0 ? `, ${reward.used} requested` : ''}
+              {rewardCount(reward, reward.earned)} earned{reward.used > 0 ? `, ${reward.used} requested` : ''}
               {reward.nextIn !== null ? ` · ${plural(reward.nextIn, 'more sale')} for the next one` : ''}
               {reward.available > 0 ? ' · Use them here or roll them over to another event before this one is over.' : ''}
             </div>
-            {reward.nextIn !== null && <Progress percent={reward.progress} label="Progress to the next free ticket" />}
+            {reward.nextIn !== null && <Progress percent={reward.progress} label={`Progress to the next: ${reward.type.label_en}`} />}
           </div>
           {self && reward.available > 0 && <a href="/payouts#rewards">Request →</a>}
         </div>
-      )}
+      ))}
 
       <SalesChart
         title="Tickets sold per day"
@@ -660,14 +690,14 @@ export function EventPage(props: {
                 </tr>
               </thead>
               <tbody>
-                {e.rows.map((r) => (
+                {e.rows.map((r, i) => (
                   <tr>
                     <td>
                       <span class="code">{r.code}</span>
                     </td>
                     <td class="num">{r.tickets_sold}</td>
                     <td class="num">{formatMoney(toCents(r.full_price), r.currency)}</td>
-                    <td class="num">{formatMoney(commissionOn(props.percent, r.event_id, r.full_price, r.tickets_sold), r.currency)}</td>
+                    <td class="num">{formatMoney(byCode[i]!, r.currency)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -780,9 +810,12 @@ function RewardsSection(props: { rewards: Rewards; ticketEvents: TicketEvent[] }
                   return (
                     <div class="reward-row">
                       <div>
-                        <strong>{t.event.title}</strong>
+                        <strong>
+                          {t.event.title}
+                          {t.type.key !== 'free_tickets' && <span class="muted"> · {t.type.label_en}</span>}
+                        </strong>
                         <div class="muted">
-                          {plural(t.event.tickets, 'sale')} · {plural(t.earned, 'free ticket')} earned
+                          {plural(t.event.tickets, 'sale')} · {rewardCount(t, t.earned)} earned
                           {t.bonus !== 0 ? ` (${t.bonus > 0 ? '+' : ''}${t.bonus} from the team)` : ''}
                           {t.used > 0 ? `, ${t.used} requested` : ''}
                           {t.nextIn !== null ? ` · next in ${plural(t.nextIn, 'sale')}` : ''}
@@ -791,6 +824,7 @@ function RewardsSection(props: { rewards: Rewards; ticketEvents: TicketEvent[] }
                       {t.available > 0 && (
                         <form class="reward-form" method="post" action="/rewards/ticket">
                           <input type="hidden" name="event_id" value={String(t.event.id)} />
+                          <input type="hidden" name="reward_type" value={t.type.key} />
                           <select name="use_for" aria-label="Use them for">
                             <option value="">For {t.event.title}</option>
                             {others.map((e) => (

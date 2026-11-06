@@ -20,6 +20,8 @@ import { hiddenByTeam } from './promoter-page';
 import { rateFor } from './commission';
 import { findInvite, inviteState, type InviteLink } from './invites';
 import { BANNER_MAX_LENGTH, generalBanner } from './banners';
+import type { RewardType } from './rules';
+import { rulesEngineSeemsDown } from './rules-engine';
 import { isTeamLead, teamCommissionPercentFor, type TeamCommission } from './teams';
 import { codesHref, codesPerPage, type CodeFilter, type CodePage } from './promo-code-list';
 import { usualRuleFor, type User } from './local-db';
@@ -654,6 +656,8 @@ export function Layout(props: {
 }) {
   const brand = getBrand();
   const notice = props.user && (!props.user.is_admin || props.promoterView) ? generalBanner() : '';
+  // The last call to the rules engine failed: the numbers on this page may be the last ones known.
+  const rulesDown = !!props.user && rulesEngineSeemsDown();
   return (
     <html lang="en" data-theme={props.user?.theme === 'light' || props.user?.theme === 'dark' ? props.user.theme : undefined}>
       <head>
@@ -699,6 +703,16 @@ export function Layout(props: {
             <div>
               <main>
                 {notice && <Banner text={notice} label="Notice for all promoters" />}
+                {rulesDown && (
+                  <Banner
+                    text={
+                      props.user.is_admin
+                        ? 'The rules engine is not available: commissions and rewards shown are the last ones known, and payouts cannot be approved until it is back.'
+                        : 'Some numbers may be a little behind right now. They will catch up shortly.'
+                    }
+                    label="Rules engine unavailable"
+                  />
+                )}
                 {!props.user.app_installed_at && !props.user.impersonator && !props.hideInstallBanner && <InstallBanner brand={brand} />}
                 {props.children}
               </main>
@@ -1552,10 +1566,13 @@ export function PromoterPage(props: {
   adjustments: Adjustment[];
   teamLeads: User[];
   team: User[]; // their promoters, when they are a team lead
+  events: { id: number; title: string; upcoming: boolean }[]; // events with their codes
+  rewardTypes: RewardType[];
   error?: string;
   ok?: string;
 }) {
   const p = props.promoter;
+  const upcoming = props.events.filter((e) => e.upcoming);
   const currency = props.balances[0]?.currency ?? 'CAD';
   return (
     <Layout title={p.name} user={props.user}>
@@ -1822,8 +1839,17 @@ export function PromoterPage(props: {
           <input type="hidden" name="kind" value="outside_sale" />
           <h3>Sales outside Hi.Events</h3>
           <label>
-            Event
+            What it was
             <input name="label" maxlength={200} placeholder="Warehouse party, door sales" required />
+          </label>
+          <label>
+            For which event
+            <select name="event_id">
+              <option value="">None: their usual commission, added now</option>
+              {props.events.map((e) => (
+                <option value={String(e.id)}>{e.title}</option>
+              ))}
+            </select>
           </label>
           <div class="field-row">
             <label>
@@ -1836,29 +1862,38 @@ export function PromoterPage(props: {
             </label>
           </div>
           <p class="muted">
-            {p.name} gets their usual commission ({usualRuleFor(p).kind === 'flat' ? `${describeRule(usualRuleFor(p), currency)} sold` : `${describeRule(usualRuleFor(p))} of the sales total`}),
-            added to their balance. The tickets count for their levels, merch and ranking.
+            For an event, they count in its rule as outside_tickets and outside_sales. Without one, {p.name} gets the
+            commission their own rule gives on these sales, added to their balance now. The tickets count for their
+            levels, merch and ranking.
           </p>
           <NotifyBox />
           <button type="submit">Add sales</button>
         </form>
         <form class="card stack-card" method="post" action={`/admin/promoters/${p.id}/adjust`}>
           <input type="hidden" name="kind" value="free_tickets" />
-          <h3>Free tickets</h3>
-          {props.rewards.tickets.length === 0 ? (
+          <h3>Free tickets and other rewards</h3>
+          {upcoming.length === 0 ? (
             <p class="muted">They have no upcoming events with their codes.</p>
           ) : (
             <>
-              <label>
-                Event
-                <select name="event_id" required>
-                  {props.rewards.tickets.map((t) => (
-                    <option value={String(t.event.id)}>
-                      {t.event.title} ({t.available} available now)
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <div class="field-row">
+                <label>
+                  Event
+                  <select name="event_id" required>
+                    {upcoming.map((e) => (
+                      <option value={String(e.id)}>{e.title}</option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  Reward
+                  <select name="reward_type">
+                    {props.rewardTypes.map((t) => (
+                      <option value={t.key}>{t.label_en}</option>
+                    ))}
+                  </select>
+                </label>
+              </div>
               <div class="field-row">
                 <label>
                   How many (negative to take back)

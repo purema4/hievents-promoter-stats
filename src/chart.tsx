@@ -1,6 +1,6 @@
 import { config } from './config';
 import type { DailySales } from './hievents';
-import { commissionOn, formatMoney, type Rate } from './money';
+import { formatMoney, splitCommission, type Rate } from './money';
 
 // The CSP allows no inline styles, so bar heights and label positions use these precomputed classes.
 export const chartCss = `
@@ -70,12 +70,14 @@ function buildBuckets(daily: DailySales[], rate: Rate | number, from: string, to
     const end = Math.min(t + (step - 1) * dayMs, parseDay(to).getTime());
     buckets.push({ start: toDay(new Date(t)), end: toDay(new Date(end)), tickets: 0, commission: new Map() });
   }
-  for (const d of daily) {
+  // Each event's commission spread over its days, so the days add up to the event's commission.
+  const split = splitCommission(rate, daily);
+  daily.forEach((d, i) => {
     const b = buckets.find((x) => d.day >= x.start && d.day <= x.end);
-    if (!b) continue;
+    if (!b) return;
     b.tickets += d.tickets;
-    b.commission.set(d.currency, (b.commission.get(d.currency) ?? 0) + commissionOn(rate, d.event_id, d.full_price, d.tickets));
-  }
+    b.commission.set(d.currency, (b.commission.get(d.currency) ?? 0) + split[i]!);
+  });
   return buckets;
 }
 

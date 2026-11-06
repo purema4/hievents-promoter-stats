@@ -5,7 +5,7 @@ import type { Totals } from '../../src/money';
 import { balances, cashAvailable, payoutsFor, requestPayout, settlePayout, type Balance } from '../../src/payouts';
 import { newUser } from './helpers';
 
-const cad = (commission: number): Totals => ({ currency: 'CAD', fullPrice: commission * 10, paid: 0, commission, tickets: 0, pending: 0, orders: 0 });
+const cad = (commission: number, bonus = 0): Totals => ({ currency: 'CAD', fullPrice: commission * 10, paid: 0, commission, bonus, tickets: 0, pending: 0, orders: 0 });
 const balanceOf = (userId: number, commission: number, currency = 'CAD') =>
   balances(userId, [cad(commission)]).find((b) => b.currency === currency)!;
 const interac = (amountCents: number) => ({ amountCents, method: 'Interac e-Transfer', details: ' max@example.com ', note: '' });
@@ -39,7 +39,7 @@ describe('requestPayout', () => {
   });
 
   test('cashAvailable rounds down to a whole step and never goes negative', () => {
-    const b = (available: number): Balance => ({ currency: 'CAD', fromSales: 0, fromTeam: 0, added: 0, earned: 0, paidOut: 0, pending: 0, available });
+    const b = (available: number): Balance => ({ currency: 'CAD', fromSales: 0, fromTeam: 0, bonus: 0, added: 0, earned: 0, paidOut: 0, pending: 0, available });
     expect(cashAvailable(b(2850))).toBe(0);
     expect(cashAvailable(b(5000))).toBe(5000);
     expect(cashAvailable(b(9999))).toBe(5000);
@@ -51,12 +51,18 @@ describe('requestPayout', () => {
     expect(requestPayout(user, balanceOf(user.id, 2850), interac(1000))).toBe('ok');
     // Even a stale balance (as read before the first request) cannot add a second one.
     expect(requestPayout(user, balanceOf(user.id, 2850), interac(500))).toBe('already_pending');
-    const usd: Balance = { currency: 'USD', fromSales: 1000, fromTeam: 0, added: 0, earned: 1000, paidOut: 0, pending: 0, available: 1000 };
+    const usd: Balance = { currency: 'USD', fromSales: 1000, fromTeam: 0, bonus: 0, added: 0, earned: 1000, paidOut: 0, pending: 0, available: 1000 };
     expect(requestPayout(user, usd, interac(1000))).toBe('ok');
     expect(payoutsFor(user.id).map((p) => [p.currency, p.amount_cents, p.status])).toEqual([
       ['USD', 1000, 'pending'],
       ['CAD', 1000, 'pending'],
     ]);
+  });
+
+  test('keeps the rule versions the balance was worked out with', async () => {
+    const user = await newUser();
+    expect(requestPayout(user, balanceOf(user.id, 2850), { ...interac(1000), ruleVersions: [3, 7] })).toBe('ok');
+    expect(payoutsFor(user.id)[0]!.rule_versions).toBe('[3,7]');
   });
 
   test('remembers how the promoter wants to be paid', async () => {
@@ -71,7 +77,9 @@ describe('balances', () => {
   test('earned minus paid minus pending; declined requests free the amount again', async () => {
     const user = await newUser();
     const admin = await newUser('Admin', true);
-    expect(balanceOf(user.id, 2850)).toEqual({ currency: 'CAD', fromSales: 2850, fromTeam: 0, added: 0, earned: 2850, paidOut: 0, pending: 0, available: 2850 });
+    expect(balanceOf(user.id, 2850)).toEqual({ currency: 'CAD', fromSales: 2850, fromTeam: 0, bonus: 0, added: 0, earned: 2850, paidOut: 0, pending: 0, available: 2850 });
+    // A bonus from the rules is earned too, kept apart from the commission.
+    expect(balances(user.id, [cad(2850, 500)])[0]).toMatchObject({ fromSales: 2850, bonus: 500, earned: 3350, available: 3350 });
 
     requestPayout(user, balanceOf(user.id, 2850), interac(1000));
     expect(balanceOf(user.id, 2850)).toMatchObject({ pending: 1000, available: 1850 });

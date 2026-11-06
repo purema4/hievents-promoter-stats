@@ -88,7 +88,7 @@ import {
   requestReward,
   rewardRequestsFor,
 } from './rewards';
-import { describeProblem, isCustomized as isRulesCustomized, rewardRules, saveRewardRules, type LevelColor, type RewardRules, type Track } from './reward-rules';
+import { describeProblem, isCustomized as isRulesCustomized, rewardRules, saveRewardRules, trackOn, type LevelColor, type RewardRules, type Track } from './reward-rules';
 import { kuttDomains, kuttEnabled, pageClicks, pageShortLink, prepareShortLinks, renamePageLink, saveShortDomain, shortLinkStatus } from './short-links';
 import { DirectoryEditorPage, MyPagePage, PageMissing, PromoterDirectoryPage, PromoterPublicPage, type DirectoryEntry } from './page-views';
 import {
@@ -110,7 +110,9 @@ import {
 import { directoryPreview, previewVersion } from './directory-preview';
 import { hiddenByTeam, pageEvents, pageOwner, setPageHidden } from './promoter-page';
 import { allEventRules, setEventRule } from './commission';
-import { migrateToRules } from './rules';
+import { endRulesOf, FREE_TICKETS, generalRuleFor, listRewardTypes, migrateToRules, rewardTypeOf, setRuleLine, setUsualRule, trackExpression } from './rules';
+import { evaluateRules, rulesEngineUp } from './rules-engine';
+import { emptyInputs } from './rule-variables';
 import { allEventBanners, generalBanner, parseBanner, setEventBanner, setGeneralBanner } from './banners';
 import { allMediaDrives, parseMediaUrl, setMediaDrive } from './media-drives';
 import { filterCodes, parseCodeFilter } from './promo-code-list';
@@ -308,6 +310,7 @@ const messages: Record<string, string> = {
   media_event: 'Pick one of the events listed: drafts and events that are not over.',
   adjust_event: 'Pick one of their upcoming events.',
   banner_saved: 'Banner saved. Promoters see it now.',
+  rules_down: 'The rules engine is not available, so the numbers may be out of date. Approve payouts once it is back.',
   banner_removed: 'Banner removed.',
   api_removed: 'Removed. It stops working right away.',
   api_removed_all: 'Their API keys and connected apps are removed and stop working right away.',
@@ -1067,6 +1070,7 @@ app.post('/payouts', async (c) => {
     method: String(body.method ?? ''),
     details: String(body.details ?? '').slice(0, 200),
     note: String(body.note ?? '').slice(0, 500),
+    ruleVersions: data.percent.versionIds,
   });
   if (result !== 'ok') return renderPayouts(c, messages[result]);
   audit(c, 'payout.requested', { userId: user.id, amountCents, currency: balance.currency });
@@ -1090,6 +1094,8 @@ app.post('/rewards/:kind{ticket|merch}', async (c) => {
   const result = requestReward(user, data.rewards, {
     kind,
     eventId: kind === 'ticket' ? Number(body.event_id) : undefined,
+    rewardType: kind === 'ticket' ? String(body.reward_type ?? '') : undefined,
+    ruleVersions: kind === 'ticket' ? data.percent.events.get(Number(body.event_id))?.versionIds : undefined,
     useFor: kind === 'ticket' ? (rolloverTarget(data, body.use_for) ?? undefined) : undefined,
     quantity: kind === 'ticket' ? Number(body.quantity ?? 1) : 1,
     details: String(body.details ?? '').slice(0, 120),
@@ -1296,6 +1302,7 @@ app.post('/admin/promoters', async (c) => {
   if (commission === 'invalid') return c.redirect('/admin?error=commission');
   if (findUserByEmail(email)) return c.redirect('/admin?error=exists');
   const id = await createUser({ name, email, isAdmin: body.is_admin === '1', commission });
+  setUsualRule(id, commission, c.get('user').id);
   setCodes(id, normalizeCodes(String(body.codes ?? '')));
   setAlias(id, suggestAlias(name, id));
   audit(c, 'admin.promoter_created', { by: c.get('user').id, userId: id, isAdmin: body.is_admin === '1', commission });
@@ -1321,6 +1328,8 @@ app.get('/admin/promoters/:id', async (c) => {
       adjustments={adjustmentsFor(promoter.id)}
       teamLeads={teamLeads().filter((l) => l.id !== promoter.id)}
       team={teamMembers(promoter.id)}
+      events={summarizeEvents(data.rows, data.percent).map((e) => ({ id: e.id, title: e.title, upcoming: !e.end || e.end.getTime() >= Date.now() }))}
+      rewardTypes={listRewardTypes()}
       ok={flash(c.req.query('ok'))}
       error={flash(c.req.query('error'))}
     />,
@@ -1346,6 +1355,10 @@ app.post('/admin/promoters/:id', async (c) => {
   if (aliasTaken(alias, promoter.id)) return c.redirect(`${back}?error=alias_taken`);
   setAlias(promoter.id, alias);
   updateUser(promoter.id, { name, email, isAdmin, commission });
+  // Only when the usual rate changed, so the rest of the promoter's rule is left alone.
+  if (commission.percent !== promoter.commission_percent || commission.flatCents !== (promoter.commission_flat_cents ?? null)) {
+    setUsualRule(promoter.id, commission, c.get('user').id);
+  }
   if (isAdmin && !promoter.is_admin) leaveTeams(promoter.id);
   if (email.toLowerCase() !== promoter.email.toLowerCase()) {
     revokeAccess(promoter.id);
@@ -1422,13 +1435,25 @@ app.post('/admin/promoters/:id/adjust', async (c) => {
       body: label,
     };
   } else if (kind === 'outside_sale') {
-    // The admin gives the ticket sales; the promoter gets their usual commission on them (a percentage of
-    // the sales, or their flat amount per ticket).
+    // The admin gives the ticket sales. For one of their events, they count in that event's rule
+    // (outside_tickets, outside_sales). Otherwise the commission their own rule gives on them is added now.
     const rawSales = String(body.sales ?? '').trim().replace(',', '.');
     const salesCents = rawSales === '' ? 0 : /^-?[0-9]+(\.[0-9]{1,2})?$/.test(rawSales) ? Math.round(Number(rawSales) * 100) : NaN;
     if (!wholeNumber || !Number.isFinite(salesCents) || Math.abs(salesCents) > 1_000_000_00) return c.redirect(`${back}?error=adjust_amount#adjust`);
-    const commission = usualCommissionOn(usualRuleFor(promoter), salesCents, quantity);
-    const saleId = addAdjustment(admin, promoter.id, { kind: 'tickets_sold', quantity, amountCents: salesCents, currency, label });
+    const eventId = String(body.event_id ?? '') === '' ? null : Number(body.event_id);
+    if (eventId !== null && !data.rows.some((r) => r.event_id === eventId)) return c.redirect(`${back}?error=adjust_event#adjust`);
+    let commission = 0;
+    if (eventId === null) {
+      // Worked out on the sizes, then signed, so a correction (negative) takes back what the sale gave.
+      const rule = generalRuleFor(promoter.id);
+      const subject = `outside:${promoter.id}:${Date.now()}`;
+      const { results, stale } = await evaluateRules({ version: rule.key, lines: rule.lines.filter((l) => l.name === 'commission') }, [
+        { subject, variables: { ...emptyInputs(), tickets_sold: Math.abs(quantity), full_price_sales: Math.abs(salesCents) / 100 } },
+      ]);
+      if (stale) return c.redirect(`${back}?error=rules_down#adjust`);
+      commission = Math.sign(quantity) * Math.max(0, Math.round((results.get(subject)?.outputs.commission ?? 0) * 100));
+    }
+    const saleId = addAdjustment(admin, promoter.id, { kind: 'tickets_sold', quantity, amountCents: salesCents, currency, eventId, label });
     if (commission !== 0) addAdjustment(admin, promoter.id, { kind: 'money', amountCents: commission, currency, label: `${label} (commission)`, parentId: saleId });
     message = {
       title: `${quantity} ${Math.abs(quantity) === 1 ? 'ticket' : 'tickets'} added: ${label}`,
@@ -1438,12 +1463,15 @@ app.post('/admin/promoters/:id/adjust', async (c) => {
     };
   } else if (kind === 'free_tickets') {
     const eventId = Number(body.event_id);
-    const event = data.rewards.tickets.find((t) => t.event.id === eventId)?.event;
+    const event = summarizeEvents(data.rows, data.percent).find((e) => e.id === eventId && (!e.end || e.end.getTime() >= Date.now()));
     if (!event) return c.redirect(`${back}?error=adjust_event#adjust`);
     if (!wholeNumber) return c.redirect(`${back}?error=adjust_amount#adjust`);
-    addAdjustment(admin, promoter.id, { kind: 'free_tickets', quantity, eventId, label });
+    const type = rewardTypeOf(String(body.reward_type ?? '') || FREE_TICKETS);
+    if (!type) return c.redirect(`${back}?error=adjust_event#adjust`);
+    addAdjustment(admin, promoter.id, { kind: 'free_tickets', quantity, eventId, label, rewardType: type.key });
+    const what = type.key === FREE_TICKETS ? `free ${Math.abs(quantity) === 1 ? 'ticket' : 'tickets'}` : type.label_en;
     message = {
-      title: quantity > 0 ? `${quantity} free ${quantity === 1 ? 'ticket' : 'tickets'} for ${event.title}` : `Free tickets for ${event.title} changed`,
+      title: quantity > 0 ? `${quantity} ${what} for ${event.title}` : `${type.key === FREE_TICKETS ? 'Free tickets' : type.label_en} for ${event.title} changed`,
       body: `${label}. Request them on Payouts & rewards.`,
     };
   } else if (kind === 'merch') {
@@ -1498,6 +1526,7 @@ app.post('/admin/promoters/:id/delete', async (c) => {
   if ((await c.req.parseBody()).confirm !== '1') return c.redirect(`/admin/promoters/${promoter.id}`);
   if (promoter.is_admin && countAdmins() === 1) return c.redirect(`/admin/promoters/${promoter.id}?error=last_admin`);
   keepTeamHistory(promoter.id);
+  endRulesOf(promoter.id, c.get('user').id);
   deleteUser(promoter.id);
   audit(c, 'admin.promoter_deleted', { by: c.get('user').id, userId: promoter.id, email: promoter.email });
   return c.redirect('/admin?ok=deleted');
@@ -1621,7 +1650,7 @@ app.post('/admin/commissions', async (c) => {
     if (!(value >= 0 && value <= 10_000)) return c.redirect(`/admin/commissions?error=rate_flat${hash}`);
     rule = { kind, value: Math.round(value * 100) };
   } else if (kind !== 'usual') return c.redirect('/admin/commissions?error=rate_event');
-  setEventRule(userId, eventId, rule);
+  setEventRule(userId, eventId, rule, c.get('user').id);
   audit(c, 'admin.event_commission_changed', { by: c.get('user').id, userId, eventId, rule });
   return c.redirect(`/admin/commissions?ok=rate_saved${hash}`);
 });
@@ -2045,12 +2074,16 @@ app.post('/admin/rewards', async (c) => {
     );
   }
   saveRewardRules(rules);
+  // Free tickets are counted by the rules: the track becomes the default rule's free_tickets line.
+  setRuleLine('default', {}, FREE_TICKETS, trackOn(rules.tickets) ? `${FREE_TICKETS} = ${trackExpression(rules.tickets)}` : null, c.get('user').id);
   audit(c, 'admin.rewards_saved', { by: c.get('user').id, levels: rules.levels.length });
   return c.redirect('/admin/rewards?ok=rewards_saved');
 });
 
 app.post('/admin/rewards/reset', (c) => {
   saveRewardRules(null);
+  const tickets = rewardRules().tickets;
+  setRuleLine('default', {}, FREE_TICKETS, trackOn(tickets) ? `${FREE_TICKETS} = ${trackExpression(tickets)}` : null, c.get('user').id);
   audit(c, 'admin.rewards_reset', { by: c.get('user').id });
   return c.redirect('/admin/rewards?ok=rewards_reset');
 });
@@ -2209,6 +2242,8 @@ app.post('/admin/payouts/:id/:action{paid|reject}', async (c) => {
   const status = c.req.param('action') === 'paid' ? 'paid' : 'rejected';
   const adminNote = String((await c.req.parseBody()).admin_note ?? '').slice(0, 200);
   if (status === 'rejected' && !adminNote.trim()) return c.redirect('/admin/payouts');
+  // A payout is approved against numbers from the rules: not while the rules engine is down.
+  if (status === 'paid' && !(await rulesEngineUp())) return c.redirect('/admin/payouts?error=rules_down');
   if (!finishPayout(c, c.get('user'), payout, status, adminNote)) return c.redirect('/admin/payouts?error=payout_gone');
   return c.redirect(`/admin/payouts?ok=payout_${status}`);
 });
@@ -2259,6 +2294,9 @@ setInterval(() => {
 // New sales become milestone notifications within a few minutes, even if nobody has the app open.
 setInterval(() => void checkAllMilestones(), config.milestoneCheckMinutes * 60 * 1000);
 setTimeout(() => void checkAllMilestones(), 10_000);
+// Keeps the "rules engine unavailable" notice and the payout check up to date, even when every number comes from the cache.
+setInterval(() => void rulesEngineUp(), 60 * 1000);
+void rulesEngineUp();
 
 // Fail fast if the Hi.Events database is unreachable or the role lacks access.
 await sql`SELECT 1 FROM promo_codes LIMIT 1`;

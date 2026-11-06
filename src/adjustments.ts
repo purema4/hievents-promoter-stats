@@ -24,6 +24,8 @@ db.exec(`
 
 // The commission that came with a sale outside Hi.Events points at it, so undoing the sale takes it back.
 addColumn('adjustments', 'parent_id', 'INTEGER');
+// Free tickets given by hand have a reward type (VIP, GA list…); NULL is plain free tickets.
+addColumn('adjustments', 'reward_type', 'TEXT');
 db.query(
   `UPDATE adjustments AS m SET parent_id = m.id - 1
    WHERE m.kind = 'money' AND m.parent_id IS NULL AND EXISTS (
@@ -68,6 +70,7 @@ export type Adjustment = {
   created_by: number | null;
   created_at: string;
   parent_id: number | null;
+  reward_type: string | null;
 };
 
 export function addAdjustment(
@@ -81,11 +84,12 @@ export function addAdjustment(
     eventId?: number | null;
     label: string;
     parentId?: number;
+    rewardType?: string | null;
   },
 ): number {
   return db
-    .query<{ id: number }, [number, string, number, number, string | null, number | null, string, number, number | null]>(
-      'INSERT INTO adjustments (user_id, kind, amount_cents, quantity, currency, event_id, label, created_by, parent_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id',
+    .query<{ id: number }, [number, string, number, number, string | null, number | null, string, number, number | null, string | null]>(
+      'INSERT INTO adjustments (user_id, kind, amount_cents, quantity, currency, event_id, label, created_by, parent_id, reward_type) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id',
     )
     .get(
       userId,
@@ -97,6 +101,7 @@ export function addAdjustment(
       entry.label.trim().slice(0, 200),
       admin.id,
       entry.parentId ?? null,
+      entry.kind === 'free_tickets' && entry.rewardType && entry.rewardType !== 'free_tickets' ? entry.rewardType : null,
     )!.id;
 }
 
@@ -159,13 +164,24 @@ export function adjustmentsByDay(userId: number): { day: string; tickets: number
     .all(userId);
 }
 
-export function freeTicketBonus(userId: number): Map<number, number> {
+/** Free tickets given or taken back by hand, by "eventId:rewardType". */
+export function freeTicketBonus(userId: number): Map<string, number> {
   const rows = db
-    .query<{ event_id: number; n: number }, [number]>(
-      "SELECT event_id, sum(quantity) AS n FROM adjustments WHERE user_id = ? AND kind = 'free_tickets' AND event_id IS NOT NULL GROUP BY event_id",
+    .query<{ event_id: number; type: string; n: number }, [number]>(
+      "SELECT event_id, coalesce(reward_type, 'free_tickets') AS type, sum(quantity) AS n FROM adjustments WHERE user_id = ? AND kind = 'free_tickets' AND event_id IS NOT NULL GROUP BY 1, 2",
     )
     .all(userId);
-  return new Map(rows.map((r) => [r.event_id, r.n]));
+  return new Map(rows.map((r) => [`${r.event_id}:${r.type}`, r.n]));
+}
+
+/** Sales outside Hi.Events entered for one event: tickets and full-price cents, by event id. */
+export function outsideByEvent(userId: number): Map<number, { tickets: number; cents: number }> {
+  const rows = db
+    .query<{ event_id: number; tickets: number; cents: number }, [number]>(
+      "SELECT event_id, sum(quantity) AS tickets, sum(amount_cents) AS cents FROM adjustments WHERE user_id = ? AND kind = 'tickets_sold' AND event_id IS NOT NULL GROUP BY event_id",
+    )
+    .all(userId);
+  return new Map(rows.map((r) => [r.event_id, { tickets: r.tickets, cents: r.cents }]));
 }
 
 export function merchBonus(userId: number): number {

@@ -1,7 +1,9 @@
 import { freeTicketBonus, merchBonus, outsideTickets } from './adjustments';
 import { addColumn, db, type User } from './local-db';
 import type { EventSummary } from './promoter-views';
+import type { Rate } from './money';
 import { earnedOn, labelOf, nextOn, rewardRules, type Next } from './reward-rules';
+import { listRewardTypes, type RewardType } from './rules';
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS reward_requests (
@@ -28,6 +30,13 @@ addColumn('reward_requests', 'details', 'TEXT');
 // they are used, source_event_id where they were earned. NULL for older requests, earned where used.
 addColumn('reward_requests', 'source_event_id', 'INTEGER');
 addColumn('reward_requests', 'source_event_title', 'TEXT');
+// The reward type (VIP, GA list…; NULL for plain free tickets), its name when asked, and the rule
+// versions that gave it, so a past request can be explained.
+addColumn('reward_requests', 'reward_type', 'TEXT');
+addColumn('reward_requests', 'reward_label', 'TEXT');
+addColumn('reward_requests', 'rule_versions', 'TEXT');
+
+export const FREE_TICKETS = 'free_tickets';
 
 export type RewardRequest = {
   id: number;
@@ -41,6 +50,9 @@ export type RewardRequest = {
   details: string | null;
   source_event_id: number | null;
   source_event_title: string | null;
+  reward_type: string | null;
+  reward_label: string | null;
+  rule_versions: string | null;
   status: 'pending' | 'fulfilled' | 'rejected';
   admin_note: string | null;
   created_at: string;
@@ -61,6 +73,7 @@ export const salesToNextMerch = (totalSold: number) => nextOn(rewardRules().merc
 
 export type TicketReward = {
   event: EventSummary;
+  type: RewardType;
   earned: number; // from sales plus what admins gave or took back
   bonus: number; // the admin part of earned
   used: number; // requested or given, not declined
@@ -72,7 +85,7 @@ export type TicketReward = {
 export type Rewards = {
   totalSold: number; // Hi.Events sales plus tickets sold outside it, entered by admins
   outsideSold: number;
-  tickets: TicketReward[]; // upcoming events only: a free ticket for a past event is no use
+  tickets: TicketReward[]; // per upcoming event and reward type: a free ticket for a past event is no use
   merch: {
     earned: number;
     bonus: number;
@@ -89,39 +102,73 @@ export type Rewards = {
 
 const isUpcoming = (e: EventSummary) => !e.end || e.end.getTime() >= Date.now();
 
-export function rewardsFor(userId: number, events: EventSummary[]): Rewards {
-  const used = db
-    .query<{ kind: string; event_id: number | null; n: number }, [number]>(
-      "SELECT kind, coalesce(source_event_id, event_id) AS event_id, sum(quantity) AS n FROM reward_requests WHERE user_id = ? AND status <> 'rejected' GROUP BY 1, 2",
+const plainFreeTickets: RewardType = { key: FREE_TICKETS, label_en: 'Free tickets', label_fr: 'Billets gratuits' };
+
+/** Requested or given rewards (not declined), by "kind:sourceEvent:type". */
+function usedRewards(userId: number): Map<string, number> {
+  const rows = db
+    .query<{ kind: string; event_id: number | null; type: string; n: number }, [number]>(
+      `SELECT kind, coalesce(source_event_id, event_id) AS event_id, coalesce(reward_type, '${FREE_TICKETS}') AS type, sum(quantity) AS n
+       FROM reward_requests WHERE user_id = ? AND status <> 'rejected' GROUP BY 1, 2, 3`,
     )
     .all(userId);
-  const usedTickets = (eventId: number) => used.find((u) => u.kind === 'ticket' && u.event_id === eventId)?.n ?? 0;
+  return new Map(rows.map((r) => [`${r.kind}:${r.event_id}:${r.type}`, r.n]));
+}
+
+/**
+ * What a promoter can request. Ticket rewards come from each event's rule (a bare number rate stands
+ * for the free-ticket track of Levels & rewards, as before rules); merch from the merch track plus any
+ * merch the rules give.
+ */
+export function rewardsFor(userId: number, events: EventSummary[], rate: Rate | number = 0): Rewards {
+  const used = usedRewards(userId);
   const outsideSold = outsideTickets(userId);
   const totalSold = events.reduce((sum, e) => sum + e.tickets, 0) + outsideSold;
-  const merchUsed = used.filter((u) => u.kind === 'merch').reduce((sum, u) => sum + u.n, 0);
+  const merchUsed = [...used].filter(([k]) => k.startsWith('merch:')).reduce((sum, [, n]) => sum + n, 0);
   const extraMerch = merchBonus(userId);
-  const merch = Math.max(0, merchEarned(totalSold) + extraMerch);
+  const fromRules = typeof rate === 'number' ? 0 : [...rate.events.values()].reduce((sum, e) => sum + e.merch, 0);
+  const merch = Math.max(0, merchEarned(totalSold) + fromRules + extraMerch);
   const extraTickets = freeTicketBonus(userId);
   const rules = rewardRules();
   const nextMerch: Next | null = nextOn(rules.merch, totalSold);
-  return {
-    totalSold,
-    outsideSold,
-    tickets: events.filter(isUpcoming).map((event) => {
-      const bonus = extraTickets.get(event.id) ?? 0;
-      const earned = Math.max(0, freeTicketsEarned(event.tickets) + bonus);
-      const usedHere = usedTickets(event.id);
-      const next = nextOn(rules.tickets, event.tickets);
-      return {
+  const types = new Map(listRewardTypes().map((t) => [t.key, t]));
+  const order = [...types.keys()];
+
+  const tickets: TicketReward[] = [];
+  for (const event of events.filter(isUpcoming)) {
+    const earning = typeof rate === 'number' ? null : rate.events.get(event.id);
+    const counts: Record<string, number> = earning ? { ...earning.rewards } : { [FREE_TICKETS]: freeTicketsEarned(event.tickets) };
+    for (const key of extraTickets.keys()) {
+      const [id, type] = key.split(':') as [string, string];
+      if (Number(id) === event.id && !(type in counts)) counts[type] = 0;
+    }
+    const keys = Object.keys(counts).sort((a, b) => (order.indexOf(a) + 1 || 999) - (order.indexOf(b) + 1 || 999));
+    for (const key of keys) {
+      const bonus = extraTickets.get(`${event.id}:${key}`) ?? 0;
+      const earned = Math.max(0, counts[key]! + bonus);
+      const usedHere = used.get(`ticket:${event.id}:${key}`) ?? 0;
+      const next = earning ? (earning.next[key] ?? null) : (() => {
+        const n = nextOn(rules.tickets, event.tickets);
+        return n ? { in: n.in, progress: n.progress } : null;
+      })();
+      // A type a rule gives 0 of, with nothing given by hand or requested, is not worth a line.
+      if (earned === 0 && usedHere === 0 && !next) continue;
+      tickets.push({
         event,
+        type: types.get(key) ?? (key === FREE_TICKETS ? plainFreeTickets : { key, label_en: key, label_fr: key }),
         earned,
         bonus,
         used: usedHere,
         available: Math.max(0, earned - usedHere),
         nextIn: next?.in ?? null,
         progress: next?.progress ?? 100,
-      };
-    }),
+      });
+    }
+  }
+  return {
+    totalSold,
+    outsideSold,
+    tickets,
     merch: {
       earned: merch,
       bonus: extraMerch,
@@ -140,22 +187,35 @@ export type RewardResult = 'ok' | 'not_available' | 'missing_details';
 export function requestReward(
   user: User,
   rewards: Rewards,
-  // eventId: the event the free tickets were earned on. useFor: another upcoming event to roll them over to.
-  input: { kind: 'ticket' | 'merch'; eventId?: number; useFor?: { id: number; title: string }; quantity: number; details: string },
+  // eventId: the event the reward was earned on; rewardType: which reward (free tickets by default);
+  // useFor: another upcoming event to roll it over to; ruleVersions: the rule versions that gave it.
+  input: {
+    kind: 'ticket' | 'merch';
+    eventId?: number;
+    rewardType?: string;
+    useFor?: { id: number; title: string };
+    quantity: number;
+    details: string;
+    ruleVersions?: number[];
+  },
 ): RewardResult {
   const details = input.details.trim();
   if (input.kind === 'merch' && !details) return 'missing_details';
-  const ticket = input.kind === 'ticket' ? rewards.tickets.find((t) => t.event.id === input.eventId) : undefined;
+  const type = input.rewardType || FREE_TICKETS;
+  const ticket = input.kind === 'ticket' ? rewards.tickets.find((t) => t.event.id === input.eventId && t.type.key === type) : undefined;
   if (input.kind === 'ticket' && !ticket) return 'not_available';
   const target = ticket && input.useFor && input.useFor.id !== ticket.event.id ? input.useFor : null;
   if (!Number.isInteger(input.quantity) || input.quantity < 1) return 'not_available';
   // Re-counted inside the transaction so two quick submits cannot claim the same reward twice.
   return db.transaction((): RewardResult => {
-    const fresh = rewardsFor(user.id, ticket ? [ticket.event] : []);
-    const available = input.kind === 'ticket' ? (fresh.tickets[0]?.available ?? 0) : Math.max(0, rewards.merch.earned - fresh.merch.used);
+    const used = usedRewards(user.id);
+    const available = ticket
+      ? ticket.earned - (used.get(`ticket:${ticket.event.id}:${type}`) ?? 0)
+      : rewards.merch.earned - [...used].filter(([k]) => k.startsWith('merch:')).reduce((sum, [, n]) => sum + n, 0);
     if (input.quantity > available) return 'not_available';
     db.query(
-      'INSERT INTO reward_requests (user_id, promoter_name, promoter_email, kind, event_id, event_title, quantity, details, source_event_id, source_event_title) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      `INSERT INTO reward_requests (user_id, promoter_name, promoter_email, kind, event_id, event_title, quantity, details,
+         source_event_id, source_event_title, reward_type, reward_label, rule_versions) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       user.id,
       user.name,
@@ -167,6 +227,9 @@ export function requestReward(
       details || null,
       ticket?.event.id ?? null,
       ticket?.event.title ?? null,
+      ticket && type !== FREE_TICKETS ? type : null,
+      ticket && type !== FREE_TICKETS ? ticket.type.label_en : null,
+      input.ruleVersions?.length ? JSON.stringify(input.ruleVersions) : null,
     );
     return 'ok';
   })();
@@ -206,6 +269,6 @@ export const isRollover = (r: RewardRequest) => r.kind === 'ticket' && r.source_
 
 export function describeReward(r: RewardRequest): string {
   if (r.kind === 'merch') return 'Merch';
-  const tickets = `${r.quantity} free ${r.quantity === 1 ? 'ticket' : 'tickets'}`;
+  const tickets = r.reward_type ? `${r.quantity} ${r.reward_label ?? r.reward_type}` : `${r.quantity} free ${r.quantity === 1 ? 'ticket' : 'tickets'}`;
   return isRollover(r) ? `${tickets} for ${r.event_title}, rolled over from ${r.source_event_title}` : `${tickets} for ${r.event_title}`;
 }

@@ -1,6 +1,6 @@
 import { hasAdjustments } from './adjustments';
 import { codesFor, db, listUsers, type User } from './local-db';
-import { rateFor } from './commission';
+import { earningsFor } from './earnings';
 import { statsForCodes } from './hievents';
 import { notify } from './notifications';
 import { alertAdmins } from './alert-prefs';
@@ -87,16 +87,18 @@ export function checkMilestones(promoter: User, rewards: Rewards) {
   setState(promoter.id, 'merch', rewards.merch.earned);
 
   for (const t of rewards.tickets) {
-    const key = `free:${t.event.id}`;
+    const plain = t.type.key === 'free_tickets';
+    const key = plain ? `free:${t.event.id}` : `reward:${t.type.key}:${t.event.id}`;
     const previous = seen.get(key);
-    // A new event counts as "0 before", so the first free ticket for it is announced too.
+    // A new event counts as "0 before", so the first reward for it is announced too.
     if (!firstLook && t.earned > (previous ?? 0)) {
       notify(promoter.id, {
-        title: `Free ticket earned for ${t.event.title}`,
-        body:
-          t.earned === 1
+        title: plain ? `Free ticket earned for ${t.event.title}` : `${t.type.label_en} earned for ${t.event.title}`,
+        body: plain
+          ? t.earned === 1
             ? 'Your sales for this event earned you a free ticket. Request it on Payouts & rewards.'
-            : `${t.earned} free tickets earned for this event so far. Request them on Payouts & rewards.`,
+            : `${t.earned} free tickets earned for this event so far. Request them on Payouts & rewards.`
+          : `${t.earned} ${t.type.label_en} earned for this event so far. Request them on Payouts & rewards.`,
         link: '/payouts#rewards',
       });
     }
@@ -110,9 +112,11 @@ export async function checkAllMilestones() {
     const codes = codesFor(promoter.id);
     if (codes.length === 0 && !hasAdjustments(promoter.id)) continue;
     try {
-      const percent = rateFor(promoter);
       const rows = await statsForCodes(codes);
-      checkMilestones(promoter, rewardsFor(promoter.id, summarizeEvents(rows, percent)));
+      const rate = await earningsFor(promoter, rows);
+      // Rewards from stale numbers would be announced twice: wait for the engine.
+      if (rate.stale) continue;
+      checkMilestones(promoter, rewardsFor(promoter.id, summarizeEvents(rows, rate), rate));
     } catch (err) {
       console.error(`Milestone check for user ${promoter.id} failed:`, err);
     }
