@@ -172,8 +172,20 @@ const hashOf = (version: string, inputs: RuleInputs) => new Bun.CryptoHasher('sh
 export async function evaluateRules(
   rule: { version: string; lines: RuleLine[] },
   inputs: { subject: string; variables: RuleInputs }[],
+  opts: { cache?: boolean } = {},
 ): Promise<Evaluation> {
   const results = new Map<string, RuleResult>();
+  // Previews of rules not saved: straight from the engine, nothing read from or written to the cache.
+  if (opts.cache === false) {
+    if (rule.lines.length === 0) return { results: new Map(inputs.map((i) => [i.subject, { outputs: {}, errors: {} }])), stale: false };
+    const res = await call<{ results: { key: string; outputs: Record<string, number>; errors?: Record<string, string> }[] }>('/evaluate', {
+      expressions: Object.fromEntries(rule.lines.map((l) => [l.name, l.expr])),
+      variables,
+      inputs: inputs.slice(0, 5000).map((t) => ({ key: t.subject, variables: t.variables })),
+    });
+    for (const r of res.results) results.set(r.key, { outputs: r.outputs ?? {}, errors: r.errors ?? {} });
+    return { results, stale: false };
+  }
   const read = db.query<{ input_hash: string; outputs: string; errors: string | null }, [string]>(
     'SELECT input_hash, outputs, errors FROM rule_results WHERE subject = ?',
   );

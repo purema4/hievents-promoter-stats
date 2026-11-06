@@ -580,6 +580,26 @@ a.lp-event:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px
 .lp-person-link { font-size: 14px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @media (prefers-reduced-motion: reduce) { .lp-event, .lp-person { transition: none; } a.lp-event:hover, a.lp-event:active, .lp-person:hover { transform: none; } }
 ${chartCss}
+/* Promoters → Rules */
+.rule-editor { display: grid; gap: 20px; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); align-items: start; }
+@media (max-width: 899px) { .rule-editor { grid-template-columns: 1fr; } }
+.rule-editor form { display: grid; gap: 10px; margin: 0; }
+.rule-editor textarea.rule-text { min-height: 240px; font: 14px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre; overflow-wrap: normal; overflow-x: auto; tab-size: 2; }
+.rule-panel { display: grid; gap: 14px; position: sticky; top: 72px; }
+.rule-panel h3 { margin: 0 0 6px; font-size: 14px; }
+.rule-panel ul { margin: 0; padding-left: 18px; display: grid; gap: 4px; font-size: 14px; }
+.rule-problems li { color: var(--danger); }
+.rule-ok { color: var(--ok); font-size: 14px; margin: 0; }
+.rule-panel table td, .rule-panel table th { padding: 6px 8px; }
+.rule-panel tr.made-up td { color: var(--muted); }
+.rule-test { display: flex; gap: 8px; align-items: center; font-size: 13px; color: var(--muted); }
+.rule-test input { width: 90px; }
+.rule-vars dt { font: 600 13px ui-monospace, SFMono-Regular, Menlo, monospace; margin-top: 8px; }
+.rule-vars dd { margin: 0; color: var(--muted); font-size: 13px; }
+.rule-history li { font-size: 13px; }
+.rule-pending { color: var(--muted); font-size: 13px; margin: 0; }
+pre.code-block { font: 13px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; overflow-x: auto; white-space: pre; }
+
 `;
 
 // Changes whenever the CSS does, so browsers never keep a stale copy.
@@ -882,6 +902,7 @@ function Sidebar(props: { user: User }) {
             <a href="/admin/commissions">Commissions</a>
             <a href="/admin/media">Media drives</a>
             <a href="/admin/banners">Banners</a>
+            <a href="/admin/rules">Rules</a>
             <a href="/admin/invites">Invite links</a>
             <a href="/admin/pages">Promoter pages</a>
           </NavGroup>
@@ -1805,6 +1826,10 @@ export function PromoterPage(props: {
       <p>
         <a href={`/admin/promoters/${p.id}/view`}>Open {p.name}'s dashboard</a>
         <span class="muted"> · events, daily sales and commission, exactly as they see it</span>
+      </p>
+      <p>
+        <a href={`/admin/rules/edit?scope=promoter&user=${p.id}`}>{p.name}'s rule</a>
+        <span class="muted"> · their own commission or rewards on every event, on top of the default rule</span>
       </p>
       {!p.is_admin && (
         <form class="inline-form" method="post" action={`/admin/promoters/${p.id}/impersonate`}>

@@ -17,6 +17,7 @@ import { notify } from '../src/notifications';
 import { requestPayout } from '../src/payouts';
 import { setPageHidden } from '../src/promoter-page';
 import { requestReward } from '../src/rewards';
+import { migrateToRules, saveRewardType, saveRuleVersion, saveTemplate } from '../src/rules';
 import { assignTeam, setTeamCommission, setTeamLead } from '../src/teams';
 import { addOrders, writer, type NewOrder } from './sales';
 
@@ -284,6 +285,16 @@ async function addHistory(adminId: number, ids: Map<string, number>, eventIds: n
   notify(ids.get('Kai')!, { title: 'Payout sent: $120.00', body: 'By Interac e-Transfer.', link: '/payouts' });
 }
 
+// Ash's deal on Midnight Market, VIP and GA list rewards, and a template to copy.
+function addRules(adminId: number, eventIds: number[]) {
+  saveRewardType('vip_tickets', 'VIP', 'VIP');
+  saveRewardType('ga_list', 'GA list', 'Liste GA');
+  const ash = ['# 2 VIP from the first ticket, a GA list spot every 5, $5 a ticket', 'commission  = tickets_sold * 5.00', 'vip_tickets = tickets_sold >= 1 ? 2 : 0', 'ga_list     = floor(tickets_sold / 5)', 'free_tickets = 0'].join('\n');
+  saveRuleVersion('event', { eventId: eventIds[5]! }, ash, adminId);
+  saveTemplate('Big show', ash, adminId);
+  saveTemplate('Free event', '# Nothing to sell: a flat thank-you instead\ncommission = 0\nbonus = tickets_sold >= 10 ? 25 : 0', adminId);
+}
+
 function dressTheApp() {
   updateBrand({ name: 'Demo Nights', accent: '#7c3aed', loginMessage: 'Demo environment: every name and number here is made up.', footer: 'Demo data' });
   saveLinkSettings('https://tickets.example.com', defaultTemplate);
@@ -299,6 +310,9 @@ export async function seed() {
   dressTheApp();
   const { adminId, ids } = await addPeople(eventIds);
   ensureAliases();
+  // The wipe removed the rules: the default and the promoters' own rates become rules again, as at a first start.
+  migrateToRules();
+  addRules(adminId, eventIds);
   await addHistory(adminId, ids, eventIds);
   // Records where everyone stands, so the next sale is what triggers level and reward notifications.
   await checkAllMilestones();

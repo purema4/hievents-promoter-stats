@@ -327,3 +327,85 @@ if (sortable) {
     save();
   });
 }
+
+// Promoters → Rules: checks the rule about a second after the last key, and shows its problems, the rule
+// in words and the preview. Built with textContent only: nothing typed is ever read as HTML.
+const ruleForm = document.querySelector('form[data-rule-editor]');
+if (ruleForm) {
+  const box = ruleForm.querySelector('[data-rule-text]');
+  const test = ruleForm.querySelector('[data-rule-test]');
+  const status = ruleForm.querySelector('[data-rule-status]');
+  const panel = document.getElementById('rule-panel');
+  const el = (tag, text, cls) => {
+    const node = document.createElement(tag);
+    if (text !== undefined) node.textContent = text;
+    if (cls) node.className = cls;
+    return node;
+  };
+  const list = (items, cls) => {
+    const ul = el('ul', undefined, cls);
+    for (const item of items) ul.append(el('li', item));
+    return ul;
+  };
+  const card = (title, ...children) => {
+    const div = el('div', undefined, 'card');
+    div.append(el('h3', title), ...children);
+    return div;
+  };
+  const render = (answer) => {
+    panel.replaceChildren();
+    if (answer.error === 'rules_down') {
+      panel.append(el('p', 'The rules engine is not available: the rule cannot be checked or saved right now.', 'flash error'));
+      return;
+    }
+    if (answer.problems.length > 0) {
+      panel.append(card('To fix', list(answer.problems.map((p) => `Line ${p.line}: ${p.message}`), 'rule-problems')));
+      return;
+    }
+    if (answer.en.length === 0) return;
+    const words = card('In words', list(answer.en));
+    words.append(el('h3', 'En français'), list(answer.fr));
+    const table = el('table');
+    const head = el('tr');
+    head.append(el('th', ''), el('th', 'Sold', 'num'), ...answer.outputs.map((o) => el('th', answer.labels[o] ?? o, 'num')));
+    const thead = el('thead');
+    thead.append(head);
+    const tbody = el('tbody');
+    for (const row of answer.preview) {
+      const tr = el('tr', undefined, row.made_up ? 'made-up' : '');
+      tr.append(el('td', row.label), el('td', String(row.tickets), 'num'), ...answer.outputs.map((o) => el('td', row.values[o] ?? '—', 'num')));
+      tbody.append(tr);
+    }
+    table.append(thead, tbody);
+    const wrap = el('div', undefined, 'table-wrap');
+    wrap.append(table);
+    panel.append(words, card('Preview', wrap));
+  };
+  let timer;
+  let asked = 0;
+  const check = async () => {
+    const mine = ++asked;
+    status.hidden = false;
+    try {
+      const res = await fetch(ruleForm.dataset.check, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: box.value, test: test.value }),
+      });
+      const answer = await res.json();
+      // An older answer arriving late never replaces a newer one.
+      if (mine === asked) render(answer);
+    } catch {
+      // Offline or the page is going away: the server checks again on save.
+    } finally {
+      if (mine === asked) status.hidden = true;
+    }
+  };
+  const later = () => {
+    clearTimeout(timer);
+    timer = setTimeout(check, 1000);
+  };
+  box.addEventListener('input', later);
+  test.addEventListener('input', later);
+}

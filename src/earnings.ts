@@ -50,7 +50,7 @@ function basics(rows: CodeStats[]): EventBasics[] {
   return [...events.values()];
 }
 
-const uses = (rules: AppliedRule[], name: string) => rules.some((r) => r.lines.some((l) => l.expr.includes(name)));
+const uses = (rules: { lines: { expr: string }[] }[], name: string) => rules.some((r) => r.lines.some((l) => l.expr.includes(name)));
 
 // Whole events (every code), asked only when a rule reads them, and shared for a minute.
 let factsCache: { at: number; byEvent: Map<number, { tickets: number; promoters: number }> } | null = null;
@@ -79,18 +79,8 @@ async function teamTicketsByEvent(lead: User, own: EventBasics[]): Promise<Map<n
   return out;
 }
 
-const emptyEarning = (versionIds: number[], errors: string[] = []): EventEarning => ({
-  commission: 0, bonus: 0, merch: 0, rewards: {}, next: {}, versionIds, errors,
-});
-
-/**
- * A promoter's earnings on each of their events. With `next`, upcoming events also get the sales to the
- * next reward of each type, found by evaluating the rule with more (and fewer) tickets sold.
- */
-export async function earningsFor(promoter: User, rows: CodeStats[], opts: { next?: boolean } = {}): Promise<Rate> {
-  const events = basics(rows);
-  const rules = new Map(events.map((e) => [e.id, ruleFor(promoter.id, e.id)]));
-  const allRules = [...rules.values()];
+/** The variables of each event for a promoter, with `sold` tickets instead of the real number when given. */
+async function inputsBuilder(promoter: User, events: EventBasics[], allRules: { lines: { expr: string }[] }[]) {
   const outside = outsideByEvent(promoter.id);
   const lifetime = events.reduce((sum, e) => sum + e.tickets, 0) + outsideTickets(promoter.id);
   const lead = isTeamLead(promoter);
@@ -126,6 +116,33 @@ export async function earningsFor(promoter: User, rows: CodeStats[], opts: { nex
       team_tickets_sold: (team.get(e.id) ?? e.tickets) + extra,
     };
   };
+
+  return { inputsFor };
+}
+
+/**
+ * Each event's variables for a promoter, for previewing a rule that is not saved: `lines` are the
+ * draft's, so whole-event and team numbers are fetched when it reads them.
+ */
+export async function previewInputs(promoter: User, rows: CodeStats[], lines: { expr: string }[]): Promise<Map<number, (sold?: number) => RuleInputs>> {
+  const events = basics(rows);
+  const { inputsFor } = await inputsBuilder(promoter, events, [{ lines }]);
+  return new Map(events.map((e) => [e.id, (sold?: number) => inputsFor(e, sold)]));
+}
+
+const emptyEarning = (versionIds: number[], errors: string[] = []): EventEarning => ({
+  commission: 0, bonus: 0, merch: 0, rewards: {}, next: {}, versionIds, errors,
+});
+
+/**
+ * A promoter's earnings on each of their events. With `next`, upcoming events also get the sales to the
+ * next reward of each type, found by evaluating the rule with more (and fewer) tickets sold.
+ */
+export async function earningsFor(promoter: User, rows: CodeStats[], opts: { next?: boolean } = {}): Promise<Rate> {
+  const events = basics(rows);
+  const rules = new Map(events.map((e) => [e.id, ruleFor(promoter.id, e.id)]));
+  const allRules = [...rules.values()];
+  const { inputsFor } = await inputsBuilder(promoter, events, allRules);
 
   // One call per distinct rule; probes for the next reward ride along in the same call.
   const groups = new Map<string, { rule: AppliedRule; items: { subject: string; variables: RuleInputs }[] }>();

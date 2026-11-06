@@ -100,6 +100,35 @@ On **Promoters → Invite links**, admins make links to share (a group chat, a f
 - An email that already has an account gets a normal sign-in link instead, and the page looks the same either way, so it does not tell who has an account. That does not use up the link.
 - At most 20 sign-ups an hour per link, so a link that leaks cannot be used to send lots of email.
 
+## Rules
+
+Commission, bonuses and rewards come from **rules** that admins write on **Promoters → Rules**, one per event if they want, in a big text box. Each line is `name = expression`; lines starting with `#` are notes. Ash's deal, for example (2 VIP from the first ticket, a GA list spot every 5 tickets, $5 a ticket):
+
+```
+commission  = tickets_sold * 5.00
+vip_tickets = tickets_sold >= 1 ? 2 : 0
+ga_list     = floor(tickets_sold / 5)
+```
+
+| Ash sells | Commission | VIP | GA list |
+| --- | --- | --- | --- |
+| 1 | $5 | 2 | 0 |
+| 4 | $20 | 2 | 0 |
+| 5 | $25 | 2 | 1 |
+| 12 | $60 | 2 | 2 |
+| 20 | $100 | 2 | 4 |
+
+- **The language** is [CEL](https://cel.dev) (Google's Common Expression Language): arithmetic, comparisons, `a ? b : c`, `&&`, `||`, plus `floor()`, `ceil()`, `round()`, `min()` and `max()`. Numbers like `5` and `5.0` mean the same.
+- **What a rule reads:** the promoter's sales on the event (`tickets_sold`, `tickets_awaiting`, `orders`, `full_price_sales`, `paid_by_customers`, `codes_used`, `outside_tickets`, `outside_sales`), the whole event (`event_tickets_sold`, `event_promoters`, `days_before_event`, `event_dates`) and the promoter (`lifetime_tickets`, `events_promoted`, `level`, `is_team_lead`, `team_size`, `team_tickets_sold`). The editor lists each one with what it means (`src/rule-variables.ts` is the one list).
+- **What a rule gives:** `commission` and `bonus` (dollars; the bonus is counted apart from the commission), `merch` (on top of the merch track of Levels & rewards), and any **reward type** added on the Rules page, like `vip_tickets` (VIP) or `ga_list` (GA list). `free_tickets` is the plain free tickets of before. A name that is none of these, or a line that gives less than 0 on made-up sales, is refused when saving, with its line number.
+- **Which rule applies, line by line:** a promoter on one event, then the event, then the promoter, then the default rule. A more specific rule only replaces the lines it gives, so an event that gives VIP still gives the default free tickets unless it says `free_tickets = 0`.
+- **The editor** checks the rule about a second after the last key: problems by line, the rule in plain English and French (worked out from the rule, not by AI), and a preview with each promoter's real numbers on the event plus made-up sales (1, 5, 12, 20 tickets, and any number typed in "Also try with"). Nothing is saved while the rule has a problem. **Templates** (like "Big show") are copied into an event's rule.
+- **Versions:** every save is a new version; nothing is overwritten. Each payout and reward request keeps the versions it was worked out with.
+- **Rewards** are counted per event and type. Promoters see "2 VIP + 2 GA list ready" on the event card, and how many more sales the next one needs (found by trying the rule with more sales). They request them, or roll them over to another upcoming event, on **Payouts & rewards**; admins see the type under **Requests** and can give or take back each type by hand.
+- **Before rules:** at the first start, `COMMISSION_PERCENT` and the free-ticket track of Levels & rewards became the default rule, each promoter's own rate a promoter rule, and each rate set on Commissions a promoter-on-event rule, with the same results (a test compares them on the seed data). The Commissions page, a promoter's usual rate and the free-ticket track still work: they write those rule lines. Changing `COMMISSION_PERCENT` afterwards does nothing; edit the default rule.
+
+The rules run in **the rules engine** (`rules-engine/`, Go and Google's cel-go), a container next to the app with no public port: only the app talks to it, through `src/rules-engine.ts`. Results are cached by rule version and sales. If the engine is down, pages show the last numbers with a notice, rules cannot be saved, and payouts cannot be approved until it is back.
+
 ## Commission per event
 
 **Promoters → Commissions** lists every event that is not over (drafts included) with the promoters who have one of its codes. For each promoter and event, choose **Usual rate** (their own %), **% of sales** (another percentage) or **per ticket** (a flat amount for each ticket sold). Like the usual rate, a change applies to all their sales for that event, earlier ones too, and stays when the event is over. Promoters see the commission amounts, never a rate, since it can differ per event; a flat amount replaces the percentage on that event, it is not added to it. Their balance, payouts, charts and the admin dashboard all use it. A team lead's team commission stays a percentage of their promoters' sales.

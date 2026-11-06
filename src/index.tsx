@@ -110,8 +110,11 @@ import {
 import { directoryPreview, previewVersion } from './directory-preview';
 import { hiddenByTeam, pageEvents, pageOwner, setPageHidden } from './promoter-page';
 import { allEventRules, setEventRule } from './commission';
-import { endRulesOf, FREE_TICKETS, generalRuleFor, listRewardTypes, migrateToRules, rewardTypeOf, setRuleLine, setUsualRule, trackExpression } from './rules';
-import { evaluateRules, rulesEngineUp } from './rules-engine';
+import { db as localDb } from './local-db';
+import { currentRule, endRulesOf, FREE_TICKETS, generalRuleFor, listRewardTypes, listTemplates, migrateToRules, removeTemplate, rewardTypeOf, ruleHistory, ruleOutputs, saveRewardType, saveRuleVersion, saveTemplate as saveRuleTemplate, type RuleScope, setRuleLine, setUsualRule, trackExpression } from './rules';
+import { checkRule, evaluateRules, RULE_MAX_LENGTH, RulesEngineUnavailable, rulesEngineUp } from './rules-engine';
+import { checkDraft, labelOf, ruleInWords, type RuleCheck } from './rule-admin';
+import { AdminRuleEditPage, AdminRulesPage, ruleEditHref, type RuleTargetInfo } from './rule-views';
 import { emptyInputs } from './rule-variables';
 import { allEventBanners, generalBanner, parseBanner, setEventBanner, setGeneralBanner } from './banners';
 import { allMediaDrives, parseMediaUrl, setMediaDrive } from './media-drives';
@@ -310,6 +313,10 @@ const messages: Record<string, string> = {
   media_event: 'Pick one of the events listed: drafts and events that are not over.',
   adjust_event: 'Pick one of their upcoming events.',
   banner_saved: 'Banner saved. Promoters see it now.',
+  rule_saved: 'Rule saved. It applies right away, to all sales, earlier ones too.',
+  rule_removed: 'Rule removed. The broader rules apply again.',
+  reward_type: 'A key is lowercase letters, digits and _ (like vip_tickets), not commission, bonus or merch, and needs a label.',
+  reward_type_saved: 'Reward type saved. Rules can give it now.',
   rules_down: 'The rules engine is not available, so the numbers may be out of date. Approve payouts once it is back.',
   banner_removed: 'Banner removed.',
   api_removed: 'Removed. It stops working right away.',
@@ -1680,6 +1687,172 @@ app.post('/admin/media', async (c) => {
   setMediaDrive(eventId, url, c.get('user').id);
   audit(c, 'admin.media_drive_changed', { by: c.get('user').id, eventId, url });
   return c.redirect(`/admin/media?ok=${url ? 'media_saved' : 'media_removed'}${hash}`);
+});
+
+// --- Rules (Promoters → Rules) -----------------------------------------------------------------------
+
+/** Which rule a request is about, checked: the promoter and the event (one that is not over) must exist. */
+async function ruleTargetOf(get: (key: string) => string | undefined): Promise<RuleTargetInfo | null> {
+  const scope = get('scope') as RuleScope;
+  if (!['default', 'promoter', 'event', 'promoter_event', 'template'].includes(scope)) return null;
+  const target: RuleTargetInfo = { scope };
+  if (scope === 'promoter' || scope === 'promoter_event') {
+    const user = findUser(Number(get('user')));
+    if (!user) return null;
+    target.userId = user.id;
+    target.promoterName = user.name;
+  }
+  if (scope === 'event' || scope === 'promoter_event') {
+    const event = (await commissionEvents()).find((e) => e.id === Number(get('event')));
+    if (!event) return null;
+    if (scope === 'promoter_event' && !event.promoters.some((p) => p.id === target.userId)) return null;
+    target.eventId = event.id;
+    target.eventTitle = event.title;
+  }
+  if (scope === 'template' && get('template')) {
+    const template = listTemplates().find((t) => t.id === Number(get('template')));
+    if (!template) return null;
+    target.templateId = template.id;
+    target.templateName = template.name;
+  }
+  return target;
+}
+
+const ruleLabels = () => Object.fromEntries(ruleOutputs().map((o) => [o, labelOf(o, 'en')]));
+
+async function renderRuleEdit(c: Context<Env>, target: RuleTargetInfo, text: string, opts: { status?: 400; error?: string; problems?: RuleCheck } = {}) {
+  let check: RuleCheck | null = opts.problems ?? null;
+  let engineDown = false;
+  if (!check) {
+    try {
+      check = text.trim() ? await checkDraft(target.scope, target, text) : null;
+    } catch (err) {
+      if (!(err instanceof RulesEngineUnavailable)) throw err;
+      engineDown = true;
+    }
+  }
+  const names = new Map(listUsers().map((u) => [u.id, u.name]));
+  const history = target.scope === 'template' && !target.templateId ? [] : ruleHistory(target.scope, target).map((v) => ({ ...v, by: v.created_by ? (names.get(v.created_by) ?? null) : null }));
+  const event = target.eventId ? (await commissionEvents()).find((e) => e.id === target.eventId) : undefined;
+  return c.html(
+    <AdminRuleEditPage
+      user={c.get('user')}
+      target={target}
+      text={text}
+      check={check}
+      labels={ruleLabels()}
+      history={history}
+      templates={listTemplates()}
+      rewardTypes={listRewardTypes()}
+      promoters={target.scope === 'event' ? event?.promoters : undefined}
+      engineDown={engineDown}
+      ok={flash(c.req.query('ok'))}
+      error={opts.error}
+    />,
+    opts.status ?? 200,
+  );
+}
+
+app.get('/admin/rules', async (c) => {
+  const events = await commissionEvents();
+  const overrides = localDb
+    .query<{ event_id: number; n: number }, []>(
+      "SELECT event_id, count(DISTINCT user_id) AS n FROM rule_versions v WHERE scope = 'promoter_event' AND text <> '' AND id = (SELECT max(id) FROM rule_versions w WHERE w.scope = v.scope AND w.user_id = v.user_id AND w.event_id = v.event_id) GROUP BY event_id",
+    )
+    .all();
+  const defaultRule = currentRule('default');
+  let defaultWords: string[] = [];
+  try {
+    const checked = defaultRule ? await checkRule(defaultRule.text, ruleOutputs()) : null;
+    defaultWords = checked ? ruleInWords(checked.lines, checked.trees, 'en') : [];
+  } catch (err) {
+    if (!(err instanceof RulesEngineUnavailable)) throw err;
+  }
+  return c.html(
+    <AdminRulesPage
+      user={c.get('user')}
+      defaultText={defaultRule?.text ?? ''}
+      defaultWords={defaultWords}
+      templates={listTemplates()}
+      rewardTypes={listRewardTypes()}
+      events={events.map((e) => ({ ...e, hasRule: !!currentRule('event', { eventId: e.id }), overrides: overrides.find((o) => o.event_id === e.id)?.n ?? 0 }))}
+      promotersWithRules={listUsers().filter((u) => currentRule('promoter', { userId: u.id }))}
+      ok={flash(c.req.query('ok'))}
+      error={flash(c.req.query('error'))}
+    />,
+  );
+});
+
+app.get('/admin/rules/edit', async (c) => {
+  const target = await ruleTargetOf((k) => c.req.query(k));
+  if (!target) return c.notFound();
+  const copy = target.scope === 'event' && c.req.query('copy') ? listTemplates().find((t) => t.id === Number(c.req.query('copy'))) : undefined;
+  const saved = target.scope === 'template' && !target.templateId ? '' : (currentRule(target.scope, target)?.text ?? '');
+  return renderRuleEdit(c, target, copy ? copy.text : saved);
+});
+
+app.post('/admin/rules/edit', async (c) => {
+  const target = await ruleTargetOf((k) => c.req.query(k));
+  if (!target) return c.notFound();
+  const body = await c.req.parseBody();
+  const admin = c.get('user');
+  const back = ruleEditHref(target);
+  if (body.remove === '1' && target.scope !== 'default') {
+    if (target.scope === 'template') {
+      if (target.templateId) removeTemplate(target.templateId);
+      audit(c, 'admin.rule_template_removed', { by: admin.id, templateId: target.templateId });
+      return c.redirect('/admin/rules?ok=rule_removed');
+    }
+    const version = saveRuleVersion(target.scope, target, '', admin.id);
+    audit(c, 'admin.rule_removed', { by: admin.id, scope: target.scope, userId: target.userId, eventId: target.eventId, version });
+    return c.redirect(`${back}&ok=rule_removed`);
+  }
+  const text = String(body.text ?? '').replace(/\r\n?/g, '\n').slice(0, RULE_MAX_LENGTH + 1);
+  const name = String(body.name ?? '').trim();
+  if (target.scope === 'template' && !name) return renderRuleEdit(c, target, text, { status: 400, error: 'Give the template a name.' });
+  if (!text.trim()) return renderRuleEdit(c, target, text, { status: 400, error: 'Write the rule, or remove it.' });
+  let check: RuleCheck;
+  try {
+    check = await checkDraft(target.scope, target, text);
+  } catch (err) {
+    if (!(err instanceof RulesEngineUnavailable)) throw err;
+    return renderRuleEdit(c, target, text, { status: 400, error: messages.rules_down });
+  }
+  // Nothing is saved while the rule has a problem.
+  if (check.problems.length > 0) return renderRuleEdit(c, target, text, { status: 400, error: 'The rule has a problem: see To fix.', problems: check });
+  if (target.scope === 'template') {
+    const id = saveRuleTemplate(name, text, admin.id, target.templateId);
+    audit(c, 'admin.rule_template_saved', { by: admin.id, templateId: id, name });
+    return c.redirect(`${ruleEditHref({ scope: 'template', templateId: id })}&ok=rule_saved`);
+  }
+  const version = saveRuleVersion(target.scope, target, text, admin.id);
+  audit(c, 'admin.rule_saved', { by: admin.id, scope: target.scope, userId: target.userId, eventId: target.eventId, version });
+  return c.redirect(`${back}&ok=rule_saved`);
+});
+
+// Live check while typing (public/app.js): errors, the rule in words and the preview. Nothing is saved.
+app.post('/admin/rules/check', async (c) => {
+  const target = await ruleTargetOf((k) => c.req.query(k));
+  if (!target) return c.json({ error: 'not_found' }, 404);
+  const body = (await c.req.json().catch(() => ({}))) as { text?: unknown; test?: unknown };
+  const text = String(body.text ?? '').slice(0, RULE_MAX_LENGTH + 1);
+  const test = body.test === '' || body.test == null ? undefined : Math.min(100_000, Math.max(0, Math.floor(Number(body.test))));
+  try {
+    const check = text.trim() ? await checkDraft(target.scope, target, text, Number.isFinite(test) ? test : undefined) : { problems: [], en: [], fr: [], outputs: [], preview: [] };
+    return c.json({ ...check, labels: ruleLabels() });
+  } catch (err) {
+    if (!(err instanceof RulesEngineUnavailable)) throw err;
+    return c.json({ error: 'rules_down' }, 503);
+  }
+});
+
+app.post('/admin/rules/types', async (c) => {
+  const body = await c.req.parseBody();
+  const key = String(body.key ?? '').trim();
+  const result = saveRewardType(key, String(body.label_en ?? ''), String(body.label_fr ?? ''));
+  if (result !== 'ok') return c.redirect('/admin/rules?error=reward_type#types');
+  audit(c, 'admin.reward_type_saved', { by: c.get('user').id, key });
+  return c.redirect('/admin/rules?ok=reward_type_saved#types');
 });
 
 // --- Banners for promoters ---------------------------------------------------------------------------
