@@ -598,6 +598,24 @@ ${chartCss}
 .rule-vars dd { margin: 0; color: var(--muted); font-size: 13px; }
 .rule-history li { font-size: 13px; }
 .rule-pending { color: var(--muted); font-size: 13px; margin: 0; }
+/* Payouts & rewards: the rewards shop */
+.shop { display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr) 280px; align-items: start; margin: 0; }
+/* On phones the cart stays at the bottom of the screen while scrolling the shop. */
+@media (max-width: 899px) {
+  .shop { grid-template-columns: 1fr; }
+  .cart { top: auto; bottom: calc(8px + env(safe-area-inset-bottom)); z-index: 5; box-shadow: 0 -6px 24px rgb(0 0 0 / 0.18); }
+}
+.shop-grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 240px), 1fr)); }
+.shop-item { display: grid; gap: 10px; align-content: start; }
+.shop-item.locked { opacity: 0.7; }
+.shop-item-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.shop-count .big { font-size: 24px; font-weight: 650; font-variant-numeric: tabular-nums; }
+.shop-item label { display: grid; gap: 4px; font-size: 14px; }
+.shop-item label.check { display: flex; gap: 8px; align-items: center; }
+.cart { position: sticky; top: 72px; display: grid; gap: 10px; }
+.cart h3 { margin: 0; }
+.cart-lines { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; font-size: 14px; }
+.cart-lines li { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
 .write-card { margin-bottom: 16px; }
 .write-card summary { cursor: pointer; font-weight: 600; }
 .write-card form { margin-top: 10px; }

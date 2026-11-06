@@ -409,3 +409,57 @@ if (ruleForm) {
   box.addEventListener('input', later);
   test.addEventListener('input', later);
 }
+
+// Payouts & rewards: the rewards shop. "Add to cart" adds one of an item (up to what is ready); the cart
+// lists what is picked, each with Remove. Without scripts, the "How many" boxes do the same job.
+const shop = document.querySelector('form[data-shop]');
+if (shop) {
+  const lines = shop.querySelector('[data-cart-lines]');
+  const send = shop.querySelector('[data-cart-send]');
+  const items = [...shop.querySelectorAll('[data-shop-item]')].filter((item) => item.querySelector('[data-qty]'));
+  const refresh = () => {
+    lines.replaceChildren();
+    let total = 0;
+    for (const item of items) {
+      const qty = item.querySelector('[data-qty]');
+      const n = Number(qty.value);
+      if (!n) continue;
+      total += n;
+      const li = document.createElement('li');
+      const what = document.createElement('span');
+      what.textContent = `${n} × ${item.dataset.name}`;
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.className = 'link';
+      remove.textContent = 'Remove';
+      remove.addEventListener('click', () => {
+        qty.value = '0';
+        refresh();
+      });
+      li.append(what, remove);
+      lines.append(li);
+    }
+    if (total === 0) {
+      const li = document.createElement('li');
+      li.className = 'muted';
+      li.textContent = 'Your cart is empty. Add a reward to it.';
+      lines.append(li);
+    }
+    send.disabled = total === 0;
+    send.textContent = total ? `Request ${total} ${total === 1 ? 'reward' : 'rewards'}` : 'Request my rewards';
+  };
+  for (const item of items) {
+    const qty = item.querySelector('[data-qty]');
+    const add = item.querySelector('[data-add]');
+    qty.addEventListener('change', refresh);
+    if (add) {
+      add.hidden = false;
+      add.addEventListener('click', () => {
+        const max = qty.options.length - 1;
+        qty.value = String(Math.min(max, Number(qty.value) + 1));
+        refresh();
+      });
+    }
+  }
+  refresh();
+}

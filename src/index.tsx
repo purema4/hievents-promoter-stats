@@ -87,6 +87,8 @@ import {
   listRewardRequests,
   requestReward,
   rewardRequestsFor,
+  requestRewards,
+  type RewardInput,
 } from './rewards';
 import { describeProblem, isCustomized as isRulesCustomized, rewardRules, saveRewardRules, trackOn, type LevelColor, type RewardRules, type Track } from './reward-rules';
 import { kuttDomains, kuttEnabled, pageClicks, pageShortLink, prepareShortLinks, renamePageLink, saveShortDomain, shortLinkStatus } from './short-links';
@@ -148,7 +150,7 @@ import {
 } from './teams';
 import QRCode from 'qrcode';
 import { publicAsset, publicText, serviceWorker } from './static';
-import { announcePayoutRequest, announceRewardRequest, commissionEvents, emailLoginLink, finishPayout, finishReward, promoterData } from './actions';
+import { announcePayoutRequest, announceRewardOrder, announceRewardRequest, commissionEvents, emailLoginLink, finishPayout, finishReward, promoterData } from './actions';
 import { iconUrl } from './icons';
 import { isTokenPath, mountApi, purgeApiLimits, takeOAuthReturn } from './api';
 import { createKey, KEY_DAYS, MAX_KEYS, type KeyDays, purgeApiTokens, revokeAllTokens, revokeToken, tokensFor } from './api-tokens';
@@ -314,6 +316,7 @@ const messages: Record<string, string> = {
   media_event: 'Pick one of the events listed: drafts and events that are not over.',
   adjust_event: 'Pick one of their upcoming events.',
   banner_saved: 'Banner saved. Promoters see it now.',
+  reward_ordered: 'Sent to the team. You will hear back here and by email.',
   rule_saved: 'Rule saved. It applies right away, to all sales, earlier ones too.',
   rule_removed: 'Rule removed. The broader rules apply again.',
   reward_type: 'A key is lowercase letters, digits and _ (like vip_tickets), not commission, bonus or merch, and needs a label.',
@@ -1100,6 +1103,51 @@ app.post('/payouts', async (c) => {
     note: String(body.note ?? '').slice(0, 500),
   });
   return c.redirect('/payouts?ok=requested');
+});
+
+/** Who the tickets of a shop item are for: "Maya + 2 guests: Ann, Bob". */
+function ticketsFor(user: User, quantity: number, forMe: boolean, guests: string): string {
+  const names = guests.split(/[,;\n]+/).map((g) => g.trim()).filter(Boolean).join(', ');
+  const others = forMe ? quantity - 1 : quantity;
+  const guestPart = others > 0 ? `${others} ${others === 1 ? 'guest' : 'guests'}${names ? `: ${names}` : ''}` : '';
+  return [forMe ? user.name : '', guestPart].filter(Boolean).join(' + ').slice(0, 120);
+}
+
+// The rewards shop (Payouts & rewards): the whole cart in one request; every item or none.
+app.post('/rewards/order', async (c) => {
+  const user = c.get('user');
+  const body = await c.req.parseBody();
+  const data = await promoterData(user);
+  const field = (name: string) => String(body[name] ?? '').trim();
+  const items: RewardInput[] = [];
+  for (const t of data.rewards.tickets) {
+    const key = `${t.event.id}.${t.type.key}`;
+    const quantity = Number(field(`qty.${key}`) || 0);
+    if (!quantity) continue;
+    const useFor = rolloverTarget(data, body[`for.${key}`]);
+    if (useFor === null) return renderPayouts(c, messages.not_available);
+    items.push({
+      kind: 'ticket',
+      eventId: t.event.id,
+      rewardType: t.type.key,
+      useFor,
+      quantity,
+      details: ticketsFor(user, quantity, field(`me.${key}`) === '1', field(`guests.${key}`)),
+      ruleVersions: data.percent.events.get(t.event.id)?.versionIds,
+    });
+  }
+  const merch = Number(field('qty.merch') || 0);
+  if (merch) items.push({ kind: 'merch', quantity: merch, details: field('merch.details').slice(0, 120) });
+  if (items.length === 0) return renderPayouts(c, 'Your cart is empty: pick how many of a reward you want first.');
+  const before = rewardRequestsFor(user.id).length;
+  const { result } = requestRewards(user, data.rewards, items);
+  if (result !== 'ok') return renderPayouts(c, messages[result]);
+  // Newest first in the list: the cart's own, back in the order they were picked.
+  const all = rewardRequestsFor(user.id);
+  const requests = all.slice(0, all.length - before).reverse();
+  audit(c, 'reward.ordered', { userId: user.id, rewardIds: requests.map((r) => r.id) });
+  announceRewardOrder(user, requests);
+  return c.redirect('/payouts?ok=reward_ordered#rewards');
 });
 
 app.post('/rewards/:kind{ticket|merch}', async (c) => {

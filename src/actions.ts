@@ -106,6 +106,22 @@ export function announceRewardRequest(user: User, request: RewardRequest) {
   );
 }
 
+/** Tells the admins about a cart from the rewards shop, in one alert. */
+export function announceRewardOrder(user: User, requests: RewardRequest[]) {
+  if (requests.length === 1) return announceRewardRequest(user, requests[0]!);
+  const list = requests.map(describeReward).join('; ');
+  alertAdmins(
+    'reward_requested',
+    { title: `${user.name} requested ${requests.length} rewards`, body: list, link: '/admin/payouts' },
+    {
+      promoter: `${user.name} (${user.email})`,
+      reward: list,
+      details: requests.map((r) => r.details).filter(Boolean).join(' / ') || 'None',
+      link: `${config.appUrl}/admin/payouts`,
+    },
+  );
+}
+
 /**
  * Marks a payout request paid or declined, and tells the promoter (notification and email). False when
  * it was already handled. A decline needs a note: the promoter is told why.

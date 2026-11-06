@@ -196,7 +196,7 @@ describeIntegration('payouts, rewards and changes by hand', () => {
     test('a free ticket per upcoming event, once; declined ones can be requested again', async () => {
       const p = await newPromoter(server, admin);
       const before = await p.client.page('/payouts');
-      expect(before).toContain('action="/rewards/ticket"');
+      expect(before).toContain('action="/rewards/order"');
 
       expect((await ticket(p.client, '1', '2')).status).toBe(400); // 4 sold → 1 earned
       expect(location(await ticket(p.client, '1'))).toBe('/payouts?ok=reward_requested#rewards');
@@ -223,12 +223,13 @@ describeIntegration('payouts, rewards and changes by hand', () => {
     test('rolled over to another upcoming event, for an admin to accept or decline', async () => {
       const p = await newPromoter(server, admin, { codes: 'LUNA' }); // only on Warehouse Night (event 1)
       const page = await p.client.page('/payouts');
-      const picker = text(page.slice(page.indexOf('name="use_for"'), page.indexOf('</select>', page.indexOf('name="use_for"'))));
-      expect(picker).toContain('For Warehouse Night');
+      const at = page.indexOf('name="for.1.free_tickets"');
+      const picker = text(page.slice(at, page.indexOf('</select>', at)));
+      expect(picker).toContain('Warehouse Night');
       expect(picker).toContain('Roll over to Winter Opening');
       expect(picker).not.toContain('Summer Rooftop'); // over
       expect(picker).not.toContain('Secret Afterparty'); // a draft
-      expect(text(page)).toContain('lost once their event is over');
+      expect(text(page)).toContain('lost once it is over');
       const roll = (useFor: string) => p.client.post('/rewards/ticket', { event_id: '1', use_for: useFor, quantity: '1', details: '' });
       for (const refused of ['4', '5', '999']) expect((await roll(refused)).status).toBe(400);
       expect(location(await roll('2'))).toBe('/payouts?ok=reward_requested#rewards');

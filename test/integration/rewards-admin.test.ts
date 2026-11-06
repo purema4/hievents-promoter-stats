@@ -73,8 +73,9 @@ describeIntegration('levels and rewards set by admins', () => {
     expect(text(dashboard)).toContain('Hoodie unlocked: request it now');
 
     const payouts = await promoter.client.page('/payouts');
-    expect(text(payouts)).toContain('For each event: 3 free tickets at 2 sales.');
-    expect(text(payouts)).toContain('3 free tickets earned');
+    // 4 sold on Warehouse Night: the milestone at 2 sales gives 3 free tickets, ready in the shop.
+    expect(payouts).toContain('name="qty.1.free_tickets"');
+    expect(text(payouts.slice(payouts.indexOf('data-name="Free tickets · Warehouse Night"')))).toMatch(/^[^<]*?3 ready/);
     expect(payouts).toContain('value="Hoodie, "');
     expect(location(await promoter.client.post('/rewards/merch', { details: 'Hoodie, size M' }))).toBe('/payouts?ok=reward_requested#rewards');
 

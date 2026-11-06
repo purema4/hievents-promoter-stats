@@ -235,6 +235,37 @@ export function requestReward(
   })();
 }
 
+export type RewardInput = Parameters<typeof requestReward>[2];
+
+/**
+ * A whole cart from the rewards shop: every item is requested, or none is. `failed` is the index of the
+ * item that could not be, so the promoter can be told which one.
+ */
+export function requestRewards(user: User, rewards: Rewards, items: RewardInput[]): { result: RewardResult; failed?: number } {
+  if (items.length === 0) return { result: 'not_available' };
+  class Stop extends Error {
+    constructor(
+      readonly result: RewardResult,
+      readonly index: number,
+    ) {
+      super(result);
+    }
+  }
+  try {
+    // Each item is counted again inside this one transaction, earlier items of the cart included.
+    db.transaction(() => {
+      items.forEach((item, i) => {
+        const result = requestReward(user, rewards, item);
+        if (result !== 'ok') throw new Stop(result, i);
+      });
+    })();
+    return { result: 'ok' };
+  } catch (err) {
+    if (err instanceof Stop) return { result: err.result, failed: err.index };
+    throw err;
+  }
+}
+
 export function rewardRequestsFor(userId: number): RewardRequest[] {
   return db.query<RewardRequest, [number]>('SELECT * FROM reward_requests WHERE user_id = ? ORDER BY id DESC').all(userId);
 }
