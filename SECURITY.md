@@ -193,5 +193,7 @@ Promoter rules are written by admins in CEL and evaluated by `rules-engine/`, a 
 - **No code execution.** CEL has no loops, no I/O and no access to anything but the variables passed in. Nothing written in a rule is run as JavaScript or Go: no `eval`, no `new Function`. The app splits the lines and checks the names itself; only the expressions go to the engine.
 - **Limits.** 1,000 characters per expression and 50 lines per rule (10,000 characters in all), 100 variables, 5,000 inputs per batch, a 4 MB body, a cel-go cost limit of 10,000 per evaluation, and 5 s per request. Unknown JSON fields are refused.
 - **Container.** Static binary on `distroless/static` as `nonroot`, read-only file system, every capability dropped, `no-new-privileges`, 256 MB of memory. Its Go tests run in the image build, and CI scans the image with Trivy.
+- **What promoters see.** Their deal on an event's page, in words generated from the rule's tree. The rule's text never reaches a promoter page, and the words are escaped like any other text.
+- **Admins only.** Every `/admin/rules*` route is behind the admin check (403 for promoters, tested), POSTs from another origin get 403, and every save, removal, template and reward type change is in the audit log. Rule text is shown back as text, never as HTML (tested with a `</textarea><script>` payload).
 - **When it is down.** The app shows the last results it has with a notice, and payouts cannot be approved until it is back.
 

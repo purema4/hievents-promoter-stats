@@ -61,11 +61,17 @@ describeIntegration('commission per event', () => {
     expect(stats(await luna.client.page('/')).get('Commission earned')).toBe('$2.50');
   });
 
-  test('promoters never see a rate, since it can differ per event', async () => {
-    for (const path of ['/', '/events/1', '/events/2', '/payouts', '/welcome?step=1']) {
+  test('promoters see a rate only on an event page, as their deal for that event', async () => {
+    for (const path of ['/', '/payouts', '/welcome?step=1']) {
       const page = text(await maya.client.page(path));
       expect(page).not.toMatch(/[0-9]%|per ticket/);
     }
+    // Warehouse Night has a flat amount for Maya; Winter Opening keeps her usual 10%.
+    const night = await maya.client.page('/events/1');
+    const deal = text(night.slice(night.indexOf('class="card deal-card"'), night.indexOf('class="card links-card"')));
+    expect(deal).toMatch(/Commission: \$[0-9.]+ per ticket sold/);
+    expect(deal).not.toContain('%');
+    expect(text(await maya.client.page('/events/2'))).toContain('Commission: 10% of your sales at full price, outside Hi.Events too.');
   });
 
   test('another percentage on another event', async () => {

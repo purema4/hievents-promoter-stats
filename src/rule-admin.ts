@@ -3,8 +3,8 @@ import { statsForCodes, type CodeStats } from './hievents';
 import { codesFor, findUser, listUsers, type User } from './local-db';
 import { formatMoney } from './money';
 import { levelFor } from './reward-rules';
-import { checkRule, evaluateRules, parseRule, type RuleLine, type RuleNode, type RuleProblem } from './rules-engine';
-import { currentRule, listRewardTypes, ruleOutputs, type RuleScope, type RuleTarget } from './rules';
+import { checkRule, evaluateRules, parseRule, RulesEngineUnavailable, type RuleLine, type RuleNode, type RuleProblem } from './rules-engine';
+import { currentRule, listRewardTypes, ruleFor, ruleOutputs, type RuleScope, type RuleTarget } from './rules';
 import { emptyInputs, type RuleInputs } from './rule-variables';
 import { describeLine, type Lang, type Unit } from './rule-words';
 
@@ -173,3 +173,57 @@ export async function checkDraft(scope: RuleScope, target: RuleTarget, text: str
     preview,
   };
 }
+
+// --- For promoters: their deal on an event, in words ------------------------------------------------
+
+const dealCache = new Map<string, string[]>();
+
+const isZero = (n: RuleNode | undefined) => !!n && n.k === 'num' && !n.v;
+
+/**
+ * The rule that applies to a promoter on an event, line by line in words, in their language; lines that
+ * always give 0 are left out. Never the rule itself. Empty when the engine cannot be reached.
+ */
+export async function dealInWords(userId: number, eventId: number, lang: Lang): Promise<string[]> {
+  const rule = ruleFor(userId, eventId);
+  const types = listRewardTypes();
+  const key = `${rule.key}:${lang}:${types.map((t) => `${t.key}=${t.label_en}/${t.label_fr}`).join(',')}`;
+  const cached = dealCache.get(key);
+  if (cached) return cached;
+  try {
+    const checked = await checkRule(rule.lines.map((l) => `${l.name} = ${l.expr}`).join('\n'), ruleOutputs());
+    const lines = checked.lines.filter((l) => !isZero(checked.trees.get(l.name)));
+    const words = ruleInWords(lines, checked.trees, lang);
+    if (dealCache.size > 500) dealCache.clear();
+    dealCache.set(key, words);
+    return words;
+  } catch (err) {
+    if (err instanceof RulesEngineUnavailable) return [];
+    throw err;
+  }
+}
+
+/** "You sold 12: $60.00, 2 VIP, 2 GA list." / "Tu as vendu 12 : 60,00 $, 2 VIP, 2 Liste GA." */
+export function resultSentence(
+  tickets: number,
+  earning: { commission: number; bonus: number; rewards: Record<string, number> } | undefined,
+  outputs: string[],
+  currency: string,
+  lang: Lang,
+): string {
+  const money = (cents: number) =>
+    lang === 'fr' ? `${(cents / 100).toFixed(2).replace('.', ',')} $` : formatMoney(cents, currency);
+  const parts: string[] = [];
+  if (outputs.includes('commission')) parts.push(money(earning?.commission ?? 0));
+  if (outputs.includes('bonus') && (earning?.bonus ?? 0) > 0) parts.push(`${money(earning!.bonus)} ${lang === 'fr' ? 'de bonus' : 'bonus'}`);
+  for (const name of outputs) {
+    if (name === 'commission' || name === 'bonus' || name === 'merch') continue;
+    const n = earning?.rewards[name];
+    if (n !== undefined) parts.push(`${n} ${labelOf(name, lang)}`);
+  }
+  const sold = lang === 'fr' ? `Tu as vendu ${tickets}` : `You sold ${tickets}`;
+  return parts.length ? `${sold}${lang === 'fr' ? ' : ' : ': '}${parts.join(', ')}.` : `${sold}.`;
+}
+
+/** French when the browser asks for it first, English otherwise. */
+export const langOf = (acceptLanguage: string | undefined): Lang => (/^\s*fr\b/i.test(acceptLanguage ?? '') ? 'fr' : 'en');

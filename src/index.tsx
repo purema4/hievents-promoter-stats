@@ -111,9 +111,9 @@ import { directoryPreview, previewVersion } from './directory-preview';
 import { hiddenByTeam, pageEvents, pageOwner, setPageHidden } from './promoter-page';
 import { allEventRules, setEventRule } from './commission';
 import { db as localDb } from './local-db';
-import { currentRule, endRulesOf, FREE_TICKETS, generalRuleFor, listRewardTypes, listTemplates, migrateToRules, removeTemplate, rewardTypeOf, ruleHistory, ruleOutputs, saveRewardType, saveRuleVersion, saveTemplate as saveRuleTemplate, type RuleScope, setRuleLine, setUsualRule, trackExpression } from './rules';
+import { currentRule, endRulesOf, ruleFor, FREE_TICKETS, generalRuleFor, listRewardTypes, listTemplates, migrateToRules, removeTemplate, rewardTypeOf, ruleHistory, ruleOutputs, saveRewardType, saveRuleVersion, saveTemplate as saveRuleTemplate, type RuleScope, setRuleLine, setUsualRule, trackExpression } from './rules';
 import { checkRule, evaluateRules, RULE_MAX_LENGTH, RulesEngineUnavailable, rulesEngineUp } from './rules-engine';
-import { checkDraft, labelOf, ruleInWords, type RuleCheck } from './rule-admin';
+import { checkDraft, dealInWords, labelOf, langOf, resultSentence, ruleInWords, type RuleCheck } from './rule-admin';
 import { AdminRuleEditPage, AdminRulesPage, ruleEditHref, type RuleTargetInfo } from './rule-views';
 import { emptyInputs } from './rule-variables';
 import { allEventBanners, generalBanner, parseBanner, setEventBanner, setGeneralBanner } from './banners';
@@ -834,8 +834,18 @@ async function renderEvent(c: Context<Env>, promoter: User, basePath: string) {
   if (!Number.isInteger(eventId) || !data.rows.some((r) => r.event_id === eventId)) return c.notFound();
   const event = summarizeEvents(data.rows, data.percent).find((e) => e.id === eventId)!;
   await prepareShortLinks(promoter, event.codes.map((code) => ({ event: { id: event.id, title: event.title }, code })));
+  // Their deal on this event in words (never the rule itself), in the browser's language.
+  const lang = langOf(c.req.header('accept-language'));
+  const rule = ruleFor(promoter.id, eventId);
+  const deal = {
+    lang,
+    lines: await dealInWords(promoter.id, eventId, lang),
+    // Lines that always give 0 (like free_tickets = 0) are left out, as in the words above.
+    result: resultSentence(event.tickets, data.percent.events.get(eventId), rule.lines.filter((l) => !/^0+(\.0+)?$/.test(l.expr.trim())).map((l) => l.name), event.currency, lang),
+  };
   return c.html(
     <EventPage
+      deal={deal}
       viewer={c.get('user')}
       promoter={promoter}
       basePath={basePath}

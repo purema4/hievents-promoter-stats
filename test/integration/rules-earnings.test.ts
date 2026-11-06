@@ -81,6 +81,15 @@ describeIntegration('earnings from rules', () => {
     expect(JSON.parse(row.rule_versions).length).toBeGreaterThanOrEqual(2); // the default rule and the event's
   });
 
+  test('admins give or take back a reward of one type by hand', async () => {
+    const page = await admin.page(`/admin/promoters/${maya.id}`);
+    expect(page).toContain('<option value="ga_list">GA list</option>');
+    const res = await admin.post(`/admin/promoters/${maya.id}/adjust`, { kind: 'free_tickets', event_id: '1', reward_type: 'ga_list', quantity: '1', label: 'Brought a crew' });
+    expect(location(res)).toContain('ok=adjusted');
+    expect(text(await maya.client.page('/events/1'))).toContain('1 GA list ready for this event');
+    expect(location(await admin.post(`/admin/promoters/${maya.id}/adjust`, { kind: 'free_tickets', event_id: '1', reward_type: 'nope', quantity: '1', label: 'x' }))).toContain('error=adjust_event');
+  });
+
   test('a payout keeps the rule versions its balance came from', async () => {
     expect(location(await maya.client.post('/payouts', { currency: 'CAD', amount: '5', method: 'Interac e-Transfer', details: 'maya@example.com', note: '' }))).toContain('ok=');
     const versions = JSON.parse(db.query<{ rule_versions: string }, []>('SELECT rule_versions FROM payout_requests ORDER BY id DESC LIMIT 1').get()!.rule_versions);

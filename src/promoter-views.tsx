@@ -545,6 +545,8 @@ export function EventPage(props: {
   media: string | null;
   banner: string | null;
   range: Range;
+  /** Their deal on this event in words, and what it gave them: never the rule itself. */
+  deal?: { lang: 'en' | 'fr'; lines: string[]; result: string };
 }) {
   const events = summarizeEvents(props.rows, props.percent);
   const index = events.findIndex((e) => e.id === props.eventId);
@@ -603,6 +605,20 @@ export function EventPage(props: {
           <div class="label">Paid by customers after discounts</div>
         </div>
       </div>
+
+      {props.deal && props.deal.lines.length > 0 && (
+        <div class="card deal-card" lang={props.deal.lang}>
+          <h2 class="first">{props.deal.lang === 'fr' ? 'Ton entente pour cet événement' : 'Your deal on this event'}</h2>
+          <ul>
+            {props.deal.lines.map((line) => (
+              <li>{line}</li>
+            ))}
+          </ul>
+          <p>
+            <strong>{props.deal.result}</strong>
+          </p>
+        </div>
+      )}
 
       <div class="card links-card">
         <h2 class="first">{e.codes.length > 1 ? 'Your links and codes' : 'Your link and code'}</h2>

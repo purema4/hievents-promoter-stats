@@ -111,6 +111,25 @@ describeIntegration('rules screens', () => {
     expect(text(await admin.page('/admin/rules/edit?scope=event&event=1'))).toContain('Versions');
   });
 
+  test('promoters see their deal in words, in their language, never the rule', async () => {
+    const en = await maya.client.page('/events/1');
+    const card = text(en.slice(en.indexOf('class="card deal-card"'), en.indexOf('class="card links-card"')));
+    expect(card).toContain('Your deal on this event');
+    expect(card).toContain('Commission: $5.00 per ticket sold.');
+    expect(card).toContain('VIP: 2 from your first sale.');
+    expect(card).toContain('GA list: 1 for every 5 tickets sold.');
+    expect(card).not.toContain('Free tickets'); // free_tickets = 0: nothing to say
+    expect(card).toContain('You sold 4: $20.00, 2 VIP, 0 GA list.');
+    const fr = text(await (await maya.client.get('/events/1', { headers: { 'Accept-Language': 'fr-CA,fr;q=0.9,en;q=0.8' } })).text());
+    expect(fr).toContain('Ton entente pour cet événement');
+    expect(fr).toContain('Liste GA : 1 par tranche de 5 billets vendus.');
+    expect(fr).toContain('Tu as vendu 4 : 20,00 $, 2 VIP, 0 Liste GA.');
+    for (const page of [en, fr]) {
+      expect(page).not.toContain('tickets_sold');
+      expect(page).not.toContain('floor(');
+    }
+  });
+
   test('a promoter\'s own lines on one event, then removed', async () => {
     const query = `scope=promoter_event&user=${maya.id}&event=1`;
     expect(text(await admin.page('/admin/rules/edit?scope=event&event=1'))).toContain(maya.name);
