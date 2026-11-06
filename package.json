@@ -11,6 +11,7 @@
     "typecheck": "tsc --noEmit -p ."
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^1.6.0",
     "hono": "^4.13.13",
     "leaflet": "1.9.4",
     "leaflet.heat": "0.2.0",
@@ -18,7 +19,8 @@
     "postgres": "^3.4.9",
     "qrcode": "^1.5.4",
     "sharp": "^0.35.5",
-    "web-push": "^3.6.7"
+    "web-push": "^3.6.7",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@types/bun": "^1.4.3",

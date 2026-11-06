@@ -182,6 +182,10 @@ export function AdminRuleEditPage(props: {
   /** On an event: its promoters, for their own lines there. */
   promoters?: User[];
   engineDown?: boolean;
+  /** Shown when ANTHROPIC_API_KEY is set. */
+  canWrite?: boolean;
+  description?: string;
+  note?: string;
   ok?: string;
   error?: string;
 }) {
@@ -209,6 +213,24 @@ export function AdminRuleEditPage(props: {
           </button>
         </form>
       )}
+      {props.canWrite && (
+        <details class="card write-card" open={!!props.description || undefined}>
+          <summary>Write it for me</summary>
+          <form class="stack" method="post" action={`/admin/rules/write?${href.split('?')[1]}`}>
+            <label>
+              Describe the deal, in French or English
+              <textarea name="description" rows={3} maxlength={2000} required placeholder="1 billet vendu = 2 VIP (lui et son +1), puis 1 place liste GA par 5 billets, 5 $ par billet">
+                {props.description ?? ''}
+              </textarea>
+            </label>
+            <button class="secondary" type="submit">
+              Write the rule
+            </button>
+            <p class="muted">Claude writes it into the box below. It is checked like a rule you type, and nothing is saved until you save.</p>
+          </form>
+        </details>
+      )}
+      {props.note && <p class="flash ok">{props.note}</p>}
       <div class="rule-editor">
         <form method="post" action={href} data-rule-editor data-check={`/admin/rules/check?${href.split('?')[1]}`}>
           {t.scope === 'template' && (

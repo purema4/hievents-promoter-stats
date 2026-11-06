@@ -123,6 +123,7 @@ ga_list     = floor(tickets_sold / 5)
 - **What a rule gives:** `commission` and `bonus` (dollars; the bonus is counted apart from the commission), `merch` (on top of the merch track of Levels & rewards), and any **reward type** added on the Rules page, like `vip_tickets` (VIP) or `ga_list` (GA list). `free_tickets` is the plain free tickets of before. A name that is none of these, or a line that gives less than 0 on made-up sales, is refused when saving, with its line number.
 - **Which rule applies, line by line:** a promoter on one event, then the event, then the promoter, then the default rule. A more specific rule only replaces the lines it gives, so an event that gives VIP still gives the default free tickets unless it says `free_tickets = 0`.
 - **The editor** checks the rule about a second after the last key: problems by line, the rule in plain English and French (worked out from the rule, not by AI), and a preview with each promoter's real numbers on the event plus made-up sales (1, 5, 12, 20 tickets, and any number typed in "Also try with"). Nothing is saved while the rule has a problem. **Templates** (like "Big show") are copied into an event's rule.
+- **Write it for me:** with `ANTHROPIC_API_KEY` set, the editor has a **Write it for me** box. Describe the deal in French or English ("1 billet vendu = 2 VIP, puis 1 place liste GA par 5 billets, 5 $ par billet") and Claude (Claude Opus 5.5, through the Anthropic API) writes the rule into the box, with a short note. It is checked and previewed like a rule you type, and nothing is saved until you save. Each call costs a few cents; an admin can make 30 an hour. Without the key, the box is not shown.
 - **Versions:** every save is a new version; nothing is overwritten. Each payout and reward request keeps the versions it was worked out with.
 - **Rewards** are counted per event and type. Promoters see "2 VIP + 2 GA list ready" on the event card, and how many more sales the next one needs (found by trying the rule with more sales). They request them, or roll them over to another upcoming event, on **Payouts & rewards**; admins see the type under **Requests** and can give or take back each type by hand.
 - **Before rules:** at the first start, `COMMISSION_PERCENT` and the free-ticket track of Levels & rewards became the default rule, each promoter's own rate a promoter rule, and each rate set on Commissions a promoter-on-event rule, with the same results (a test compares them on the seed data). The Commissions page, a promoter's usual rate and the free-ticket track still work: they write those rule lines. Changing `COMMISSION_PERCENT` afterwards does nothing; edit the default rule.
@@ -297,10 +298,11 @@ Every sign-in, failed attempt and admin change is logged as a JSON line; read th
    psql "$ADMIN_DATABASE_URL" -f sql/readonly-role.sql
    ```
 2. `cp .env.example .env` and fill it in, including the SMTP settings (the account Hi.Events sends email with works). If your Hi.Events instance hosts events for other organizers, set `HIEVENTS_ACCOUNT_IDS` so promoters only see your events.
-3. Start it:
+3. Start it (the app and the rules engine):
    ```sh
    docker compose up -d --build
    ```
+   Optional: set `ANTHROPIC_API_KEY` to get **Write it for me** on the rule editor (see [Rules](#rules)).
 4. Put it behind your HTTPS reverse proxy at the `APP_URL` you configured, sign in with `ADMIN_EMAIL` / `ADMIN_PASSWORD`, and add promoters on the Promoters page.
 
 The container must be able to reach the database host. If Hi.Events runs in Docker on the same server, either expose Postgres to the host, or attach this service to the Hi.Events compose network:

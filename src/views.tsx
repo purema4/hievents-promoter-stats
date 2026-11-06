@@ -598,6 +598,9 @@ ${chartCss}
 .rule-vars dd { margin: 0; color: var(--muted); font-size: 13px; }
 .rule-history li { font-size: 13px; }
 .rule-pending { color: var(--muted); font-size: 13px; margin: 0; }
+.write-card { margin-bottom: 16px; }
+.write-card summary { cursor: pointer; font-weight: 600; }
+.write-card form { margin-top: 10px; }
 .deal-card { margin-bottom: 20px; display: grid; gap: 8px; }
 .deal-card h2, .deal-card p { margin: 0; }
 .deal-card ul { margin: 0; padding-left: 18px; display: grid; gap: 4px; }

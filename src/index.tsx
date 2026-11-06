@@ -113,6 +113,7 @@ import { allEventRules, setEventRule } from './commission';
 import { db as localDb } from './local-db';
 import { currentRule, endRulesOf, ruleFor, FREE_TICKETS, generalRuleFor, listRewardTypes, listTemplates, migrateToRules, removeTemplate, rewardTypeOf, ruleHistory, ruleOutputs, saveRewardType, saveRuleVersion, saveTemplate as saveRuleTemplate, type RuleScope, setRuleLine, setUsualRule, trackExpression } from './rules';
 import { checkRule, evaluateRules, RULE_MAX_LENGTH, RulesEngineUnavailable, rulesEngineUp } from './rules-engine';
+import { ruleWriterEnabled, writeRule } from './rule-writer';
 import { checkDraft, dealInWords, labelOf, langOf, resultSentence, ruleInWords, type RuleCheck } from './rule-admin';
 import { AdminRuleEditPage, AdminRulesPage, ruleEditHref, type RuleTargetInfo } from './rule-views';
 import { emptyInputs } from './rule-variables';
@@ -1730,7 +1731,12 @@ async function ruleTargetOf(get: (key: string) => string | undefined): Promise<R
 
 const ruleLabels = () => Object.fromEntries(ruleOutputs().map((o) => [o, labelOf(o, 'en')]));
 
-async function renderRuleEdit(c: Context<Env>, target: RuleTargetInfo, text: string, opts: { status?: 400; error?: string; problems?: RuleCheck } = {}) {
+async function renderRuleEdit(
+  c: Context<Env>,
+  target: RuleTargetInfo,
+  text: string,
+  opts: { status?: 400; error?: string; problems?: RuleCheck; description?: string; note?: string } = {},
+) {
   let check: RuleCheck | null = opts.problems ?? null;
   let engineDown = false;
   if (!check) {
@@ -1756,6 +1762,9 @@ async function renderRuleEdit(c: Context<Env>, target: RuleTargetInfo, text: str
       rewardTypes={listRewardTypes()}
       promoters={target.scope === 'event' ? event?.promoters : undefined}
       engineDown={engineDown}
+      canWrite={ruleWriterEnabled()}
+      description={opts.description}
+      note={opts.note}
       ok={flash(c.req.query('ok'))}
       error={opts.error}
     />,
@@ -1838,6 +1847,29 @@ app.post('/admin/rules/edit', async (c) => {
   const version = saveRuleVersion(target.scope, target, text, admin.id);
   audit(c, 'admin.rule_saved', { by: admin.id, scope: target.scope, userId: target.userId, eventId: target.eventId, version });
   return c.redirect(`${back}&ok=rule_saved`);
+});
+
+// "Write it for me": Claude writes the rule from a description; it lands in the box, not saved.
+const writeCounts = new Map<number, number[]>();
+app.post('/admin/rules/write', async (c) => {
+  const target = await ruleTargetOf((k) => c.req.query(k));
+  if (!target || !ruleWriterEnabled()) return c.notFound();
+  const admin = c.get('user');
+  const body = await c.req.parseBody();
+  const description = String(body.description ?? '').trim().slice(0, 2000);
+  const saved = target.scope === 'template' && !target.templateId ? '' : (currentRule(target.scope, target)?.text ?? '');
+  if (!description) return renderRuleEdit(c, target, saved, { status: 400, error: 'Describe the deal first.' });
+  // Each call costs money: 30 per admin per hour.
+  const recent = (writeCounts.get(admin.id) ?? []).filter((at) => Date.now() - at < 3600_000);
+  if (recent.length >= 30) return renderRuleEdit(c, target, saved, { status: 400, error: 'That is 30 rules written this hour. Try again later.', description });
+  writeCounts.set(admin.id, [...recent, Date.now()]);
+  const result = await writeRule(description);
+  audit(c, 'admin.rule_written', { by: admin.id, scope: target.scope, eventId: target.eventId, ok: result.ok, descriptionLength: description.length });
+  if (!result.ok) return renderRuleEdit(c, target, saved, { status: 400, error: result.error, description });
+  return renderRuleEdit(c, target, result.written.rule.slice(0, RULE_MAX_LENGTH), {
+    description,
+    note: `${result.written.note} Check it below, then save.`.trim(),
+  });
 });
 
 // Live check while typing (public/app.js): errors, the rule in words and the preview. Nothing is saved.

@@ -151,6 +151,11 @@ describeIntegration('rules screens', () => {
     expect(stats(await maya.client.page('/events/2')).get('Commission')).toBe('$1.00');
   });
 
+  test('without ANTHROPIC_API_KEY, no "Write it for me"', async () => {
+    expect(text(await admin.page('/admin/rules/edit?scope=default'))).not.toContain('Write it for me');
+    expect((await admin.post('/admin/rules/write?scope=default', { description: 'x' })).status).toBe(404);
+  });
+
   test('only events that are not over, and real promoters', async () => {
     expect((await admin.get('/admin/rules/edit?scope=event&event=4')).status).toBe(404);
     expect((await admin.get('/admin/rules/edit?scope=event&event=999')).status).toBe(404);
