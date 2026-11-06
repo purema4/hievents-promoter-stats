@@ -608,6 +608,26 @@ ${chartCss}
 .shop-grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 240px), 1fr)); }
 .shop-item { display: grid; gap: 10px; align-content: start; }
 .shop-item.locked { opacity: 0.7; }
+.shop-type { font-size: 20px; font-weight: 700; line-height: 1.2; }
+.shop-what { margin: 0; font-size: 14px; }
+.shop-event { margin: 0; font-size: 14px; }
+.shop-item label.for-me { padding: 8px 10px; border-radius: 8px; background: color-mix(in srgb, var(--accent) 10%, var(--surface)); }
+.who { margin: 0; font-size: 14px; font-weight: 600; color: var(--accent); }
+.checkout-lines { display: grid; gap: 12px; margin: 16px 0; }
+.checkout-line { display: flex; gap: 16px; align-items: flex-start; }
+.checkout-qty { font-size: 28px; font-weight: 700; font-variant-numeric: tabular-nums; min-width: 56px; }
+.checkout-body { display: grid; gap: 6px; min-width: 0; }
+.checkout-type { font-size: 22px; font-weight: 700; }
+.checkout-facts { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 4px 0 0; font-size: 15px; }
+.checkout-facts dt { color: var(--muted); }
+.checkout-facts dd { margin: 0; }
+.who-strong { font-weight: 700; }
+.checkout-confirm { display: grid; gap: 12px; margin: 16px 0; }
+.checkout-actions { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+dialog.notice-modal { max-width: min(520px, calc(100vw - 32px)); border: 1px solid var(--border); border-radius: 12px; padding: 20px; background: var(--surface); color: var(--text); }
+dialog.notice-modal::backdrop { background: rgb(0 0 0 / 0.55); }
+dialog.notice-modal h2 { margin-top: 0; }
+.notice-text { white-space: pre-line; font-size: 16px; }
 .bank-item { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 6%, var(--surface)); }
 .shop-item-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
 .shop-count .big { font-size: 24px; font-weight: 650; font-variant-numeric: tabular-nums; }
@@ -3781,6 +3801,7 @@ export function AdminMediaPage(props: {
 export function AdminBannersPage(props: {
   user: User;
   general: string;
+  checkout: string;
   events: { id: number; title: string; start: Date | null; timezone: string | null; promoters: User[] }[];
   banners: Map<number, string>;
   ok?: string;
@@ -3800,6 +3821,22 @@ export function AdminBannersPage(props: {
         <form class="banner-form" method="post" action="/admin/banners/general">
           <textarea name="message" rows={3} maxlength={BANNER_MAX_LENGTH} aria-label="Banner for all promoters">
             {props.general}
+          </textarea>
+          <button class="secondary" type="submit">
+            Save
+          </button>
+        </form>
+      </div>
+      <div class="card rate-card" id="checkout">
+        <h2 class="first">Before a reward request</h2>
+        <p class="muted">
+          Shown in a pop-up when a promoter reviews their reward request: they must click “I understand” before they can
+          send it. Say what they need to know, like “Tickets are under your name at the door: bring ID.”
+        </p>
+        {props.checkout && <Banner text={props.checkout} label="Current notice before a reward request" />}
+        <form class="banner-form" method="post" action="/admin/banners/checkout">
+          <textarea name="message" rows={3} maxlength={BANNER_MAX_LENGTH} aria-label="Notice before a reward request">
+            {props.checkout}
           </textarea>
           <button class="secondary" type="submit">
             Save

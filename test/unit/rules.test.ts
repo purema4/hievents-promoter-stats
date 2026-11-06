@@ -78,7 +78,9 @@ describe('templates and reward types', () => {
     expect(saveRewardType('commission', 'x', 'x')).toBe('invalid');
     expect(saveRewardType('VIP tickets', 'x', 'x')).toBe('invalid');
     expect(saveRewardType('ok_key', ' ', 'x')).toBe('invalid');
-    expect(listRewardTypes().find((t) => t.key === 'ga_list')).toEqual({ key: 'ga_list', label_en: 'GA list', label_fr: 'Liste GA' });
+    expect(listRewardTypes().find((t) => t.key === 'ga_list')).toEqual({ key: 'ga_list', label_en: 'GA list', label_fr: 'Liste GA', description_en: null, description_fr: null });
+    expect(saveRewardType('ga_list', 'GA list spot', 'Place liste GA', 'Your guest on the list.')).toBe('ok');
+    expect(listRewardTypes().find((t) => t.key === 'ga_list')).toMatchObject({ label_en: 'GA list spot', description_en: 'Your guest on the list.', description_fr: 'Your guest on the list.' });
     expect(ruleOutputs()).toEqual(expect.arrayContaining(['commission', 'bonus', 'merch', 'vip_tickets', 'ga_list']));
   });
 });

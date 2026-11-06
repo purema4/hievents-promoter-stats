@@ -417,6 +417,17 @@ if (shop) {
   const lines = shop.querySelector('[data-cart-lines]');
   const send = shop.querySelector('[data-cart-send]');
   const items = [...shop.querySelectorAll('[data-shop-item]')].filter((item) => item.querySelector('[data-qty]'));
+  // Who the tickets of an item are for, in words: "1 for you + 1 guest (Ana)".
+  const whoOf = (item, n) => {
+    const me = item.querySelector('[data-me]');
+    const names = (item.querySelector('[data-guests]')?.value ?? '').split(/[,;]+/).map((g) => g.trim()).filter(Boolean);
+    const forMe = me && me.checked ? 1 : 0;
+    const others = n - forMe;
+    const parts = [];
+    if (forMe) parts.push('1 for you');
+    if (others > 0) parts.push(`${others} for ${others === 1 ? 'a guest' : 'guests'}${names.length ? ` (${names.join(', ')})` : ''}`);
+    return parts.join(' + ');
+  };
   const refresh = () => {
     lines.replaceChildren();
     let total = 0;
@@ -427,7 +438,9 @@ if (shop) {
       total += n;
       const li = document.createElement('li');
       const what = document.createElement('span');
-      what.textContent = `${n} × ${item.dataset.name}`;
+      const banked = item.querySelector('[data-use]')?.value === 'bank';
+      const who = item.querySelector('[data-me]') ? (banked ? 'into your bank' : whoOf(item, n)) : '';
+      what.textContent = `${n} × ${item.dataset.name}${who ? ` — ${who}` : ''}`;
       const remove = document.createElement('button');
       remove.type = 'button';
       remove.className = 'link';
@@ -446,20 +459,48 @@ if (shop) {
       lines.append(li);
     }
     send.disabled = total === 0;
-    send.textContent = total ? `Request ${total} ${total === 1 ? 'reward' : 'rewards'}` : 'Request my rewards';
+    send.textContent = total ? `Review my request (${total}) →` : 'Review my request →';
+  };
+  const showWho = (item) => {
+    const line = item.querySelector('[data-who]');
+    if (!line) return;
+    const n = Number(item.querySelector('[data-qty]').value);
+    line.hidden = n === 0;
+    line.textContent = n === 0 ? '' : item.querySelector('[data-use]')?.value === 'bank' ? `${n} into your bank` : whoOf(item, n);
   };
   for (const item of items) {
     const qty = item.querySelector('[data-qty]');
     const add = item.querySelector('[data-add]');
-    qty.addEventListener('change', refresh);
+    for (const input of item.querySelectorAll('[data-qty], [data-me], [data-guests], [data-use]')) {
+      input.addEventListener('input', () => {
+        showWho(item);
+        refresh();
+      });
+      input.addEventListener('change', () => {
+        showWho(item);
+        refresh();
+      });
+    }
     if (add) {
       add.hidden = false;
       add.addEventListener('click', () => {
         const max = qty.options.length - 1;
         qty.value = String(Math.min(max, Number(qty.value) + 1));
+        showWho(item);
         refresh();
       });
     }
   }
   refresh();
+}
+
+// Checkout: the team's note opens in a pop-up; "I understand" ticks the box needed to send.
+const notice = document.querySelector('dialog[data-notice-modal]');
+if (notice && typeof notice.showModal === 'function') {
+  notice.showModal();
+  notice.querySelector('[data-notice-ok]').addEventListener('click', () => {
+    const ack = document.querySelector('[data-ack]');
+    if (ack) ack.checked = true;
+    notice.close();
+  });
 }

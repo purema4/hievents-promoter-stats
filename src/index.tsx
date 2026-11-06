@@ -81,12 +81,13 @@ import {
   payoutsFor,
   requestPayout,
 } from './payouts';
-import { DashboardPage, EventPage, PayoutsPage, summarizeEvents } from './promoter-views';
+import { CheckoutPage, DashboardPage, EventPage, PayoutsPage, summarizeEvents, type CartLine } from './promoter-views';
 import {
   findRewardRequest,
   listRewardRequests,
   requestReward,
   rewardRequestsFor,
+  checkRewards,
   requestRewards,
   type RewardInput,
 } from './rewards';
@@ -119,7 +120,7 @@ import { ruleWriterEnabled, writeRule } from './rule-writer';
 import { checkDraft, dealInWords, labelOf, langOf, resultSentence, ruleInWords, type RuleCheck } from './rule-admin';
 import { AdminRuleEditPage, AdminRulesPage, ruleEditHref, type RuleTargetInfo } from './rule-views';
 import { emptyInputs } from './rule-variables';
-import { allEventBanners, generalBanner, parseBanner, setEventBanner, setGeneralBanner } from './banners';
+import { allEventBanners, checkoutNotice, generalBanner, setCheckoutNotice, parseBanner, setEventBanner, setGeneralBanner } from './banners';
 import { allMediaDrives, parseMediaUrl, setMediaDrive } from './media-drives';
 import { filterCodes, parseCodeFilter } from './promo-code-list';
 import {
@@ -1106,24 +1107,39 @@ app.post('/payouts', async (c) => {
 });
 
 /** Who the tickets of a shop item are for: "Maya + 2 guests: Ann, Bob". */
+function guestNames(guests: string): string {
+  return guests.split(/[,;\n]+/).map((g) => g.trim()).filter(Boolean).join(', ');
+}
+
+/** Who the tickets of a shop item are for, for the team: "Maya + 2 guests: Ann, Bob". */
 function ticketsFor(user: User, quantity: number, forMe: boolean, guests: string): string {
-  const names = guests.split(/[,;\n]+/).map((g) => g.trim()).filter(Boolean).join(', ');
+  const names = guestNames(guests);
   const others = forMe ? quantity - 1 : quantity;
   const guestPart = others > 0 ? `${others} ${others === 1 ? 'guest' : 'guests'}${names ? `: ${names}` : ''}` : '';
   return [forMe ? user.name : '', guestPart].filter(Boolean).join(' + ').slice(0, 120);
 }
 
-// The rewards shop (Payouts & rewards): the whole cart in one request; every item or none.
-app.post('/rewards/order', async (c) => {
-  const user = c.get('user');
-  const body = await c.req.parseBody();
-  const data = await promoterData(user);
+/** The same, for the promoter: "1 for you (Maya Tremblay) + 1 guest: Ana". */
+function whoFor(user: User, quantity: number, forMe: boolean, guests: string): string {
+  const names = guestNames(guests);
+  const others = forMe ? quantity - 1 : quantity;
+  const guestPart = others > 0 ? `${others} for ${others === 1 ? 'a guest' : 'guests'}${names ? ` (${names})` : ''}` : '';
+  return [forMe ? `1 for you (${user.name})` : '', guestPart].filter(Boolean).join(' + ');
+}
+
+// Shop fields carried from the shop to checkout and on to the order.
+const CART_FIELD = /^(qty|me|guests|for|event)\.[a-z0-9_.]+$|^merch\.details$/;
+
+/** The cart sent from the shop: the requests to make, and each line in plain words for checkout. */
+function cartFrom(body: Record<string, unknown>, data: Awaited<ReturnType<typeof promoterData>>, user: User): { items: RewardInput[]; lines: CartLine[]; fields: [string, string][]; error?: string } {
   const field = (name: string) => String(body[name] ?? '').trim();
   const items: RewardInput[] = [];
+  const lines: CartLine[] = [];
   for (const t of data.rewards.tickets) {
     const key = `${t.event.id}.${t.type.key}`;
     const quantity = Number(field(`qty.${key}`) || 0);
     if (!quantity) continue;
+    const forMe = field(`me.${key}`) === '1';
     // "Use them for": this event, or the bank (the team accepts it; then it keeps until asked for).
     const toBank = field(`for.${key}`) === 'bank';
     items.push({
@@ -1132,9 +1148,10 @@ app.post('/rewards/order', async (c) => {
       rewardType: t.type.key,
       toBank,
       quantity,
-      details: ticketsFor(user, quantity, field(`me.${key}`) === '1', field(`guests.${key}`)),
+      details: ticketsFor(user, quantity, forMe, field(`guests.${key}`)),
       ruleVersions: data.percent.events.get(t.event.id)?.versionIds,
     });
+    lines.push({ quantity, type: t.type, event: t.event, toBank, who: toBank ? '' : whoFor(user, quantity, forMe, field(`guests.${key}`)) });
   }
   // Out of the bank, for an upcoming event of their choice; the type stays.
   for (const b of data.rewards.bank) {
@@ -1142,20 +1159,49 @@ app.post('/rewards/order', async (c) => {
     const quantity = Number(field(`qty.${key}`) || 0);
     if (!quantity) continue;
     const event = data.ticketEvents.find((e) => e.id === Number(field(`event.${key}`)));
-    if (!event) return renderPayouts(c, 'Pick the event to use your banked rewards for.');
-    items.push({
-      kind: 'ticket',
-      rewardType: b.type.key,
-      fromBank: event,
-      quantity,
-      details: ticketsFor(user, quantity, field(`me.${key}`) === '1', field(`guests.${key}`)),
-    });
+    if (!event) return { items, lines, fields: [], error: 'Pick the event to use your banked rewards for.' };
+    const forMe = field(`me.${key}`) === '1';
+    items.push({ kind: 'ticket', rewardType: b.type.key, fromBank: event, quantity, details: ticketsFor(user, quantity, forMe, field(`guests.${key}`)) });
+    lines.push({ quantity, type: b.type, event, fromBank: true, who: whoFor(user, quantity, forMe, field(`guests.${key}`)) });
   }
   const merch = Number(field('qty.merch') || 0);
-  if (merch) items.push({ kind: 'merch', quantity: merch, details: field('merch.details').slice(0, 120) });
-  if (items.length === 0) return renderPayouts(c, 'Your cart is empty: pick how many of a reward you want first.');
+  if (merch) {
+    items.push({ kind: 'merch', quantity: merch, details: field('merch.details').slice(0, 120) });
+    lines.push({ quantity: merch, merch: field('merch.details').slice(0, 120) });
+  }
+  const fields = Object.entries(body)
+    .filter(([k, v]) => CART_FIELD.test(k) && typeof v === 'string')
+    .map(([k, v]) => [k, String(v).slice(0, 200)] as [string, string]);
+  if (items.length === 0) return { items, lines, fields, error: 'Your cart is empty: pick how many of a reward you want first.' };
+  return { items, lines, fields };
+}
+
+// Checkout: the cart in plain words, and the team's notice to accept, before anything is sent.
+app.post('/rewards/checkout', async (c) => {
+  const user = c.get('user');
+  const body = await c.req.parseBody();
+  const data = await promoterData(user);
+  const cart = cartFrom(body, data, user);
+  if (cart.error) return renderPayouts(c, cart.error);
+  const result = checkRewards(user, data.rewards, cart.items);
+  if (result !== 'ok') return renderPayouts(c, messages[result]);
+  return c.html(<CheckoutPage user={user} lines={cart.lines} fields={cart.fields} notice={checkoutNotice()} />);
+});
+
+// The rewards shop (Payouts & rewards): the whole cart in one request; every item or none.
+app.post('/rewards/order', async (c) => {
+  const user = c.get('user');
+  const body = await c.req.parseBody();
+  const data = await promoterData(user);
+  const cart = cartFrom(body, data, user);
+  if (cart.error) return renderPayouts(c, cart.error);
+  // The team's notice must have been accepted at checkout.
+  const notice = checkoutNotice();
+  if (notice && body.ack !== '1') {
+    return c.html(<CheckoutPage user={user} lines={cart.lines} fields={cart.fields} notice={notice} error="Read the note from the team and tick “I understand” first." />, 400);
+  }
   const before = rewardRequestsFor(user.id).length;
-  const { result } = requestRewards(user, data.rewards, items);
+  const { result } = requestRewards(user, data.rewards, cart.items);
   if (result !== 'ok') return renderPayouts(c, messages[result]);
   // Newest first in the list: the cart's own, back in the order they were picked.
   const all = rewardRequestsFor(user.id);
@@ -1958,7 +2004,7 @@ app.post('/admin/rules/check', async (c) => {
 app.post('/admin/rules/types', async (c) => {
   const body = await c.req.parseBody();
   const key = String(body.key ?? '').trim();
-  const result = saveRewardType(key, String(body.label_en ?? ''), String(body.label_fr ?? ''));
+  const result = saveRewardType(key, String(body.label_en ?? ''), String(body.label_fr ?? ''), String(body.description_en ?? ''), String(body.description_fr ?? ''));
   if (result !== 'ok') return c.redirect('/admin/rules?error=reward_type#types');
   audit(c, 'admin.reward_type_saved', { by: c.get('user').id, key });
   return c.redirect('/admin/rules?ok=reward_type_saved#types');
@@ -1971,6 +2017,7 @@ app.get('/admin/banners', async (c) =>
     <AdminBannersPage
       user={c.get('user')}
       general={generalBanner()}
+      checkout={checkoutNotice()}
       events={await commissionEvents()}
       banners={allEventBanners()}
       ok={flash(c.req.query('ok'))}
@@ -1978,6 +2025,13 @@ app.get('/admin/banners', async (c) =>
     />,
   ),
 );
+
+app.post('/admin/banners/checkout', async (c) => {
+  const message = parseBanner((await c.req.parseBody()).message);
+  setCheckoutNotice(message);
+  audit(c, 'admin.checkout_notice_changed', { by: c.get('user').id, message });
+  return c.redirect(`/admin/banners?ok=${message ? 'banner_saved' : 'banner_removed'}#checkout`);
+});
 
 app.post('/admin/banners/general', async (c) => {
   const message = parseBanner((await c.req.parseBody()).message);

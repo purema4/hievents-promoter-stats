@@ -406,15 +406,16 @@ export function AdminRulesPage(props: {
       <h2 id="types">Reward types</h2>
       <p class="muted">
         What a rule can give besides commission, bonus and merch. The key is the name a rule uses (like vip_tickets);
-        promoters see the label.
+        promoters see the name, like "VIP ticket" or "GA list spot", and what it is. Make both clear: it is how promoters
+        know exactly what they ask for. To change one, save it again with the same key.
       </p>
       <div class="card table-wrap">
         <table>
           <thead>
             <tr>
               <th>Key</th>
-              <th>Label</th>
-              <th>En français</th>
+              <th>Name</th>
+              <th>What it is (promoters see it)</th>
             </tr>
           </thead>
           <tbody>
@@ -423,8 +424,14 @@ export function AdminRulesPage(props: {
                 <td>
                   <code>{t.key}</code>
                 </td>
-                <td>{t.label_en}</td>
-                <td>{t.label_fr}</td>
+                <td>
+                  {t.label_en}
+                  <div class="muted">{t.label_fr}</div>
+                </td>
+                <td>
+                  {t.description_en ?? <span class="muted">Not said yet</span>}
+                  {t.description_fr && t.description_fr !== t.description_en && <div class="muted">{t.description_fr}</div>}
+                </td>
               </tr>
             ))}
           </tbody>
@@ -443,8 +450,16 @@ export function AdminRulesPage(props: {
           </label>
         </div>
         <label>
-          En français
+          Name in French
           <input name="label_fr" maxlength={40} placeholder="VIP" />
+        </label>
+        <label>
+          What it is, in one sentence (shown on the reward and at checkout)
+          <input name="description_en" maxlength={200} placeholder="Skip the line and get into the VIP area." />
+        </label>
+        <label>
+          Same, in French
+          <input name="description_fr" maxlength={200} placeholder="Passe devant la file et accès à la zone VIP." />
         </label>
         <button type="submit">Save</button>
       </form>

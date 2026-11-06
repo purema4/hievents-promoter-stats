@@ -1,5 +1,5 @@
 import { config } from './config';
-import { db, listUsers } from './local-db';
+import { addColumn, db, listUsers } from './local-db';
 import type { EventRule } from './money';
 import { rewardRules, trackOn, type Track } from './reward-rules';
 import { parseRule, type RuleLine } from './rules-engine';
@@ -215,25 +215,37 @@ export function removeTemplate(id: number) {
 
 // --- Reward types -------------------------------------------------------------------------------------
 
-export type RewardType = { key: string; label_en: string; label_fr: string };
+// What one is, in a sentence, shown to promoters so they know exactly what they ask for.
+addColumn('reward_types', 'description_en', 'TEXT');
+addColumn('reward_types', 'description_fr', 'TEXT');
+// The first label of plain free tickets said nothing of what they are: given a clear one, unless changed.
+db.query(
+  "UPDATE reward_types SET label_en = 'Free ticket', label_fr = 'Billet gratuit', description_en = 'A regular entry ticket to the event, free.', description_fr = 'Un billet d’entrée régulier pour l’événement, gratuit.' WHERE key = 'free_tickets' AND label_en = 'Free tickets' AND description_en IS NULL",
+).run();
+
+export type RewardType = { key: string; label_en: string; label_fr: string; description_en?: string | null; description_fr?: string | null };
 
 export const REWARD_KEY = /^[a-z][a-z0-9_]{1,39}$/;
 
 export function listRewardTypes(): RewardType[] {
-  return db.query<RewardType, []>('SELECT key, label_en, label_fr FROM reward_types ORDER BY created_at, key').all();
+  return db.query<RewardType, []>('SELECT key, label_en, label_fr, description_en, description_fr FROM reward_types ORDER BY created_at, key').all();
 }
 
 export function rewardTypeOf(key: string): RewardType | null {
-  return db.query<RewardType, [string]>('SELECT key, label_en, label_fr FROM reward_types WHERE key = ?').get(key);
+  return db.query<RewardType, [string]>('SELECT key, label_en, label_fr, description_en, description_fr FROM reward_types WHERE key = ?').get(key);
 }
 
 /** Adds or renames a reward type. Its key is what rules use and cannot be one of the fixed outputs. */
-export function saveRewardType(key: string, labelEn: string, labelFr: string): 'ok' | 'invalid' {
+export function saveRewardType(key: string, labelEn: string, labelFr: string, descriptionEn = '', descriptionFr = ''): 'ok' | 'invalid' {
   if (!REWARD_KEY.test(key) || FIXED_OUTPUTS.some((o) => o.name === key)) return 'invalid';
   const en = labelEn.trim().slice(0, 40);
   const fr = labelFr.trim().slice(0, 40) || en;
   if (!en) return 'invalid';
-  db.query('INSERT INTO reward_types (key, label_en, label_fr) VALUES (?, ?, ?) ON CONFLICT (key) DO UPDATE SET label_en = excluded.label_en, label_fr = excluded.label_fr').run(key, en, fr);
+  const dEn = descriptionEn.trim().slice(0, 200) || null;
+  const dFr = descriptionFr.trim().slice(0, 200) || dEn;
+  db.query(
+    'INSERT INTO reward_types (key, label_en, label_fr, description_en, description_fr) VALUES (?, ?, ?, ?, ?) ON CONFLICT (key) DO UPDATE SET label_en = excluded.label_en, label_fr = excluded.label_fr, description_en = excluded.description_en, description_fr = excluded.description_fr',
+  ).run(key, en, fr, dEn, dFr);
   return 'ok';
 }
 
@@ -277,7 +289,7 @@ export const FREE_TICKETS = 'free_tickets';
 export function migrateToRules() {
   if (db.query("SELECT 1 FROM settings WHERE key = 'rules:migrated'").get()) return;
   db.transaction(() => {
-    if (!rewardTypeOf(FREE_TICKETS)) saveRewardType(FREE_TICKETS, 'Free tickets', 'Billets gratuits');
+    if (!rewardTypeOf(FREE_TICKETS)) saveRewardType(FREE_TICKETS, 'Free ticket', 'Billet gratuit', 'A regular entry ticket to the event, free.', 'Un billet d’entrée régulier pour l’événement, gratuit.');
     const tickets = rewardRules().tickets;
     const defaultText = [
       '# Your usual deal. Events and promoters can have their own lines.',

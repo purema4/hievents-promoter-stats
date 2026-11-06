@@ -799,44 +799,62 @@ function RewardHistory(props: { requests: RewardRequest[] }) {
   );
 }
 
-/** One reward in the shop: what it is, how many are ready, and how many to add to the cart. */
-function ShopItem(props: { t: TicketReward; ticketEvents: TicketEvent[] }) {
+/** The name of a reward type, like "VIP ticket", and what it is, in a sentence the team wrote. */
+const typeName = (t: { key: string; label_en: string }) => t.label_en || t.key;
+const typeWhat = (t: { description_en?: string | null }) => t.description_en ?? '';
+
+/** "How many", "1 of them is for me" and guests: the same on an event's reward and on the bank. */
+function WhoFields(props: { name: string; field: string; available: number; promoter: string }) {
+  return (
+    <>
+      <label>
+        {props.name} — how many?
+        <select name={`qty.${props.field}`} data-qty>
+          {Array.from({ length: props.available + 1 }, (_, n) => (
+            <option value={String(n)}>{n}</option>
+          ))}
+        </select>
+      </label>
+      <label class="check for-me">
+        <input type="checkbox" name={`me.${props.field}`} value="1" checked data-me />
+        <span>
+          <strong>1 of them is for me</strong> ({props.promoter})
+        </span>
+      </label>
+      <label>
+        Guest names <span class="muted">(optional, for the others)</span>
+        <input name={`guests.${props.field}`} maxlength={100} placeholder="Ana, Ben" data-guests />
+      </label>
+      <p class="who" data-who hidden></p>
+    </>
+  );
+}
+
+/** One reward in the shop: exactly what it is, for which event, how many are ready, and who they are for. */
+function ShopItem(props: { t: TicketReward; promoter: string }) {
   const { t } = props;
   const key = `${t.event.id}.${t.type.key}`;
-  const name = t.type.key === 'free_tickets' ? 'Free tickets' : t.type.label_en;
+  const name = typeName(t.type);
   const ready = t.available > 0;
   return (
     <div class={`card shop-item${ready ? '' : ' locked'}`} data-shop-item data-name={`${name} · ${t.event.title}`}>
       <div class="shop-item-head">
-        <span class="chip">{name}</span>
+        <span class="shop-type">{name}</span>
         <span class="shop-count">
           <span class="big">{t.available}</span> <span class="muted">ready</span>
         </span>
       </div>
-      <div>
-        <strong>{t.event.title}</strong>
-        <div class="muted">{eventDate(t.event)}</div>
-      </div>
+      {typeWhat(t.type) && <p class="shop-what">{typeWhat(t.type)}</p>}
+      <p class="shop-event">
+        For <strong>{t.event.title}</strong>
+        <span class="muted"> · {eventDate(t.event)}</span>
+      </p>
       {ready ? (
         <>
-          <label>
-            How many
-            <select name={`qty.${key}`} data-qty>
-              {Array.from({ length: t.available + 1 }, (_, n) => (
-                <option value={String(n)}>{n}</option>
-              ))}
-            </select>
-          </label>
-          <label class="check">
-            <input type="checkbox" name={`me.${key}`} value="1" checked /> One of them is for me
-          </label>
-          <label>
-            Guest names <span class="muted">(optional, for the extras)</span>
-            <input name={`guests.${key}`} maxlength={100} placeholder="Ana, Ben" />
-          </label>
+          <WhoFields name={name} field={key} available={t.available} promoter={props.promoter} />
           <label>
             Use them for
-            <select name={`for.${key}`}>
+            <select name={`for.${key}`} data-use>
               <option value="">{t.event.title}</option>
               <option value="bank">My bank, for a later event</option>
             </select>
@@ -858,32 +876,28 @@ function ShopItem(props: { t: TicketReward; ticketEvents: TicketEvent[] }) {
   );
 }
 
-/**
- * Payouts & rewards: a shop. Every reward that can be requested is a card (free tickets, VIP, GA list…
- * per event, and merch); the promoter adds them to a cart and sends it in one request. Without scripts
- * the "How many" boxes are the cart.
- */
 /** Rewards in the bank: their type stays; they are asked for an upcoming event of the promoter's choice. */
-function BankItem(props: { b: Rewards['bank'][number]; ticketEvents: TicketEvent[] }) {
+function BankItem(props: { b: Rewards['bank'][number]; ticketEvents: TicketEvent[]; promoter: string }) {
   const { b } = props;
   const key = `bank.${b.type.key}`;
-  const name = b.type.key === 'free_tickets' ? 'Free tickets' : b.type.label_en;
+  const name = typeName(b.type);
   const ready = b.balance > 0 && props.ticketEvents.length > 0;
   return (
     <div class={`card shop-item bank-item${ready ? '' : ' locked'}`} data-shop-item data-name={`${name} · from my bank`}>
       <div class="shop-item-head">
-        <span class="chip">{name}</span>
+        <span class="shop-type">{name}</span>
         <span class="shop-count">
-          <span class="big">{b.balance}</span> <span class="muted">in the bank</span>
+          <span class="big">{b.balance}</span> <span class="muted">in your bank</span>
         </span>
       </div>
-      <div>
+      {typeWhat(b.type) && <p class="shop-what">{typeWhat(b.type)}</p>}
+      <p class="shop-event">
         <strong>Your bank</strong>
-        <div class="muted">
-          Kept until you use them, on any upcoming event.
-          {b.pending > 0 && ` ${b.pending} more waiting for the team to bank.`}
-        </div>
-      </div>
+        <span class="muted">
+          {' '}
+          · kept until you use them, on any upcoming event.{b.pending > 0 && ` ${b.pending} more waiting for the team to bank.`}
+        </span>
+      </p>
       {ready ? (
         <>
           <label>
@@ -894,21 +908,7 @@ function BankItem(props: { b: Rewards['bank'][number]; ticketEvents: TicketEvent
               ))}
             </select>
           </label>
-          <label>
-            How many
-            <select name={`qty.${key}`} data-qty>
-              {Array.from({ length: b.balance + 1 }, (_, n) => (
-                <option value={String(n)}>{n}</option>
-              ))}
-            </select>
-          </label>
-          <label class="check">
-            <input type="checkbox" name={`me.${key}`} value="1" checked /> One of them is for me
-          </label>
-          <label>
-            Guest names <span class="muted">(optional, for the extras)</span>
-            <input name={`guests.${key}`} maxlength={100} placeholder="Ana, Ben" />
-          </label>
+          <WhoFields name={name} field={key} available={b.balance} promoter={props.promoter} />
           <button type="button" class="secondary small" data-add hidden>
             Add to cart
           </button>
@@ -920,7 +920,7 @@ function BankItem(props: { b: Rewards['bank'][number]; ticketEvents: TicketEvent
   );
 }
 
-function RewardsShop(props: { rewards: Rewards; ticketEvents: TicketEvent[] }) {
+function RewardsShop(props: { rewards: Rewards; ticketEvents: TicketEvent[]; promoter: string }) {
   const { tickets, merch, bank } = props.rewards;
   const rules = rewardRules();
   const showMerch = trackOn(rules.merch) || merch.earned > 0;
@@ -937,10 +937,10 @@ function RewardsShop(props: { rewards: Rewards; ticketEvents: TicketEvent[] }) {
       <form class="shop" method="post" action="/rewards/order" data-shop>
         <div class="shop-grid">
           {bank.map((b) => (
-            <BankItem b={b} ticketEvents={props.ticketEvents} />
+            <BankItem b={b} ticketEvents={props.ticketEvents} promoter={props.promoter} />
           ))}
           {order.map((t) => (
-            <ShopItem t={t} ticketEvents={props.ticketEvents} />
+            <ShopItem t={t} promoter={props.promoter} />
           ))}
           {showMerch && (
             <div class={`card shop-item${merch.available > 0 ? '' : ' locked'}`} data-shop-item data-name={merch.readyLabel || 'Merch'}>
@@ -989,9 +989,10 @@ function RewardsShop(props: { rewards: Rewards; ticketEvents: TicketEvent[] }) {
           <ul class="cart-lines" data-cart-lines>
             <li class="muted">Pick how many of a reward you want, then send your request.</li>
           </ul>
-          <button type="submit" data-cart-send>
-            Request my rewards
+          <button type="submit" formaction="/rewards/checkout" data-cart-send>
+            Review my request →
           </button>
+          <p class="muted">Nothing is sent yet: you check everything on the next screen.</p>
         </div>
       </form>
     </section>
@@ -1113,7 +1114,7 @@ export function PayoutsPage(props: {
         );
       })}
 
-      <RewardsShop rewards={props.rewards} ticketEvents={props.ticketEvents} />
+      <RewardsShop rewards={props.rewards} ticketEvents={props.ticketEvents} promoter={props.user.name} />
 
       {props.adjustments.length > 0 && (
         <>
@@ -1150,3 +1151,95 @@ export function PayoutsPage(props: {
 }
 
 export { parseRange, RewardHistory };
+
+/** One line of a cart, in plain words, for checkout. */
+export type CartLine = {
+  quantity: number;
+  type?: { key: string; label_en: string; description_en?: string | null };
+  event?: { title: string; start?: Date | null; timezone?: string | null; dates?: number };
+  toBank?: boolean;
+  fromBank?: boolean;
+  who?: string;
+  merch?: string;
+};
+
+/**
+ * Checkout: every line of the cart spelled out (the kind of ticket, the event, who each one is for), the
+ * team's notice in a pop-up to accept, then Confirm. Nothing is sent before.
+ */
+export function CheckoutPage(props: { user: User; lines: CartLine[]; fields: [string, string][]; notice: string; error?: string }) {
+  const total = props.lines.reduce((sum, l) => sum + l.quantity, 0);
+  return (
+    <Layout title="Check your request" user={props.user}>
+      <p class="muted">
+        <a href="/payouts#rewards">Rewards shop</a> / Check your request
+      </p>
+      <h1>Check your request</h1>
+      <p class="muted">Nothing is sent yet. Check each line: what kind of reward it is, for which event, and who it is for.</p>
+      <Flash error={props.error} />
+      <div class="checkout-lines">
+        {props.lines.map((l) => (
+          <div class="card checkout-line">
+            <div class="checkout-qty">{l.quantity} ×</div>
+            <div class="checkout-body">
+              <div class="checkout-type">{l.merch !== undefined ? 'Merch' : (l.type?.label_en ?? '')}</div>
+              {l.type?.description_en && <p class="shop-what">{l.type.description_en}</p>}
+              <dl class="checkout-facts">
+                {l.merch !== undefined ? (
+                  <>
+                    <dt>What</dt>
+                    <dd>{l.merch || '—'}</dd>
+                  </>
+                ) : l.toBank ? (
+                  <>
+                    <dt>Goes to</dt>
+                    <dd>
+                      <strong>Your bank</strong>, from {l.event?.title}. The team confirms it; then they wait for any later
+                      event, still {l.type?.label_en}.
+                    </dd>
+                  </>
+                ) : (
+                  <>
+                    <dt>Event</dt>
+                    <dd>
+                      <strong>{l.event?.title}</strong>
+                      {l.event?.start ? ` · ${formatDate(l.event.start, l.event.timezone ?? null)}` : ''}
+                      {l.fromBank ? ' · from your bank' : ''}
+                    </dd>
+                    <dt>For</dt>
+                    <dd class="who-strong">{l.who}</dd>
+                  </>
+                )}
+              </dl>
+            </div>
+          </div>
+        ))}
+      </div>
+      {props.notice && <Banner text={props.notice} label="A note from the team" />}
+      <form class="checkout-confirm" method="post" action="/rewards/order">
+        {props.fields.map(([name, value]) => (
+          <input type="hidden" name={name} value={value} />
+        ))}
+        {props.notice && (
+          <label class="check">
+            <input type="checkbox" name="ack" value="1" required data-ack /> I have read the note from the team
+          </label>
+        )}
+        <div class="checkout-actions">
+          <button type="submit">Confirm and send {plural(total, 'reward')}</button>
+          <a href="/payouts#rewards">Back to the shop</a>
+        </div>
+      </form>
+      {props.notice && (
+        <dialog class="notice-modal" data-notice-modal aria-labelledby="notice-title">
+          <h2 id="notice-title">Before you send</h2>
+          <p class="notice-text">{props.notice}</p>
+          <button type="button" data-notice-ok>
+            I understand
+          </button>
+        </dialog>
+      )}
+    </Layout>
+  );
+}
+

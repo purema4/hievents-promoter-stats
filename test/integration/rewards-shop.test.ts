@@ -36,8 +36,8 @@ describeIntegration('rewards shop', () => {
     expect(text(page)).toContain('Rewards shop');
     const card = (name: string) => text(page.slice(page.indexOf(`data-name="${name}"`)).split('data-shop-item')[0]!);
     expect(card('VIP · Warehouse Night')).toMatch(/2 ready/);
-    expect(card('Free tickets · Warehouse Night')).toMatch(/1 ready/);
-    expect(card('Free tickets · Winter Opening')).toMatch(/1 ready/);
+    expect(card('Free ticket · Warehouse Night')).toMatch(/1 ready/);
+    expect(card('Free ticket · Winter Opening')).toMatch(/1 ready/);
     // Nothing ready yet: shown, with how far to go.
     expect(card('GA list · Warehouse Night')).toContain('None ready yet.');
     expect(card('GA list · Warehouse Night')).toContain('1 more sale for the next one');
@@ -105,7 +105,7 @@ describeIntegration('rewards shop', () => {
     const id = queue.match(/1 free ticket into the bank[\s\S]*?action="\/admin\/rewards\/(\d+)\/fulfil"/)![1]!;
     expect(location(await admin.post(`/admin/rewards/${id}/fulfil`, { admin_note: '' }))).toBe('/admin/payouts?ok=reward_fulfilled');
     page = await maya.client.page('/payouts');
-    expect(text(page.slice(page.indexOf('data-name="Free tickets · from my bank"')).split('data-shop-item')[0]!)).toMatch(/1 in the bank/);
+    expect(text(page.slice(page.indexOf('data-name="Free ticket · from my bank"')).split('data-shop-item')[0]!)).toMatch(/1 in your bank/);
 
     // Too many out of the bank: refused, nothing saved.
     const before = requests();
@@ -118,7 +118,7 @@ describeIntegration('rewards shop', () => {
     // An event that is over, or no event at all, cannot take banked rewards.
     db.query("INSERT INTO reward_requests (user_id, promoter_name, promoter_email, kind, event_id, source_event_id, source_event_title, quantity, reward_type, reward_label, status) VALUES (?, 'x', 'x', 'ticket', NULL, 1, 'Warehouse Night', 1, 'ga_list', 'GA list', 'fulfilled')").run(maya.id);
     expect((await order({ 'qty.bank.ga_list': '1', 'event.bank.ga_list': '4' })).status).toBe(400);
-    expect(text(await (await maya.client.page('/payouts')))).toMatch(/GA list[^]*?1 in the bank/);
+    expect(text(await (await maya.client.page('/payouts')))).toMatch(/GA list[^]*?1 in your bank/);
   });
 
   test('a bank request the team declines goes back to its event', async () => {
@@ -128,6 +128,53 @@ describeIntegration('rewards shop', () => {
     const id = queue.match(/1 free ticket into the bank, from Winter Opening[\s\S]*?action="\/admin\/rewards\/(\d+)\/reject"/)![1]!;
     await admin.post(`/admin/rewards/${id}/reject`, { admin_note: 'Use it on Winter Opening' });
     const page = await maya.client.page('/payouts');
-    expect(text(page.slice(page.indexOf('data-name="Free tickets · Winter Opening"')).split('data-shop-item')[0]!)).toMatch(/1 ready/);
+    expect(text(page.slice(page.indexOf('data-name="Free ticket · Winter Opening"')).split('data-shop-item')[0]!)).toMatch(/1 ready/);
+  });
+
+  test('checkout spells out every line, and the team\'s note must be accepted before sending', async () => {
+    // Clear names and what each one is, set by the admins.
+    expect(location(await admin.post('/admin/rules/types', { key: 'vip_tickets', label_en: 'VIP ticket', label_fr: 'Billet VIP', description_en: 'Skip the line and get into the VIP area.' }))).toContain('ok=reward_type_saved');
+    expect(location(await admin.post('/admin/banners/checkout', { message: 'Tickets are under your name at the door: bring ID.' }))).toBe('/admin/banners?ok=banner_saved#checkout');
+    // Two more VIP to ask for.
+    await admin.post(`/admin/promoters/${maya.id}/adjust`, { kind: 'free_tickets', event_id: '1', reward_type: 'vip_tickets', quantity: '2', label: 'Thanks' });
+    const shop = await maya.client.page('/payouts');
+    const card = text(shop.slice(shop.indexOf('data-name="VIP ticket · Warehouse Night"')).split('data-shop-item')[0]!);
+    expect(card).toContain('VIP ticket');
+    expect(card).toContain('Skip the line and get into the VIP area.');
+    expect(card).toContain('VIP ticket — how many?');
+    expect(card).toContain(`1 of them is for me (${maya.name})`);
+    expect(shop).toContain('formaction="/rewards/checkout"');
+
+    const cart = { 'qty.1.vip_tickets': '2', 'me.1.vip_tickets': '1', 'guests.1.vip_tickets': 'Ana' };
+    const res = await maya.client.post('/rewards/checkout', cart);
+    expect(res.status).toBe(200);
+    const page = await res.text();
+    const words = text(page);
+    expect(words).toContain('Check your request');
+    expect(words).toContain('2 × VIP ticket');
+    expect(words).toContain('Skip the line and get into the VIP area.');
+    expect(words).toContain('Warehouse Night');
+    expect(words).toContain(`1 for you (${maya.name}) + 1 for a guest (Ana)`);
+    expect(page).toContain('<dialog class="notice-modal"');
+    expect(words).toContain('Tickets are under your name at the door: bring ID.');
+    expect(page).toContain('<input type="hidden" name="qty.1.vip_tickets" value="2"/>');
+    // Nothing sent yet.
+    const before = requests();
+    expect(requests()).toBe(before);
+    // Without "I understand": refused, nothing sent.
+    const unread = await order(cart);
+    expect(unread.status).toBe(400);
+    expect(text(await unread.text())).toContain('tick “I understand” first');
+    expect(requests()).toBe(before);
+    expect(location(await order({ ...cart, ack: '1' }))).toBe('/payouts?ok=reward_ordered#rewards');
+    expect(requests()).toBe(before + 1);
+    expect(text(await admin.page('/admin/payouts'))).toContain('2 VIP ticket for Warehouse Night');
+    await admin.post('/admin/banners/checkout', { message: '' });
+  });
+
+  test('checkout refuses a cart that would not go through', async () => {
+    const res = await maya.client.post('/rewards/checkout', { 'qty.1.vip_tickets': '5' });
+    expect(res.status).toBe(400);
+    expect(text(await res.text())).toContain('That reward is not available any more.');
   });
 });

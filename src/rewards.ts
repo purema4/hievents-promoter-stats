@@ -130,7 +130,7 @@ export function bankFor(userId: number): Map<string, { balance: number; pending:
   return new Map(rows.map((r) => [r.type, { balance: r.banked - r.out, pending: r.pending }]));
 }
 
-const plainFreeTickets: RewardType = { key: FREE_TICKETS, label_en: 'Free tickets', label_fr: 'Billets gratuits' };
+const plainFreeTickets: RewardType = { key: FREE_TICKETS, label_en: 'Free ticket', label_fr: 'Billet gratuit', description_en: 'A regular entry ticket to the event, free.' };
 
 /** Requested or given rewards (not declined), by "kind:sourceEvent:type". */
 function usedRewards(userId: number): Map<string, number> {
@@ -315,6 +315,24 @@ export function requestRewards(user: User, rewards: Rewards, items: RewardInput[
     if (err instanceof Stop) return { result: err.result, failed: err.index };
     throw err;
   }
+}
+
+/** Would this cart go through? The same checks as requestRewards, then everything is undone. */
+export function checkRewards(user: User, rewards: Rewards, items: RewardInput[]): RewardResult {
+  class Undo extends Error {
+    constructor(readonly result: RewardResult) {
+      super(result);
+    }
+  }
+  try {
+    db.transaction(() => {
+      throw new Undo(requestRewards(user, rewards, items).result);
+    })();
+  } catch (err) {
+    if (err instanceof Undo) return err.result;
+    throw err;
+  }
+  return 'not_available';
 }
 
 export function rewardRequestsFor(userId: number): RewardRequest[] {
