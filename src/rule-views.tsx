@@ -214,8 +214,8 @@ export function AdminRuleEditPage(props: {
         </form>
       )}
       {props.canWrite && (
-        <details class="card write-card" open={!!props.description || undefined}>
-          <summary>Write it for me</summary>
+        <details class="card write-card" open>
+          <summary>Ask Claude to write it</summary>
           <form class="stack" method="post" action={`/admin/rules/write?${href.split('?')[1]}`}>
             <label>
               Describe the deal, in French or English
@@ -224,7 +224,7 @@ export function AdminRuleEditPage(props: {
               </textarea>
             </label>
             <button class="secondary" type="submit">
-              Write the rule
+              Ask Claude
             </button>
             <p class="muted">Claude writes it into the box below. It is checked like a rule you type, and nothing is saved until you save.</p>
           </form>
@@ -307,6 +307,7 @@ export function AdminRulesPage(props: {
   rewardTypes: RewardType[];
   events: { id: number; title: string; start: Date | null; timezone: string | null; promoters: User[]; hasRule: boolean; overrides: number }[];
   promotersWithRules: User[];
+  canAsk?: boolean;
   ok?: string;
   error?: string;
 }) {
@@ -318,6 +319,27 @@ export function AdminRulesPage(props: {
         line wins: a promoter on an event, then the event, then the promoter, then the default rule.
       </p>
       <Flash error={props.error} ok={props.ok} />
+      {props.canAsk && (
+        <form class="card stack-card ask-card" method="post" action="/admin/rules/write">
+          <h2 class="first">Ask Claude</h2>
+          <p class="muted">Describe a deal in French or English. Claude writes the rule; you check it and save it.</p>
+          <label>
+            For
+            <select name="rule">
+              {props.events.map((e) => (
+                <option value={`event:${e.id}`}>{e.title}</option>
+              ))}
+              <option value="default">The default rule (everyone, every event)</option>
+              <option value="template">A new template</option>
+            </select>
+          </label>
+          <label>
+            The deal
+            <textarea name="description" rows={3} maxlength={2000} required placeholder="1 billet vendu = 2 VIP (lui et son +1), puis 1 place liste GA par 5 billets, 5 $ par billet" />
+          </label>
+          <button type="submit">Ask Claude</button>
+        </form>
+      )}
 
       <div class="card rate-card">
         <h2 class="first">Default rule</h2>

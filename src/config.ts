@@ -57,7 +57,7 @@ export const config = {
   // Share of sales (after discounts, before taxes and fees) paid back to promoters. Can be overridden per promoter.
   commissionPercent: Number(process.env.COMMISSION_PERCENT ?? 10),
   // The rules engine (rules-engine/, cel-go), reached on the Docker network only.
-  // "Write it for me" on the rule editor (Claude). Without it, the button is not shown.
+  // "Ask Claude" on the rule editor (Claude). Without it, the button is not shown.
   anthropicApiKey: (process.env.ANTHROPIC_API_KEY ?? '').trim(),
   rulesEngineUrl: (process.env.RULES_ENGINE_URL || 'http://rules-engine:8080').trim().replace(/\/+$/, ''),
   // Optional password login for the first admin, so there is a way in even if email is down.

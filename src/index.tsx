@@ -1844,6 +1844,7 @@ app.get('/admin/rules', async (c) => {
       rewardTypes={listRewardTypes()}
       events={events.map((e) => ({ ...e, hasRule: !!currentRule('event', { eventId: e.id }), overrides: overrides.find((o) => o.event_id === e.id)?.n ?? 0 }))}
       promotersWithRules={listUsers().filter((u) => currentRule('promoter', { userId: u.id }))}
+      canAsk={ruleWriterEnabled()}
       ok={flash(c.req.query('ok'))}
       error={flash(c.req.query('error'))}
     />,
@@ -1897,13 +1898,16 @@ app.post('/admin/rules/edit', async (c) => {
   return c.redirect(`${back}&ok=rule_saved`);
 });
 
-// "Write it for me": Claude writes the rule from a description; it lands in the box, not saved.
+// "Ask Claude": Claude writes the rule from a description; it lands in the box, not saved.
 const writeCounts = new Map<number, number[]>();
 app.post('/admin/rules/write', async (c) => {
-  const target = await ruleTargetOf((k) => c.req.query(k));
+  const body = await c.req.parseBody();
+  // From a rule's editor the rule is in the address; from the Rules page, in the form ("default", "event:12", "template").
+  const [scope, id] = String(body.rule ?? '').split(':');
+  const fromForm: Record<string, string | undefined> = { scope, event: scope === 'event' ? id : undefined };
+  const target = await ruleTargetOf((k) => c.req.query(k) ?? fromForm[k]);
   if (!target || !ruleWriterEnabled()) return c.notFound();
   const admin = c.get('user');
-  const body = await c.req.parseBody();
   const description = String(body.description ?? '').trim().slice(0, 2000);
   const saved = target.scope === 'template' && !target.templateId ? '' : (currentRule(target.scope, target)?.text ?? '');
   if (!description) return renderRuleEdit(c, target, saved, { status: 400, error: 'Describe the deal first.' });

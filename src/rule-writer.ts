@@ -6,7 +6,7 @@ import { listRewardTypes } from './rules';
 import { FIXED_OUTPUTS, RULE_VARIABLES } from './rule-variables';
 
 /*
- * "Write it for me" on the rule editor: an admin describes a deal in French or English and Claude writes
+ * "Ask Claude" on the rule editor: an admin describes a deal in French or English and Claude writes
  * the rule. The rule only goes into the text box: it is checked and previewed like a typed one, and
  * nothing is saved until the admin saves it. Without ANTHROPIC_API_KEY the button is not shown.
  */
