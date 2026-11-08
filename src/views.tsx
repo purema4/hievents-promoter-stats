@@ -632,6 +632,21 @@ table.shop-table tr.in-cart td { background: color-mix(in srgb, var(--accent) 6%
 td.shop-avail { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
 td.shop-avail .big { font-size: 22px; font-weight: 650; }
 td.shop-add { width: 1%; text-align: right; white-space: nowrap; }
+.stepper:not([hidden]) { display: inline-flex; align-items: stretch; height: 44px; border-radius: 999px; overflow: hidden; background: var(--accent); color: var(--accent-text); box-shadow: 0 2px 8px color-mix(in srgb, var(--accent) 35%, transparent); }
+.stepper button { display: grid; place-items: center; width: 44px; padding: 0; border-radius: 0; background: transparent; color: inherit; }
+.stepper button:hover:not(:disabled) { background: rgb(255 255 255 / 0.14); }
+.stepper button:disabled { opacity: 0.4; cursor: not-allowed; }
+.stepper-n { display: grid; place-items: center; min-width: 40px; padding: 0 6px; font-weight: 700; font-size: 17px; font-variant-numeric: tabular-nums; border-left: 1px solid rgb(255 255 255 / 0.35); border-right: 1px solid rgb(255 255 255 / 0.35); }
+/* Narrow screens: the reward on its own line, then how many are available and the button. */
+@media (max-width: 600px) {
+  table.shop-table tr { display: grid; grid-template-columns: 1fr auto; align-items: center; column-gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--border); }
+  table.shop-table tr:last-child { border-bottom: 0; }
+  table.shop-table td { border-bottom: 0; padding: 4px 8px; }
+  table.shop-table td:first-child { grid-column: 1 / -1; }
+  td.shop-avail { text-align: left; }
+}
+td.shop-avail .of { font-size: 16px; font-weight: 600; color: var(--muted); }
+button.plus[hidden] { display: none; }
 button.plus { display: inline-grid; place-items: center; width: 44px; height: 44px; padding: 0; border-radius: 50%; }
 button.plus svg, button.step svg { display: block; }
 button.plus:disabled { opacity: 0.35; cursor: not-allowed; }

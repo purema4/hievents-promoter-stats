@@ -554,9 +554,17 @@ if (shop) {
     let total = 0;
     for (const row of rows) {
       const n = qtyOf(row);
+      const max = row.querySelector('[data-qty]').options.length - 1;
       row.classList.toggle('in-cart', n > 0);
-      const plus = row.querySelector('[data-add]');
-      if (plus) plus.disabled = n >= row.querySelector('[data-qty]').options.length - 1;
+      // Round "+" while none are in the cart; then the pill (− n +) and "3/4 available".
+      const add = row.querySelector('[data-add]');
+      const stepper = row.querySelector('[data-stepper]');
+      add.hidden = n > 0;
+      stepper.hidden = n === 0;
+      stepper.querySelector('[data-count]').textContent = String(n);
+      stepper.querySelector('[data-plus]').disabled = n >= max;
+      row.querySelector('[data-left]').textContent = String(max - n);
+      row.querySelector('[data-of]').hidden = n === 0;
       if (!n) continue;
       total += n;
       lines.append(lineFor(row));
@@ -602,6 +610,17 @@ if (shop) {
     add.addEventListener('click', () => {
       setQty(row, qtyOf(row) + 1);
       refresh();
+      row.querySelector('[data-plus]').focus();
+    });
+    row.querySelector('[data-plus]').addEventListener('click', () => {
+      setQty(row, qtyOf(row) + 1);
+      refresh();
+    });
+    row.querySelector('[data-minus]').addEventListener('click', () => {
+      setQty(row, qtyOf(row) - 1);
+      refresh();
+      // Back to the round "+" at 0: keep the focus on the row.
+      if (qtyOf(row) === 0) add.focus();
     });
   }
   refresh();

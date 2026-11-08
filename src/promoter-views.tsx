@@ -834,7 +834,14 @@ function ShopRow(props: {
         {props.note && <div class="muted">{props.note}</div>}
       </td>
       <td class="shop-avail">
-        <span class="big">{props.available}</span> <span class="muted">available</span>
+        {/* "3/4 available" once some are in the cart: left out of all (set by app.js). */}
+        <span class="big" data-left>
+          {props.available}
+        </span>
+        <span class="of" data-of hidden>
+          /{props.available}
+        </span>{' '}
+        <span class="muted">available</span>
       </td>
       <td class="shop-add">
         {ready ? (
@@ -849,6 +856,22 @@ function ShopRow(props: {
               <path fill="currentColor" d="M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z" />
             </svg>
             </button>
+            {/* Once one is in the cart, "+" becomes a pill: − on the left, how many, + on the right. */}
+            <div class="stepper" data-stepper hidden>
+              <button type="button" data-minus aria-label={`One less ${props.name}`}>
+                <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+                  <path fill="currentColor" d="M5 11h14v2H5z" />
+                </svg>
+              </button>
+              <span class="stepper-n" data-count aria-live="polite">
+                0
+              </span>
+              <button type="button" data-plus aria-label={`One more ${props.name}`}>
+                <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+                  <path fill="currentColor" d="M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z" />
+                </svg>
+              </button>
+            </div>
             {props.kind !== 'merch' && (
               <>
                 <input type="hidden" name={`me.${props.field}`} value="1" data-me-field />
