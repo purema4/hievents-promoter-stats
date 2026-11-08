@@ -73,6 +73,7 @@ function probes(): RuleInputs[] {
           is_team_lead: lead,
           team_size: lead ? 4 : 0,
           team_tickets_sold: lead ? sold * 4 : sold,
+          team_full_price_sales: (lead ? sold * 4 : sold) * 25,
         });
       }
     }
@@ -156,7 +157,7 @@ export async function checkDraft(scope: RuleScope, target: RuleTarget, text: str
   }
   const tickets = [1, 5, 12, 20, ...(testTickets !== undefined && Number.isFinite(testTickets) ? [testTickets] : [])];
   for (const sold of [...new Set(tickets)].sort((a, b) => a - b)) {
-    const variables: RuleInputs = { ...emptyInputs(), tickets_sold: sold, orders: sold, full_price_sales: sold * 25, codes_used: 1, event_tickets_sold: sold, event_promoters: 1, event_dates: 1, lifetime_tickets: sold, events_promoted: 1, level: levelFor(sold).level.name, team_tickets_sold: sold };
+    const variables: RuleInputs = { ...emptyInputs(), tickets_sold: sold, orders: sold, full_price_sales: sold * 25, codes_used: 1, event_tickets_sold: sold, event_promoters: 1, event_dates: 1, lifetime_tickets: sold, events_promoted: 1, level: levelFor(sold).level.name, team_tickets_sold: sold, team_full_price_sales: sold * 25 };
     items.push({ subject: `test:${sold}`, variables, row: { label: `${sold} tickets at $25`, tickets: sold, values: {}, made_up: true }, currency: 'CAD' });
   }
   const { results } = await evaluateRules({ version: 'preview', lines }, items, { cache: false });

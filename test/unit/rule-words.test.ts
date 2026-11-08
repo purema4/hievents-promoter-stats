@@ -31,6 +31,8 @@ describe('rules in words', () => {
     expect(describeLine('Commission', tenPercent, 'money', 'en')).toBe('Commission: 10% of your sales at full price, outside Hi.Events too.');
     expect(describeLine('Commission', tenPercent, 'money', 'fr')).toBe('Commission : 10 % de tes ventes au plein prix, hors Hi.Events compris.');
     expect(describeLine('Commission', c('_*_', v('full_price_sales'), n(0.125)), 'money', 'en')).toBe('Commission: 12.5% of your sales at full price.');
+    expect(describeLine('Bonus', c('_*_', v('team_full_price_sales'), n(0.02)), 'money', 'en')).toBe('Bonus: 2% of your team’s sales at full price.');
+    expect(describeLine('Bonus', c('_*_', v('team_full_price_sales'), n(0.02)), 'money', 'fr')).toBe('Bonus : 2 % des ventes au plein prix de ton équipe.');
   });
 
   test('thresholds, if/else and sums', () => {

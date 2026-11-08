@@ -845,7 +845,9 @@ function ShopRow(props: {
               ))}
             </select>
             <button type="button" class="plus" data-add hidden aria-label={`Add one ${props.name}${props.where ? ` for ${props.where}` : ''}`}>
-              +
+              <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+              <path fill="currentColor" d="M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z" />
+            </svg>
             </button>
             {props.kind !== 'merch' && (
               <>
@@ -857,7 +859,9 @@ function ShopRow(props: {
           </>
         ) : (
           <button type="button" class="plus" disabled aria-label={`None available: ${props.name}`}>
-            +
+            <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+              <path fill="currentColor" d="M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z" />
+            </svg>
           </button>
         )}
       </td>
@@ -960,11 +964,17 @@ function RewardsShop(props: { rewards: Rewards; ticketEvents: TicketEvent[]; pro
             </div>
           )}
         </div>
-        <a class="cart-jump" href="#cart" data-cart-jump hidden>
-          Your cart
-        </a>
-        <div class="card cart" id="cart" data-cart>
-          <h3>Your cart</h3>
+        <button type="button" class="cart-jump" data-cart-jump hidden>
+          View cart
+        </button>
+        <div class="cart-backdrop" data-cart-backdrop hidden></div>
+        <div class="card cart" id="cart" data-cart role="region" aria-label="Your cart">
+          <div class="cart-head">
+            <h3>Your cart</h3>
+            <button type="button" class="cart-close" data-cart-close aria-label="Close the cart">
+              ×
+            </button>
+          </div>
           <div class="cart-lines" data-cart-lines>
             <p class="muted">Press + next to a reward to add it here.</p>
           </div>

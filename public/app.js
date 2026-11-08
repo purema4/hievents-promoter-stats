@@ -432,6 +432,21 @@ if (shop) {
     node.append(...children);
     return node;
   };
+  // + and − drawn as icons, so they sit in the middle of their round buttons.
+  const icon = (d) => {
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('width', '18');
+    svg.setAttribute('height', '18');
+    svg.setAttribute('aria-hidden', 'true');
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('fill', 'currentColor');
+    path.setAttribute('d', d);
+    svg.append(path);
+    return svg;
+  };
+  const PLUS = 'M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z';
+  const MINUS = 'M5 11h14v2H5z';
   const names = (value) => value.split(/[,;]+/).map((g) => g.trim()).filter(Boolean);
   // "1 for you + 1 for a guest (Ana)"
   const whoOf = (row, n) => {
@@ -459,8 +474,8 @@ if (shop) {
     if (row.dataset.where) head.append(el('span', { class: 'muted', text: ` · ${row.dataset.where}` }));
     line.append(head);
 
-    const minus = el('button', { type: 'button', class: 'step', 'aria-label': `One less ${row.dataset.type}`, text: '−' });
-    const plus = el('button', { type: 'button', class: 'step', 'aria-label': `One more ${row.dataset.type}`, text: '+' });
+    const minus = el('button', { type: 'button', class: 'step', 'aria-label': `One less ${row.dataset.type}` }, icon(MINUS));
+    const plus = el('button', { type: 'button', class: 'step', 'aria-label': `One more ${row.dataset.type}` }, icon(PLUS));
     const remove = el('button', { type: 'button', class: 'link', text: 'Remove' });
     minus.addEventListener('click', () => {
       setQty(row, n - 1);
@@ -551,9 +566,34 @@ if (shop) {
     send.textContent = total ? `Review my request (${total}) →` : 'Review my request →';
     if (jump) {
       jump.hidden = total === 0;
-      jump.textContent = `Your cart (${total}) — review ↓`;
+      jump.textContent = `View cart (${total})`;
     }
+    if (total === 0) closeSheet();
   };
+
+  // Phones: the cart is a sheet that slides up from the bottom (styles in .shop.sheet).
+  const cart = shop.querySelector('[data-cart]');
+  const backdrop = shop.querySelector('[data-cart-backdrop]');
+  function openSheet() {
+    cart.classList.add('open');
+    backdrop.hidden = false;
+    cart.querySelector('[data-cart-close]')?.focus();
+  }
+  function closeSheet() {
+    if (!cart.classList.contains('open')) return;
+    cart.classList.remove('open');
+    backdrop.hidden = true;
+  }
+  shop.classList.add('sheet');
+  jump?.addEventListener('click', openSheet);
+  backdrop.addEventListener('click', closeSheet);
+  shop.querySelector('[data-cart-close]')?.addEventListener('click', () => {
+    closeSheet();
+    jump?.focus();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeSheet();
+  });
 
   for (const row of rows) {
     row.querySelector('[data-qty]').hidden = true;

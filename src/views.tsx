@@ -600,12 +600,18 @@ ${chartCss}
 .rule-pending { color: var(--muted); font-size: 13px; margin: 0; }
 /* Payouts & rewards: the rewards shop */
 .shop { display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr) 320px; align-items: start; margin: 0; }
-/* On phones the cart comes after the events; a bar at the bottom of the screen leads to it. */
+/* On phones the cart is a sheet that slides up from the bottom, opened from a bar that stays at the bottom
+   of the screen (set up by app.js: without scripts the cart simply comes after the events). */
 @media (max-width: 899px) {
   .shop { grid-template-columns: 1fr; }
-  .cart { position: static; }
-  .cart-jump:not([hidden]) { display: block; position: sticky; bottom: calc(8px + env(safe-area-inset-bottom)); z-index: 5; text-align: center; padding: 12px 16px; border-radius: 10px; background: var(--accent); color: var(--accent-text); font-weight: 700; text-decoration: none; box-shadow: 0 -6px 24px rgb(0 0 0 / 0.18); }
+  .shop .cart { position: static; }
+  .shop.sheet .cart { position: fixed; left: 0; right: 0; bottom: 0; top: auto; z-index: 70; max-height: 85vh; overflow-y: auto; border-radius: 16px 16px 0 0; border-bottom: 0; padding-bottom: calc(16px + env(safe-area-inset-bottom)); box-shadow: 0 -12px 40px rgb(0 0 0 / 0.3); transform: translateY(105%); transition: transform 0.25s ease; visibility: hidden; }
+  .shop.sheet .cart.open { transform: none; visibility: visible; }
+  .shop.sheet .cart-close { display: grid; }
+  .shop.sheet .cart-jump:not([hidden]) { display: flex; }
+  .shop.sheet { padding-bottom: 72px; }
 }
+@media (prefers-reduced-motion: reduce) { .shop.sheet .cart { transition: none; } }
 .shop-events { display: grid; gap: 16px; align-content: start; }
 .shop-event-card h3 { margin: 0; font-size: 18px; }
 .shop-event-card > p.muted { margin: 2px 0 10px; }
@@ -618,13 +624,18 @@ table.shop-table tr.in-cart td { background: color-mix(in srgb, var(--accent) 6%
 td.shop-avail { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
 td.shop-avail .big { font-size: 22px; font-weight: 650; }
 td.shop-add { width: 1%; text-align: right; white-space: nowrap; }
-button.plus { width: 44px; height: 44px; padding: 0; border-radius: 50%; font-size: 26px; line-height: 1; font-weight: 600; }
+button.plus { display: inline-grid; place-items: center; width: 44px; height: 44px; padding: 0; border-radius: 50%; }
+button.plus svg, button.step svg { display: block; }
 button.plus:disabled { opacity: 0.35; cursor: not-allowed; }
-.cart-jump { display: none; }
+.cart-jump { display: none; position: fixed; left: 12px; right: 12px; width: calc(100% - 24px); bottom: calc(12px + env(safe-area-inset-bottom)); z-index: 65; justify-content: center; align-items: center; gap: 8px; padding: 14px 16px; border-radius: 12px; background: var(--accent); color: var(--accent-text); font-weight: 700; font-size: 16px; box-shadow: 0 8px 24px rgb(0 0 0 / 0.25); }
+.cart-backdrop { position: fixed; inset: 0; z-index: 68; background: rgb(0 0 0 / 0.5); }
+.cart-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.cart-head h3 { margin: 0; }
+.cart-close { display: none; place-items: center; width: 36px; height: 36px; padding: 0; border-radius: 50%; font-size: 22px; line-height: 1; background: var(--bg); color: var(--text); border: 1px solid var(--border); }
 .cart-line { display: grid; gap: 8px; padding: 10px 0; border-bottom: 1px solid var(--border); }
 .cart-line:last-child { border-bottom: 0; }
 .cart-steps { display: flex; gap: 8px; align-items: center; }
-button.step { width: 32px; height: 32px; padding: 0; border-radius: 50%; font-size: 18px; line-height: 1; background: var(--bg); color: var(--text); border: 1px solid var(--border); }
+button.step { display: inline-grid; place-items: center; width: 32px; height: 32px; padding: 0; border-radius: 50%; background: var(--bg); color: var(--text); border: 1px solid var(--border); }
 .cart-n { min-width: 20px; text-align: center; font-weight: 700; font-variant-numeric: tabular-nums; }
 .cart-steps .link { margin-left: auto; }
 .cart-field { display: grid; gap: 4px; font-size: 13px; color: var(--muted); }

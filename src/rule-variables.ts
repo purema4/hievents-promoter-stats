@@ -34,6 +34,7 @@ export const RULE_VARIABLES: readonly RuleVariable[] = [
   { name: 'level', type: 'string', group: 'promoter', en: 'Their level’s name, like "Gold".', fr: 'Le nom de son niveau, ex. "Gold".' },
   { name: 'is_team_lead', type: 'bool', group: 'promoter', en: 'True for a team lead.', fr: 'Vrai pour un chef d’équipe.' },
   { name: 'team_size', type: 'number', group: 'promoter', en: 'Promoters on their team (0 when not a team lead).', fr: 'Promoteurs dans son équipe (0 s’il n’est pas chef d’équipe).' },
+  { name: 'team_full_price_sales', type: 'number', group: 'promoter', en: 'Sales at full price by their team for this event, theirs included, in dollars.', fr: 'Ventes au plein prix de son équipe pour cet événement, les siennes comprises, en dollars.' },
   { name: 'team_tickets_sold', type: 'number', group: 'promoter', en: 'Tickets sold by their team for this event, theirs included.', fr: 'Billets vendus par son équipe pour cet événement, les siens compris.' },
 ];
 

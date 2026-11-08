@@ -30,6 +30,7 @@ const VAR_WORDS: Record<string, { en: string; fr: string }> = {
   is_team_lead: { en: 'team lead', fr: 'chef d’équipe' },
   team_size: { en: 'promoters on the team', fr: 'promoteurs dans l’équipe' },
   team_tickets_sold: { en: 'tickets sold by the team', fr: 'billets vendus par l’équipe' },
+  team_full_price_sales: { en: 'the team’s sales at full price', fr: 'ventes au plein prix de l’équipe' },
 };
 
 const TICKETS = new Set(['tickets_sold', 'outside_tickets']);
@@ -100,6 +101,10 @@ function linearWords(l: { vars: string[]; factor: number }, ctx: Ctx): string | 
     return outside
       ? w(ctx, `${each} per ticket sold, outside Hi.Events too`, `${each} par billet vendu, hors Hi.Events compris`)
       : w(ctx, `${each} per ticket sold`, `${each} par billet vendu`);
+  }
+  if (l.vars.length === 1 && l.vars[0] === 'team_full_price_sales' && ctx.unit === 'money') {
+    const percent = `${fmtNumber(Number((l.factor * 100).toFixed(4)), ctx.lang)}${ctx.lang === 'fr' ? ' %' : '%'}`;
+    return w(ctx, `${percent} of your team’s sales at full price`, `${percent} des ventes au plein prix de ton équipe`);
   }
   if (sales && ctx.unit === 'money') {
     const percent = `${fmtNumber(Number((l.factor * 100).toFixed(4)), ctx.lang)}${ctx.lang === 'fr' ? ' %' : '%'}`;

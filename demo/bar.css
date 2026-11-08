@@ -38,3 +38,6 @@ body { padding-bottom: 64px; }
 @media (max-width: 640px) {
   .demo-tag, .demo-message { display: none; }
 }
+/* The rewards shop's cart bar and sheet sit above the demo bar. */
+.cart-jump { bottom: 64px !important; }
+.shop.sheet .cart { bottom: 52px !important; max-height: calc(85vh - 52px) !important; }

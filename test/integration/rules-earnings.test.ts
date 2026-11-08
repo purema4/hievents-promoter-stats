@@ -1,7 +1,7 @@
 import { Database } from 'bun:sqlite';
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { join } from 'node:path';
-import { Client, describeIntegration, location, newPromoter, signInAdmin, startServer, stack, stats, text, uid, type Server } from './harness';
+import { Client, createPromoter, describeIntegration, location, newPromoter, signInAdmin, startServer, stack, stats, text, uid, type Server } from './harness';
 
 /*
  * Commission, bonus and typed rewards worked out by the rules, in the running app. From dev/seed.sql,
@@ -126,5 +126,14 @@ describeIntegration('earnings from rules', () => {
   test('a rule that gives a negative amount counts it as 0', async () => {
     setRule('event', 2, 'commission = 0 - 5');
     expect(stats(await maya.client.page('/events/2')).get('Commission')).toBe('$0.00');
+  });
+
+  test('team_full_price_sales: a team lead\'s rule can read their team\'s sales', async () => {
+    // Maya leads a team with Luna, whose code LUNA sold 1 ticket ($25) on Warehouse Night; Maya sold $100 there.
+    await admin.post('/admin/teams/lead', { user_id: String(maya.id), lead: '1' });
+    const luna = await createPromoter(admin, { name: `Luna ${uid()}`, codes: 'LUNA' });
+    await admin.post('/admin/teams/add', { user_id: String(luna.id), team_lead_id: String(maya.id) });
+    setRule('event', 1, `${ash}\nbonus = team_full_price_sales * 0.1`);
+    expect(stats(await maya.client.page('/events/1')).get('Bonus')).toBe('$12.50');
   });
 });

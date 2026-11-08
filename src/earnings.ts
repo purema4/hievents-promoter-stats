@@ -71,11 +71,14 @@ async function eventFacts(eventIds: number[]): Promise<Map<number, { tickets: nu
   return out;
 }
 
-/** Tickets the team (the team lead included) sold per event. */
-async function teamTicketsByEvent(lead: User, own: EventBasics[]): Promise<Map<number, number>> {
-  const out = new Map(own.map((e) => [e.id, e.tickets]));
+/** What the team (the team lead included) sold per event: tickets, and sales at full price in cents. */
+async function teamSalesByEvent(lead: User, own: EventBasics[]): Promise<Map<number, { tickets: number; fullPrice: number }>> {
+  const out = new Map(own.map((e) => [e.id, { tickets: e.tickets, fullPrice: e.fullPrice }]));
   const codes = teamMembers(lead.id).flatMap((m) => codesFor(m.id));
-  for (const r of await statsForCodes([...new Set(codes)])) out.set(r.event_id, (out.get(r.event_id) ?? 0) + r.tickets_sold);
+  for (const r of await statsForCodes([...new Set(codes)])) {
+    const e = out.get(r.event_id) ?? { tickets: 0, fullPrice: 0 };
+    out.set(r.event_id, { tickets: e.tickets + r.tickets_sold, fullPrice: e.fullPrice + toCents(r.full_price) });
+  }
   return out;
 }
 
@@ -85,7 +88,10 @@ async function inputsBuilder(promoter: User, events: EventBasics[], allRules: { 
   const lifetime = events.reduce((sum, e) => sum + e.tickets, 0) + outsideTickets(promoter.id);
   const lead = isTeamLead(promoter);
   const facts = uses(allRules, 'event_tickets_sold') || uses(allRules, 'event_promoters') ? await eventFacts(events.map((e) => e.id)) : new Map();
-  const team = lead && uses(allRules, 'team_tickets_sold') ? await teamTicketsByEvent(promoter, events) : new Map<number, number>();
+  const team =
+    lead && (uses(allRules, 'team_tickets_sold') || uses(allRules, 'team_full_price_sales'))
+      ? await teamSalesByEvent(promoter, events)
+      : new Map<number, { tickets: number; fullPrice: number }>();
   const general: RuleInputs = {
     lifetime_tickets: lifetime,
     events_promoted: events.filter((e) => e.tickets > 0).length,
@@ -113,7 +119,8 @@ async function inputsBuilder(promoter: User, events: EventBasics[], allRules: { 
       days_before_event: e.start ? Math.floor((e.start.getTime() - Date.now()) / DAY) : 0,
       event_dates: e.dates,
       lifetime_tickets: lifetime + extra,
-      team_tickets_sold: (team.get(e.id) ?? e.tickets) + extra,
+      team_tickets_sold: (team.get(e.id)?.tickets ?? e.tickets) + extra,
+      team_full_price_sales: ((team.get(e.id)?.fullPrice ?? e.fullPrice) + extra * perTicket) / 100,
     };
   };
 
