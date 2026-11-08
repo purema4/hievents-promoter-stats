@@ -1,6 +1,6 @@
 // Version is filled in by the server so a new release replaces the cached files.
 const CACHE = 'promoter-stats-__VERSION__';
-const STATIC = ['/offline', '/app.css?v=__CSS_VERSION__', '/app.js', '/icon.svg?v=__ICON_VERSION__', '/icon-192.png?v=__ICON_VERSION__'];
+const STATIC = ['/offline', '/app.css?v=__CSS_VERSION__', '/app.js?v=__JS_VERSION__', '/icon.svg?v=__ICON_VERSION__', '/icon-192.png?v=__ICON_VERSION__'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(STATIC)).then(() => self.skipWaiting()));

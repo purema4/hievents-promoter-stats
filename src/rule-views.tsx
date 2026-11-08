@@ -37,6 +37,8 @@ function titleOf(t: RuleTargetInfo): string {
       return `${t.promoterName} on ${t.eventTitle}`;
     case 'template':
       return t.templateName ? `Template: ${t.templateName}` : 'New template';
+    case 'team':
+      return `${t.promoterName}’s team rule`;
   }
 }
 
@@ -52,6 +54,8 @@ function whatItIs(t: RuleTargetInfo): string {
       return `Lines for ${t.promoterName} on this event only: they win over everything else.`;
     case 'template':
       return 'A rule to copy into an event’s rule. Changing a template changes no event.';
+    case 'team':
+      return `Added on top of ${t.promoterName}’s own rule, on every event their team sells: their commission and this together. Write their team commission here, like commission = team_full_price_sales * 0.05 (team_full_price_sales is what their promoters sold, never their own sales). Its commission shows as team commission.`;
   }
 }
 
@@ -307,6 +311,7 @@ export function AdminRulesPage(props: {
   rewardTypes: RewardType[];
   events: { id: number; title: string; start: Date | null; timezone: string | null; promoters: User[]; hasRule: boolean; overrides: number }[];
   promotersWithRules: User[];
+  teamLeads: { lead: User; hasRule: boolean }[];
   canAsk?: boolean;
   ok?: string;
   error?: string;
@@ -385,6 +390,24 @@ export function AdminRulesPage(props: {
           {props.promotersWithRules.map((p) => (
             <li>
               <a href={ruleEditHref({ scope: 'promoter', userId: p.id })}>{p.name}</a>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <h2>Team leads</h2>
+      <p class="muted">
+        A team lead’s team rule is added on top of their own rule: their own commission, plus what the team rule gives on
+        their team’s sales.
+      </p>
+      {props.teamLeads.length === 0 ? (
+        <p class="muted">No team leads yet. Make one on Teams.</p>
+      ) : (
+        <ul>
+          {props.teamLeads.map((l) => (
+            <li>
+              <a href={ruleEditHref({ scope: 'team', userId: l.lead.id })}>{l.lead.name}</a>
+              <span class="muted"> · {l.hasRule ? 'team rule set' : 'no team rule yet'}</span>
             </li>
           ))}
         </ul>

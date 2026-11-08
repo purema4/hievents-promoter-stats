@@ -920,9 +920,16 @@ function RewardsShop(props: { rewards: Rewards; ticketEvents: TicketEvent[]; pro
             </div>
           )}
           {byDate.map(({ event, rows }) => (
-            <div class="card shop-event-card">
-              <h3 class="first">{event.title}</h3>
-              <p class="muted">{eventDate(event)}</p>
+            <div class={`card shop-event-card${event.hasCover ? ' with-cover' : ''}`}>
+              <div class="shop-event-head">
+                {/* The event's colours: its cover, blurred, behind the header. */}
+                {event.hasCover && <img class="shop-event-backdrop" src={`/event-image/${event.id}`} alt="" loading="lazy" />}
+                {event.hasCover && <img class="cover-thumb" src={`/event-image/${event.id}`} alt="" loading="lazy" />}
+                <div>
+                  <h3 class="first">{event.title}</h3>
+                  <p class="muted">{eventDate(event)}</p>
+                </div>
+              </div>
               <table class="shop-table">
                 <tbody>
                   {rows.map((t) => (

@@ -20,6 +20,7 @@ import { hiddenByTeam } from './promoter-page';
 import { rateFor } from './commission';
 import { findInvite, inviteState, type InviteLink } from './invites';
 import { BANNER_MAX_LENGTH, generalBanner } from './banners';
+import { jsVersion } from './js-version';
 import type { RewardType } from './rules';
 import { rulesEngineSeemsDown } from './rules-engine';
 import { isTeamLead, teamCommissionPercentFor, type TeamCommission } from './teams';
@@ -614,6 +615,13 @@ ${chartCss}
 @media (prefers-reduced-motion: reduce) { .shop.sheet .cart { transition: none; } }
 .shop-events { display: grid; gap: 16px; align-content: start; }
 .shop-event-card h3 { margin: 0; font-size: 18px; }
+.shop-event-card { overflow: hidden; }
+.shop-event-head { position: relative; overflow: hidden; display: flex; gap: 14px; align-items: center; margin: -16px -16px 8px; padding: 16px; }
+.shop-event-head > :not(.shop-event-backdrop) { position: relative; z-index: 1; }
+.shop-event-head p.muted { margin: 2px 0 0; color: var(--text); opacity: 0.75; }
+.shop-event-backdrop { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; filter: blur(28px) saturate(1.6); transform: scale(1.4); opacity: 0.45; pointer-events: none; }
+.with-cover .shop-event-head { border-bottom: 1px solid var(--border); }
+.shop-event-head .cover-thumb { width: 72px; height: 72px; border-radius: 10px; box-shadow: 0 4px 14px rgb(0 0 0 / 0.25); }
 .shop-event-card > p.muted { margin: 2px 0 10px; }
 .bank-card { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 6%, var(--surface)); }
 table.shop-table { width: 100%; }
@@ -764,7 +772,7 @@ export function Layout(props: {
         <meta name="theme-color" content={brand.accent} />
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-title" content={brand.name} />
-        <script src="/app.js" defer></script>
+        <script src={`/app.js?v=${jsVersion}`} defer></script>
       </head>
       <body class={props.user ? (props.user.impersonator ? 'with-nav impersonating' : 'with-nav') : undefined}>
         {props.user?.impersonator && <ImpersonationBanner user={props.user} />}
@@ -1902,6 +1910,12 @@ export function PromoterPage(props: {
         <a href={`/admin/rules/edit?scope=promoter&user=${p.id}`}>{p.name}'s rule</a>
         <span class="muted"> · their own commission or rewards on every event, on top of the default rule</span>
       </p>
+      {isTeamLead(p) && (
+        <p>
+          <a href={`/admin/rules/edit?scope=team&user=${p.id}`}>{p.name}'s team rule</a>
+          <span class="muted"> · added on top of their rule, on their team's sales: their team commission</span>
+        </p>
+      )}
       {!p.is_admin && (
         <form class="inline-form" method="post" action={`/admin/promoters/${p.id}/impersonate`}>
           <button class="secondary" type="submit">

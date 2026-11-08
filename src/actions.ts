@@ -11,7 +11,7 @@ import { allEventBanners } from './banners';
 import { allMediaDrives } from './media-drives';
 import { formatMoney, totalsByCurrency } from './money';
 import { notify } from './notifications';
-import { balances, settlePayout, type PayoutRequest } from './payouts';
+import { balances, settlePayout, type PayoutRequest, withTeamRule } from './payouts';
 import { summarizeEvents } from './promoter-views';
 import { describeReward, isDeposit, rewardsFor, settleReward, type RewardRequest } from './rewards';
 import { hadTeam, teamCommission } from './teams';
@@ -51,7 +51,7 @@ export async function promoterData(promoter: User) {
     stale: percent.stale,
     rows,
     team,
-    balances: balances(promoter.id, totalsByCurrency(rows, percent), team),
+    balances: balances(promoter.id, totalsByCurrency(rows, percent), withTeamRule(team, percent.team)),
     rewards: rewardsFor(promoter.id, summarizeEvents(rows, percent), percent),
     ticketEvents,
     media: allMediaDrives(),

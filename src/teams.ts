@@ -125,6 +125,12 @@ export async function teamSalesByEvent(lead: User): Promise<Map<number, { ticket
   return out;
 }
 
+/** Every promo code ever on a team lead's team (promoters who left included). */
+export function teamCodes(leadId: number): string[] {
+  const rows = db.query<{ member_id: number | null; codes: string | null }, [number]>('SELECT member_id, codes FROM team_memberships WHERE lead_id = ?').all(leadId);
+  return [...new Set(rows.flatMap((r) => (r.codes ? (JSON.parse(r.codes) as string[]) : r.member_id ? codesFor(r.member_id) : [])))];
+}
+
 /** True when someone ever was on this person's team, so they may have team commission. */
 export const hadTeam = (leadId: number) => !!db.query('SELECT 1 FROM team_memberships WHERE lead_id = ? LIMIT 1').get(leadId);
 

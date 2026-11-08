@@ -66,6 +66,9 @@ export const personas = [
 ];
 
 // Past events first; `share` splits a promoter's tickets across the events that have sales.
+// Hi.Events records the owner of an image by class name, backslashes included: sent as a parameter so they stay.
+const EVENT_ENTITY = String.raw`HiEvents\DomainObjects\EventDomainObject`;
+
 const events = [
   { title: 'Neon Harvest', days: -75, price: 25, share: 0.2, cover: null },
   { title: 'Rooftop Sessions', days: -40, price: 30, share: 0.2, cover: 'rooftop.png' },
@@ -121,7 +124,7 @@ async function addEvents() {
     }
     if (event.cover) {
       await writer`INSERT INTO images (entity_id, entity_type, type, path)
-        VALUES (${id}, 'HiEvents\DomainObjects\EventDomainObject', 'EVENT_COVER', ${`event_cover/${event.cover}`})`;
+        VALUES (${id}, ${EVENT_ENTITY}, 'EVENT_COVER', ${`event_cover/${event.cover}`})`;
     }
   }
   return ids;

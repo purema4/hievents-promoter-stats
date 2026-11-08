@@ -30,7 +30,8 @@ export function ruleInWords(lines: RuleLine[], trees: Map<string, RuleNode>, lan
 
 /** The lines that apply with a draft at one level, the other levels as saved (see ruleFor). */
 export function linesWithDraft(scope: RuleScope, target: RuleTarget, draft: string): RuleLine[] {
-  if (scope === 'template') return parseRule(draft).lines;
+  // A template is a rule of its own; a team rule is added on top of the team lead's rule, line for line.
+  if (scope === 'template' || scope === 'team') return parseRule(draft).lines;
   const levels: [RuleScope, RuleTarget][] = [
     ['default', {}],
     ['promoter', { userId: target.userId }],
@@ -91,7 +92,7 @@ const show = (name: string, n: number | undefined, currency = 'CAD') =>
 
 /** Real promoters' sales for the preview: one promoter, or everyone with a code on the event. */
 async function realRows(scope: RuleScope, target: RuleTarget): Promise<{ user: User; rows: CodeStats[] }[]> {
-  if (scope === 'promoter' || scope === 'promoter_event') {
+  if (scope === 'promoter' || scope === 'promoter_event' || scope === 'team') {
     const user = target.userId ? findUser(target.userId) : null;
     if (!user) return [];
     const rows = await statsForCodes(codesFor(user.id));
@@ -151,14 +152,15 @@ export async function checkDraft(scope: RuleScope, target: RuleTarget, text: str
     for (const [eventId, at] of inputs) {
       const title = rows.find((r) => r.event_id === eventId)?.event_title ?? `Event ${eventId}`;
       const variables = at();
-      const row: PreviewRow = { label: scope === 'promoter' ? title : user.name, tickets: Number(variables.tickets_sold), values: {} };
+      const row: PreviewRow = { label: scope === 'promoter' || scope === 'team' ? title : user.name, tickets: Number(variables.tickets_sold), values: {} };
       items.push({ subject: `${user.id}:${eventId}`, variables, row, currency: rows.find((r) => r.event_id === eventId)?.currency ?? 'CAD' });
     }
   }
   const tickets = [1, 5, 12, 20, ...(testTickets !== undefined && Number.isFinite(testTickets) ? [testTickets] : [])];
   for (const sold of [...new Set(tickets)].sort((a, b) => a - b)) {
-    const variables: RuleInputs = { ...emptyInputs(), tickets_sold: sold, orders: sold, full_price_sales: sold * 25, codes_used: 1, event_tickets_sold: sold, event_promoters: 1, event_dates: 1, lifetime_tickets: sold, events_promoted: 1, level: levelFor(sold).level.name, team_tickets_sold: sold, team_full_price_sales: 0 };
-    items.push({ subject: `test:${sold}`, variables, row: { label: `${sold} tickets at $25`, tickets: sold, values: {}, made_up: true }, currency: 'CAD' });
+    const variables: RuleInputs = { ...emptyInputs(), tickets_sold: sold, orders: sold, full_price_sales: sold * 25, codes_used: 1, event_tickets_sold: sold, event_promoters: 1, event_dates: 1, lifetime_tickets: sold, events_promoted: 1, level: levelFor(sold).level.name, team_tickets_sold: scope === 'team' ? sold * 2 : sold, team_full_price_sales: scope === 'team' ? sold * 25 : 0 };
+    const label = scope === 'team' ? `Team sold ${sold} at $25` : `${sold} tickets at $25`;
+    items.push({ subject: `test:${sold}`, variables, row: { label, tickets: sold, values: {}, made_up: true }, currency: 'CAD' });
   }
   const { results } = await evaluateRules({ version: 'preview', lines }, items, { cache: false });
   for (const item of items) {

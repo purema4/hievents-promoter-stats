@@ -21,8 +21,8 @@ import { FIXED_OUTPUTS } from './rule-variables';
 db.exec(`
   CREATE TABLE IF NOT EXISTS rule_versions (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    scope       TEXT NOT NULL CHECK (scope IN ('default', 'promoter', 'event', 'promoter_event', 'template')),
-    user_id     INTEGER, -- promoter and promoter_event (kept when the promoter is deleted: history)
+    scope       TEXT NOT NULL CHECK (scope IN ('default', 'promoter', 'event', 'promoter_event', 'template', 'team')),
+    user_id     INTEGER, -- promoter, promoter_event and team (kept when the promoter is deleted: history)
     event_id    INTEGER, -- event and promoter_event (a Hi.Events event id)
     template_id INTEGER, -- template
     text        TEXT NOT NULL, -- '' when the rule was removed
@@ -44,7 +44,21 @@ db.exec(`
   );
 `);
 
-export type RuleScope = 'default' | 'promoter' | 'event' | 'promoter_event' | 'template';
+// Tables made before team rules: their CHECK lacks 'team'. Rebuilt once, every version kept with its id.
+{
+  const made = db.query<{ sql: string }, []>("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'rule_versions'").get();
+  if (made && !made.sql.includes("'team'")) {
+    db.transaction(() => {
+      db.exec('ALTER TABLE rule_versions RENAME TO rule_versions_before_teams');
+      db.exec(made.sql.replace("'template')", "'template', 'team')"));
+      db.exec('INSERT INTO rule_versions SELECT * FROM rule_versions_before_teams');
+      db.exec('DROP TABLE rule_versions_before_teams');
+      db.exec('CREATE INDEX IF NOT EXISTS rule_versions_lookup ON rule_versions (scope, user_id, event_id, template_id, id)');
+    })();
+  }
+}
+
+export type RuleScope = 'default' | 'promoter' | 'event' | 'promoter_event' | 'template' | 'team';
 export type RuleTarget = { userId?: number | null; eventId?: number | null; templateId?: number | null };
 export type RuleVersion = { id: number; scope: RuleScope; user_id: number | null; event_id: number | null; template_id: number | null; text: string; created_by: number | null; created_at: string };
 
@@ -97,7 +111,7 @@ export function saveRuleVersion(scope: RuleScope, target: RuleTarget, text: stri
 export function endRulesOf(userId: number, by: number | null) {
   const rows = db
     .query<{ scope: RuleScope; event_id: number | null }, [number]>(
-      "SELECT DISTINCT scope, event_id FROM rule_versions WHERE user_id = ? AND scope IN ('promoter', 'promoter_event')",
+      "SELECT DISTINCT scope, event_id FROM rule_versions WHERE user_id = ? AND scope IN ('promoter', 'promoter_event', 'team')",
     )
     .all(userId);
   for (const r of rows) saveRuleVersion(r.scope, { userId, eventId: r.event_id }, '', by);
@@ -159,6 +173,17 @@ export function ruleFor(userId: number, eventId: number): AppliedRule {
     }
   }
   return { lines: [...byName.values()], versionIds, key: versionIds.join('.') || 'none', from };
+}
+
+/**
+ * A team lead's team rule: lines added on top of their own rule (whatever it is), on every event their
+ * team sells. Its commission is their team commission; it reads team_full_price_sales and the like.
+ */
+export function teamRuleFor(leadId: number): AppliedRule | null {
+  const version = currentRule('team', { userId: leadId });
+  if (!version) return null;
+  const lines = parseRule(version.text).lines;
+  return { lines, versionIds: [version.id], key: `team${version.id}`, from: new Map(lines.map((l) => [l.name, 'team' as RuleScope])) };
 }
 
 /** The rule a promoter has outside any event (their own, else the default): sales entered by hand. */

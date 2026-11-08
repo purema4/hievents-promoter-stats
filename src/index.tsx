@@ -1814,11 +1814,13 @@ app.post('/admin/media', async (c) => {
 /** Which rule a request is about, checked: the promoter and the event (one that is not over) must exist. */
 async function ruleTargetOf(get: (key: string) => string | undefined): Promise<RuleTargetInfo | null> {
   const scope = get('scope') as RuleScope;
-  if (!['default', 'promoter', 'event', 'promoter_event', 'template'].includes(scope)) return null;
+  if (!['default', 'promoter', 'event', 'promoter_event', 'template', 'team'].includes(scope)) return null;
   const target: RuleTargetInfo = { scope };
-  if (scope === 'promoter' || scope === 'promoter_event') {
+  if (scope === 'promoter' || scope === 'promoter_event' || scope === 'team') {
     const user = findUser(Number(get('user')));
     if (!user) return null;
+    // A team rule is only for a team lead.
+    if (scope === 'team' && !isTeamLead(user)) return null;
     target.userId = user.id;
     target.promoterName = user.name;
   }
@@ -1905,6 +1907,7 @@ app.get('/admin/rules', async (c) => {
       rewardTypes={listRewardTypes()}
       events={events.map((e) => ({ ...e, hasRule: !!currentRule('event', { eventId: e.id }), overrides: overrides.find((o) => o.event_id === e.id)?.n ?? 0 }))}
       promotersWithRules={listUsers().filter((u) => currentRule('promoter', { userId: u.id }))}
+      teamLeads={teamLeads().map((lead) => ({ lead, hasRule: !!currentRule('team', { userId: lead.id }) }))}
       canAsk={ruleWriterEnabled()}
       ok={flash(c.req.query('ok'))}
       error={flash(c.req.query('error'))}

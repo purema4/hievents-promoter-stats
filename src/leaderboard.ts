@@ -4,7 +4,7 @@ import { adjustmentsByDay, hasAdjustments, moneyAdjustments, moneyAdjustmentsBet
 import { codesFor, listUsers, type User } from './local-db';
 import { splitCommission, toCents, totalsByCurrency } from './money';
 import { earningsFor } from './earnings';
-import { balances, countPendingPayouts } from './payouts';
+import { balances, countPendingPayouts, withTeamRule } from './payouts';
 import { countPendingRewards, levelFor, type Level } from './rewards';
 import { hadTeam, teamCommission } from './teams';
 
@@ -85,7 +85,7 @@ export async function leaderboard(range: Range, sort: Sort, users: User[] = list
     tickets += range === 'all' ? outsideTickets(user.id) : outsideTickets(user.id, from, to);
     commission += range === 'all' ? [...moneyAdjustments(user.id).values()].reduce((a, b) => a + b, 0) : moneyAdjustmentsBetween(user.id, from, to);
     const team = hadTeam(user.id) ? await teamCommission(user) : [];
-    const owed = balances(user.id, totals, team).reduce((sum, b) => sum + b.available + b.pending, 0);
+    const owed = balances(user.id, totals, withTeamRule(team, percent.team)).reduce((sum, b) => sum + b.available + b.pending, 0);
     entries.push({
       user,
       tickets,
