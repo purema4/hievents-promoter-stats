@@ -628,7 +628,12 @@ table.shop-table { width: 100%; }
 table.shop-table td { vertical-align: middle; padding: 12px 8px; }
 table.shop-table tr:last-child td { border-bottom: 0; }
 table.shop-table tr.locked { opacity: 0.6; }
-table.shop-table tr.in-cart td { background: color-mix(in srgb, var(--accent) 6%, transparent); }
+/* A reward in the cart: the whole row is tinted, never its cells one by one (they wrap on phones). */
+table.shop-table tr.in-cart { background: color-mix(in srgb, var(--accent) 8%, transparent); }
+table.shop-table tr.in-cart td { background: none; }
+@keyframes cart-pop { 0% { transform: translateY(12px) scale(0.96); } 60% { transform: translateY(-3px) scale(1.02); } 100% { transform: none; } }
+.cart-jump.pop { animation: cart-pop 0.35s ease-out; }
+@media (prefers-reduced-motion: reduce) { .cart-jump.pop { animation: none; } }
 td.shop-avail { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
 td.shop-avail .big { font-size: 22px; font-weight: 650; }
 td.shop-add { width: 1%; text-align: right; white-space: nowrap; }
@@ -639,7 +644,7 @@ td.shop-add { width: 1%; text-align: right; white-space: nowrap; }
 .stepper-n { display: grid; place-items: center; min-width: 40px; padding: 0 6px; font-weight: 700; font-size: 17px; font-variant-numeric: tabular-nums; border-left: 1px solid rgb(255 255 255 / 0.35); border-right: 1px solid rgb(255 255 255 / 0.35); }
 /* Narrow screens: the reward on its own line, then how many are available and the button. */
 @media (max-width: 600px) {
-  table.shop-table tr { display: grid; grid-template-columns: 1fr auto; align-items: center; column-gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--border); }
+  table.shop-table tr { display: grid; grid-template-columns: 1fr auto; align-items: center; column-gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--border); border-radius: 10px; }
   table.shop-table tr:last-child { border-bottom: 0; }
   table.shop-table td { border-bottom: 0; padding: 4px 8px; }
   table.shop-table td:first-child { grid-column: 1 / -1; }

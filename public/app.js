@@ -573,8 +573,15 @@ if (shop) {
     send.disabled = total === 0;
     send.textContent = total ? `Review my request (${total}) →` : 'Review my request →';
     if (jump) {
+      const changed = jump.textContent !== `View cart (${total})`;
       jump.hidden = total === 0;
       jump.textContent = `View cart (${total})`;
+      // A little bounce each time the cart changes, so the bar is seen.
+      if (changed && total > 0) {
+        jump.classList.remove('pop');
+        void jump.offsetWidth;
+        jump.classList.add('pop');
+      }
     }
     if (total === 0) closeSheet();
   };
