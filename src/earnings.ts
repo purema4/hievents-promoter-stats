@@ -6,7 +6,7 @@ import { levelFor } from './reward-rules';
 import { evaluateRules } from './rules-engine';
 import { ruleFor, type AppliedRule } from './rules';
 import { FIXED_OUTPUTS, type RuleInputs } from './rule-variables';
-import { isTeamLead, teamMembers } from './teams';
+import { isTeamLead, teamMembers, teamSalesByEvent } from './teams';
 
 /*
  * What each promoter earns, event by event, from their rules: commission, bonus, merch and rewards by
@@ -71,16 +71,6 @@ async function eventFacts(eventIds: number[]): Promise<Map<number, { tickets: nu
   return out;
 }
 
-/** What the team (the team lead included) sold per event: tickets, and sales at full price in cents. */
-async function teamSalesByEvent(lead: User, own: EventBasics[]): Promise<Map<number, { tickets: number; fullPrice: number }>> {
-  const out = new Map(own.map((e) => [e.id, { tickets: e.tickets, fullPrice: e.fullPrice }]));
-  const codes = teamMembers(lead.id).flatMap((m) => codesFor(m.id));
-  for (const r of await statsForCodes([...new Set(codes)])) {
-    const e = out.get(r.event_id) ?? { tickets: 0, fullPrice: 0 };
-    out.set(r.event_id, { tickets: e.tickets + r.tickets_sold, fullPrice: e.fullPrice + toCents(r.full_price) });
-  }
-  return out;
-}
 
 /** The variables of each event for a promoter, with `sold` tickets instead of the real number when given. */
 async function inputsBuilder(promoter: User, events: EventBasics[], allRules: { lines: { expr: string }[] }[]) {
@@ -90,7 +80,7 @@ async function inputsBuilder(promoter: User, events: EventBasics[], allRules: { 
   const facts = uses(allRules, 'event_tickets_sold') || uses(allRules, 'event_promoters') ? await eventFacts(events.map((e) => e.id)) : new Map();
   const team =
     lead && (uses(allRules, 'team_tickets_sold') || uses(allRules, 'team_full_price_sales'))
-      ? await teamSalesByEvent(promoter, events)
+      ? await teamSalesByEvent(promoter)
       : new Map<number, { tickets: number; fullPrice: number }>();
   const general: RuleInputs = {
     lifetime_tickets: lifetime,
@@ -119,8 +109,9 @@ async function inputsBuilder(promoter: User, events: EventBasics[], allRules: { 
       days_before_event: e.start ? Math.floor((e.start.getTime() - Date.now()) / DAY) : 0,
       event_dates: e.dates,
       lifetime_tickets: lifetime + extra,
-      team_tickets_sold: (team.get(e.id)?.tickets ?? e.tickets) + extra,
-      team_full_price_sales: ((team.get(e.id)?.fullPrice ?? e.fullPrice) + extra * perTicket) / 100,
+      // The team lead's own tickets and their promoters'; the sales are their promoters' alone (what team commission is on).
+      team_tickets_sold: e.tickets + (team.get(e.id)?.tickets ?? 0) + extra,
+      team_full_price_sales: (team.get(e.id)?.fullPrice ?? 0) / 100,
     };
   };
 

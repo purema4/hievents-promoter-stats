@@ -1,7 +1,7 @@
 import { Database } from 'bun:sqlite';
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { join } from 'node:path';
-import { Client, createPromoter, describeIntegration, location, newPromoter, signInAdmin, startServer, stack, stats, text, uid, type Server } from './harness';
+import { Client, describeIntegration, location, newPromoter, signInAdmin, startServer, stack, stats, text, uid, type Server } from './harness';
 
 /*
  * Commission, bonus and typed rewards worked out by the rules, in the running app. From dev/seed.sql,
@@ -128,12 +128,16 @@ describeIntegration('earnings from rules', () => {
     expect(stats(await maya.client.page('/events/2')).get('Commission')).toBe('$0.00');
   });
 
-  test('team_full_price_sales: a team lead\'s rule can read their team\'s sales', async () => {
-    // Maya leads a team with Luna, whose code LUNA sold 1 ticket ($25) on Warehouse Night; Maya sold $100 there.
-    await admin.post('/admin/teams/lead', { user_id: String(maya.id), lead: '1' });
-    const luna = await createPromoter(admin, { name: `Luna ${uid()}`, codes: 'LUNA' });
-    await admin.post('/admin/teams/add', { user_id: String(luna.id), team_lead_id: String(maya.id) });
+  test('team_full_price_sales: what a team lead\'s promoters sold since joining, not the team lead\'s own', async () => {
+    // Luna (LUNA, $25 on Warehouse Night) leads; Maya (DJMAX) joins today. Maya sold $100 there in all, but
+    // only today's $25 sale comes after she joined; Luna's own $25 does not count either.
+    const luna = await newPromoter(server, admin, { name: `Luna ${uid()}`, codes: 'LUNA' });
+    await admin.post('/admin/teams/lead', { user_id: String(luna.id), lead: '1' });
+    await admin.post('/admin/teams/add', { user_id: String(maya.id), team_lead_id: String(luna.id) });
     setRule('event', 1, `${ash}\nbonus = team_full_price_sales * 0.1`);
-    expect(stats(await maya.client.page('/events/1')).get('Bonus')).toBe('$12.50');
+    expect(stats(await luna.client.page('/events/1')).get('Bonus')).toBe('$2.50');
+    // Maya is not a team lead: 0 for her, so no bonus.
+    expect(stats(await maya.client.page('/events/1')).get('Bonus')).toBeUndefined();
   });
+
 });
