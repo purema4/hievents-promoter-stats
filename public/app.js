@@ -410,86 +410,159 @@ if (ruleForm) {
   test.addEventListener('input', later);
 }
 
-// Payouts & rewards: the rewards shop. "Add to cart" adds one of an item (up to what is ready); the cart
-// lists what is picked, each with Remove. Without scripts, the "How many" boxes do the same job.
+// Payouts & rewards: the rewards shop, by event. "+" adds one of a reward to the cart; each cart line
+// then says exactly what it is and who it is for, and holds the choices: how many, "1 of them is for me",
+// guest names, this event or the bank (or, for banked rewards, which event). The choices are written back
+// to the fields in the reward's row, which is what the form sends. Without scripts, the "How many" boxes
+// in the rows do the job.
 const shop = document.querySelector('form[data-shop]');
 if (shop) {
+  const promoter = shop.dataset.promoter || 'you';
   const lines = shop.querySelector('[data-cart-lines]');
   const send = shop.querySelector('[data-cart-send]');
-  const items = [...shop.querySelectorAll('[data-shop-item]')].filter((item) => item.querySelector('[data-qty]'));
-  // Who the tickets of an item are for, in words: "1 for you + 1 guest (Ana)".
-  const whoOf = (item, n) => {
-    const me = item.querySelector('[data-me]');
-    const names = (item.querySelector('[data-guests]')?.value ?? '').split(/[,;]+/).map((g) => g.trim()).filter(Boolean);
-    const forMe = me && me.checked ? 1 : 0;
+  const jump = shop.querySelector('[data-cart-jump]');
+  const rows = [...shop.querySelectorAll('[data-shop-item]')].filter((row) => row.querySelector('[data-qty]'));
+  const el = (tag, props = {}, ...children) => {
+    const node = document.createElement(tag);
+    for (const [k, v] of Object.entries(props)) {
+      if (k === 'text') node.textContent = v;
+      else if (k === 'class') node.className = v;
+      else node.setAttribute(k, v);
+    }
+    node.append(...children);
+    return node;
+  };
+  const names = (value) => value.split(/[,;]+/).map((g) => g.trim()).filter(Boolean);
+  // "1 for you + 1 for a guest (Ana)"
+  const whoOf = (row, n) => {
+    const me = row.querySelector('[data-me-field]');
+    const forMe = me && me.value === '1' ? 1 : 0;
     const others = n - forMe;
+    const guests = names(row.querySelector('[data-guests-field]')?.value ?? '');
     const parts = [];
     if (forMe) parts.push('1 for you');
-    if (others > 0) parts.push(`${others} for ${others === 1 ? 'a guest' : 'guests'}${names.length ? ` (${names.join(', ')})` : ''}`);
+    if (others > 0) parts.push(`${others} for ${others === 1 ? 'a guest' : 'guests'}${guests.length ? ` (${guests.join(', ')})` : ''}`);
     return parts.join(' + ');
   };
+  const qtyOf = (row) => Number(row.querySelector('[data-qty]').value);
+  const setQty = (row, n) => {
+    const qty = row.querySelector('[data-qty]');
+    qty.value = String(Math.max(0, Math.min(qty.options.length - 1, n)));
+  };
+
+  const lineFor = (row) => {
+    const n = qtyOf(row);
+    const kind = row.dataset.kind;
+    const line = el('div', { class: 'cart-line' });
+    const head = el('div', { class: 'cart-line-head' });
+    head.append(el('strong', { text: `${n} × ${row.dataset.type}` }));
+    if (row.dataset.where) head.append(el('span', { class: 'muted', text: ` · ${row.dataset.where}` }));
+    line.append(head);
+
+    const minus = el('button', { type: 'button', class: 'step', 'aria-label': `One less ${row.dataset.type}`, text: '−' });
+    const plus = el('button', { type: 'button', class: 'step', 'aria-label': `One more ${row.dataset.type}`, text: '+' });
+    const remove = el('button', { type: 'button', class: 'link', text: 'Remove' });
+    minus.addEventListener('click', () => {
+      setQty(row, n - 1);
+      refresh();
+    });
+    plus.addEventListener('click', () => {
+      setQty(row, n + 1);
+      refresh();
+    });
+    plus.disabled = n >= row.querySelector('[data-qty]').options.length - 1;
+    remove.addEventListener('click', () => {
+      setQty(row, 0);
+      refresh();
+    });
+    line.append(el('div', { class: 'cart-steps' }, minus, el('span', { class: 'cart-n', text: String(n) }), plus, remove));
+
+    if (kind === 'event' || kind === 'bank') {
+      const use = row.querySelector('[data-use-field]');
+      const banking = use && use.value === 'bank';
+      if (kind === 'bank') {
+        const source = row.querySelector('[data-event-field]');
+        const pick = el('select', { 'aria-label': 'For which event' });
+        for (const option of source.options) pick.append(el('option', { value: option.value, text: option.text }));
+        pick.value = source.value;
+        pick.addEventListener('change', () => {
+          source.value = pick.value;
+        });
+        line.append(el('label', { class: 'cart-field' }, 'For which event', pick));
+      } else {
+        const pick = el('select', { 'aria-label': 'Use them for' });
+        pick.append(el('option', { value: '', text: `${row.dataset.where}` }), el('option', { value: 'bank', text: 'My bank, for a later event' }));
+        pick.value = use.value;
+        pick.addEventListener('change', () => {
+          use.value = pick.value;
+          refresh();
+        });
+        line.append(el('label', { class: 'cart-field' }, 'Use them for', pick));
+      }
+      if (!banking) {
+        const me = row.querySelector('[data-me-field]');
+        const box = el('input', { type: 'checkbox' });
+        box.checked = me.value === '1';
+        box.addEventListener('change', () => {
+          me.value = box.checked ? '1' : '';
+          refresh();
+        });
+        const strong = el('strong', { text: '1 of them is for me' });
+        line.append(el('label', { class: 'check for-me' }, box, el('span', {}, strong, ` (${promoter})`)));
+        if (n - (me.value === '1' ? 1 : 0) > 0) {
+          const guestsField = row.querySelector('[data-guests-field]');
+          const guests = el('input', { maxlength: '100', placeholder: 'Ana, Ben', value: guestsField.value });
+          guests.addEventListener('input', () => {
+            guestsField.value = guests.value;
+            who.textContent = whoOf(row, qtyOf(row));
+          });
+          line.append(el('label', { class: 'cart-field' }, 'Guest names (optional)', guests));
+        }
+        const who = el('p', { class: 'who', text: whoOf(row, n) });
+        line.append(who);
+      } else {
+        line.append(el('p', { class: 'who', text: `${n} into your bank, for a later event` }));
+      }
+    } else if (kind === 'merch') {
+      const field = row.querySelector('[data-merch-field]');
+      const details = el('input', { maxlength: '120', placeholder: 'T-shirt, size L', value: field.value, required: '' });
+      details.addEventListener('input', () => {
+        field.value = details.value;
+      });
+      line.append(el('label', { class: 'cart-field' }, 'Which item and size', details));
+    }
+    return line;
+  };
+
   const refresh = () => {
     lines.replaceChildren();
     let total = 0;
-    for (const item of items) {
-      const qty = item.querySelector('[data-qty]');
-      const n = Number(qty.value);
+    for (const row of rows) {
+      const n = qtyOf(row);
+      row.classList.toggle('in-cart', n > 0);
+      const plus = row.querySelector('[data-add]');
+      if (plus) plus.disabled = n >= row.querySelector('[data-qty]').options.length - 1;
       if (!n) continue;
       total += n;
-      const li = document.createElement('li');
-      const what = document.createElement('span');
-      const banked = item.querySelector('[data-use]')?.value === 'bank';
-      const who = item.querySelector('[data-me]') ? (banked ? 'into your bank' : whoOf(item, n)) : '';
-      what.textContent = `${n} × ${item.dataset.name}${who ? ` — ${who}` : ''}`;
-      const remove = document.createElement('button');
-      remove.type = 'button';
-      remove.className = 'link';
-      remove.textContent = 'Remove';
-      remove.addEventListener('click', () => {
-        qty.value = '0';
-        refresh();
-      });
-      li.append(what, remove);
-      lines.append(li);
+      lines.append(lineFor(row));
     }
-    if (total === 0) {
-      const li = document.createElement('li');
-      li.className = 'muted';
-      li.textContent = 'Your cart is empty. Add a reward to it.';
-      lines.append(li);
-    }
+    if (total === 0) lines.append(el('p', { class: 'muted', text: 'Press + next to a reward to add it here.' }));
     send.disabled = total === 0;
     send.textContent = total ? `Review my request (${total}) →` : 'Review my request →';
-  };
-  const showWho = (item) => {
-    const line = item.querySelector('[data-who]');
-    if (!line) return;
-    const n = Number(item.querySelector('[data-qty]').value);
-    line.hidden = n === 0;
-    line.textContent = n === 0 ? '' : item.querySelector('[data-use]')?.value === 'bank' ? `${n} into your bank` : whoOf(item, n);
-  };
-  for (const item of items) {
-    const qty = item.querySelector('[data-qty]');
-    const add = item.querySelector('[data-add]');
-    for (const input of item.querySelectorAll('[data-qty], [data-me], [data-guests], [data-use]')) {
-      input.addEventListener('input', () => {
-        showWho(item);
-        refresh();
-      });
-      input.addEventListener('change', () => {
-        showWho(item);
-        refresh();
-      });
+    if (jump) {
+      jump.hidden = total === 0;
+      jump.textContent = `Your cart (${total}) — review ↓`;
     }
-    if (add) {
-      add.hidden = false;
-      add.addEventListener('click', () => {
-        const max = qty.options.length - 1;
-        qty.value = String(Math.min(max, Number(qty.value) + 1));
-        showWho(item);
-        refresh();
-      });
-    }
+  };
+
+  for (const row of rows) {
+    row.querySelector('[data-qty]').hidden = true;
+    const add = row.querySelector('[data-add]');
+    add.hidden = false;
+    add.addEventListener('click', () => {
+      setQty(row, qtyOf(row) + 1);
+      refresh();
+    });
   }
   refresh();
 }

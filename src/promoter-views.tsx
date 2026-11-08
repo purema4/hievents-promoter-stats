@@ -803,192 +803,171 @@ function RewardHistory(props: { requests: RewardRequest[] }) {
 const typeName = (t: { key: string; label_en: string }) => t.label_en || t.key;
 const typeWhat = (t: { description_en?: string | null }) => t.description_en ?? '';
 
-/** "How many", "1 of them is for me" and guests: the same on an event's reward and on the bank. */
-function WhoFields(props: { name: string; field: string; available: number; promoter: string }) {
+/**
+ * One reward in an event's table: what it is on the left, how many are available, and "+" on the right.
+ * The fields the cart sets (how many, for me, guests, this event or the bank) live here, so the form works
+ * without scripts too: then "How many" is a box instead of "+".
+ */
+function ShopRow(props: {
+  field: string;
+  name: string;
+  what: string;
+  where: string; // the event, "your bank", or '' for merch
+  kind: 'event' | 'bank' | 'merch';
+  available: number;
+  note?: string; // like "2 more sales for the next one"
+  children?: unknown;
+}) {
+  const ready = props.available > 0;
   return (
-    <>
-      <label>
-        {props.name} — how many?
-        <select name={`qty.${props.field}`} data-qty>
-          {Array.from({ length: props.available + 1 }, (_, n) => (
-            <option value={String(n)}>{n}</option>
-          ))}
-        </select>
-      </label>
-      <label class="check for-me">
-        <input type="checkbox" name={`me.${props.field}`} value="1" checked data-me />
-        <span>
-          <strong>1 of them is for me</strong> ({props.promoter})
-        </span>
-      </label>
-      <label>
-        Guest names <span class="muted">(optional, for the others)</span>
-        <input name={`guests.${props.field}`} maxlength={100} placeholder="Ana, Ben" data-guests />
-      </label>
-      <p class="who" data-who hidden></p>
-    </>
-  );
-}
-
-/** One reward in the shop: exactly what it is, for which event, how many are ready, and who they are for. */
-function ShopItem(props: { t: TicketReward; promoter: string }) {
-  const { t } = props;
-  const key = `${t.event.id}.${t.type.key}`;
-  const name = typeName(t.type);
-  const ready = t.available > 0;
-  return (
-    <div class={`card shop-item${ready ? '' : ' locked'}`} data-shop-item data-name={`${name} · ${t.event.title}`}>
-      <div class="shop-item-head">
-        <span class="shop-type">{name}</span>
-        <span class="shop-count">
-          <span class="big">{t.available}</span> <span class="muted">ready</span>
-        </span>
-      </div>
-      {typeWhat(t.type) && <p class="shop-what">{typeWhat(t.type)}</p>}
-      <p class="shop-event">
-        For <strong>{t.event.title}</strong>
-        <span class="muted"> · {eventDate(t.event)}</span>
-      </p>
-      {ready ? (
-        <>
-          <WhoFields name={name} field={key} available={t.available} promoter={props.promoter} />
-          <label>
-            Use them for
-            <select name={`for.${key}`} data-use>
-              <option value="">{t.event.title}</option>
-              <option value="bank">My bank, for a later event</option>
-            </select>
-          </label>
-          <button type="button" class="secondary small" data-add hidden>
-            Add to cart
-          </button>
-        </>
-      ) : (
-        <p class="muted">{t.used > 0 ? `All ${t.used} requested.` : 'None ready yet.'}</p>
-      )}
-      {t.nextIn !== null && (
-        <>
-          <Progress percent={t.progress} label={`Progress to the next: ${name}`} />
-          <p class="muted">{plural(t.nextIn, 'more sale')} for the next one</p>
-        </>
-      )}
-    </div>
-  );
-}
-
-/** Rewards in the bank: their type stays; they are asked for an upcoming event of the promoter's choice. */
-function BankItem(props: { b: Rewards['bank'][number]; ticketEvents: TicketEvent[]; promoter: string }) {
-  const { b } = props;
-  const key = `bank.${b.type.key}`;
-  const name = typeName(b.type);
-  const ready = b.balance > 0 && props.ticketEvents.length > 0;
-  return (
-    <div class={`card shop-item bank-item${ready ? '' : ' locked'}`} data-shop-item data-name={`${name} · from my bank`}>
-      <div class="shop-item-head">
-        <span class="shop-type">{name}</span>
-        <span class="shop-count">
-          <span class="big">{b.balance}</span> <span class="muted">in your bank</span>
-        </span>
-      </div>
-      {typeWhat(b.type) && <p class="shop-what">{typeWhat(b.type)}</p>}
-      <p class="shop-event">
-        <strong>Your bank</strong>
-        <span class="muted">
-          {' '}
-          · kept until you use them, on any upcoming event.{b.pending > 0 && ` ${b.pending} more waiting for the team to bank.`}
-        </span>
-      </p>
-      {ready ? (
-        <>
-          <label>
-            For which event
-            <select name={`event.${key}`}>
-              {props.ticketEvents.map((e) => (
-                <option value={String(e.id)}>{e.title}</option>
+    <tr
+      class={ready ? undefined : 'locked'}
+      data-shop-item
+      data-name={props.where ? `${props.name} · ${props.where}` : props.name}
+      data-type={props.name}
+      data-where={props.where}
+      data-kind={props.kind}
+    >
+      <td>
+        <div class="shop-type">{props.name}</div>
+        {props.what && <div class="shop-what">{props.what}</div>}
+        {props.note && <div class="muted">{props.note}</div>}
+      </td>
+      <td class="shop-avail">
+        <span class="big">{props.available}</span> <span class="muted">available</span>
+      </td>
+      <td class="shop-add">
+        {ready ? (
+          <>
+            <select name={`qty.${props.field}`} data-qty class="qty-fallback" aria-label={`How many: ${props.name}`}>
+              {Array.from({ length: props.available + 1 }, (_, n) => (
+                <option value={String(n)}>{n}</option>
               ))}
             </select>
-          </label>
-          <WhoFields name={name} field={key} available={b.balance} promoter={props.promoter} />
-          <button type="button" class="secondary small" data-add hidden>
-            Add to cart
+            <button type="button" class="plus" data-add hidden aria-label={`Add one ${props.name}${props.where ? ` for ${props.where}` : ''}`}>
+              +
+            </button>
+            {props.kind !== 'merch' && (
+              <>
+                <input type="hidden" name={`me.${props.field}`} value="1" data-me-field />
+                <input type="hidden" name={`guests.${props.field}`} value="" data-guests-field />
+              </>
+            )}
+            {props.children as never}
+          </>
+        ) : (
+          <button type="button" class="plus" disabled aria-label={`None available: ${props.name}`}>
+            +
           </button>
-        </>
-      ) : (
-        <p class="muted">{b.balance > 0 ? 'No upcoming event to use them for yet.' : 'Nothing in the bank yet.'}</p>
-      )}
-    </div>
+        )}
+      </td>
+    </tr>
   );
 }
 
+/**
+ * Payouts & rewards: a shop, by event. Each event lists its rewards (free tickets, VIP, GA list…) with
+ * how many are available and "+" to add one to the cart; the bank and merch come the same way. The cart
+ * holds the rest: how many, "1 of them is for me", guests, and this event or the bank.
+ */
 function RewardsShop(props: { rewards: Rewards; ticketEvents: TicketEvent[]; promoter: string }) {
   const { tickets, merch, bank } = props.rewards;
   const rules = rewardRules();
   const showMerch = trackOn(rules.merch) || merch.earned > 0;
   if (tickets.length === 0 && bank.length === 0 && !showMerch) return null;
-  const order = [...tickets].sort((a, b) => Number(b.available > 0) - Number(a.available > 0));
+  // Events in date order, each with its rewards.
+  const events = new Map<number, { event: TicketReward['event']; rows: TicketReward[] }>();
+  for (const t of tickets) events.set(t.event.id, { event: t.event, rows: [...(events.get(t.event.id)?.rows ?? []), t] });
+  const byDate = [...events.values()].sort((a, b) => (a.event.start?.getTime() ?? Infinity) - (b.event.start?.getTime() ?? Infinity));
   return (
     <section id="rewards">
       <h2>Rewards shop</h2>
       <p class="muted">
-        What your sales earned. Add what you want to your cart and send it: the team confirms each item. Rewards for an
-        event are lost once it is over: ask for them, or put them in your bank before then. Banked rewards keep their type
-        and wait for any later event.
+        What your sales earned, event by event. Press + to add one to your cart, then review and send it: the team confirms
+        each item. Rewards for an event are lost once it is over: ask for them, or put them in your bank before then.
       </p>
-      <form class="shop" method="post" action="/rewards/order" data-shop>
-        <div class="shop-grid">
-          {bank.map((b) => (
-            <BankItem b={b} ticketEvents={props.ticketEvents} promoter={props.promoter} />
-          ))}
-          {order.map((t) => (
-            <ShopItem t={t} promoter={props.promoter} />
+      <form class="shop" method="post" action="/rewards/order" data-shop data-promoter={props.promoter}>
+        <div class="shop-events">
+          {bank.length > 0 && (
+            <div class="card shop-event-card bank-card">
+              <h3 class="first">Your bank</h3>
+              <p class="muted">Kept until you use them, on any upcoming event. Their type stays.</p>
+              <table class="shop-table">
+                <tbody>
+                  {bank.map((b) => (
+                    <ShopRow
+                      field={`bank.${b.type.key}`}
+                      name={typeName(b.type)}
+                      what={typeWhat(b.type)}
+                      where="your bank"
+                      kind="bank"
+                      available={props.ticketEvents.length > 0 ? b.balance : 0}
+                      note={b.pending > 0 ? `${b.pending} more waiting for the team to bank` : props.ticketEvents.length === 0 ? 'No upcoming event to use them for yet' : undefined}
+                    >
+                      <select name={`event.bank.${b.type.key}`} data-event-field hidden aria-label="For which event">
+                        {props.ticketEvents.map((e) => (
+                          <option value={String(e.id)}>{e.title}</option>
+                        ))}
+                      </select>
+                    </ShopRow>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          {byDate.map(({ event, rows }) => (
+            <div class="card shop-event-card">
+              <h3 class="first">{event.title}</h3>
+              <p class="muted">{eventDate(event)}</p>
+              <table class="shop-table">
+                <tbody>
+                  {rows.map((t) => (
+                    <ShopRow
+                      field={`${t.event.id}.${t.type.key}`}
+                      name={typeName(t.type)}
+                      what={typeWhat(t.type)}
+                      where={t.event.title}
+                      kind="event"
+                      available={t.available}
+                      note={t.available === 0 && t.used > 0 ? `All ${t.used} requested` : t.nextIn !== null ? `${plural(t.nextIn, 'more sale')} for the next one` : undefined}
+                    >
+                      <input type="hidden" name={`for.${t.event.id}.${t.type.key}`} value="" data-use-field />
+                    </ShopRow>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           ))}
           {showMerch && (
-            <div class={`card shop-item${merch.available > 0 ? '' : ' locked'}`} data-shop-item data-name={merch.readyLabel || 'Merch'}>
-              <div class="shop-item-head">
-                <span class="chip">Merch</span>
-                <span class="shop-count">
-                  <span class="big">{merch.available}</span> <span class="muted">ready</span>
-                </span>
-              </div>
-              <div>
-                <strong>{merch.readyLabel || 'Merch'}</strong>
-                <div class="muted">{describeTrack(rules.merch, 'merch')}</div>
-              </div>
-              {merch.available > 0 ? (
-                <>
-                  <label>
-                    How many
-                    <select name="qty.merch" data-qty>
-                      {Array.from({ length: merch.available + 1 }, (_, n) => (
-                        <option value={String(n)}>{n}</option>
-                      ))}
-                    </select>
-                  </label>
-                  <label>
-                    {merch.readyLabel ? 'Size or option' : 'Which item and size'}
-                    <input
-                      name="merch.details"
-                      maxlength={120}
-                      placeholder={merch.readyLabel ? `${merch.readyLabel}, size L` : 'T-shirt, size L'}
-                      value={merch.readyLabel ? `${merch.readyLabel}, ` : undefined}
-                    />
-                  </label>
-                  <button type="button" class="secondary small" data-add hidden>
-                    Add to cart
-                  </button>
-                </>
-              ) : (
-                <p class="muted">{merch.nextIn !== null ? `${merch.nextLabel || 'Merch'} unlocks in ${plural(merch.nextIn, 'more ticket')}.` : 'All merch unlocked.'}</p>
-              )}
-              {merch.nextIn !== null && <Progress percent={merch.progress} label="Progress to the next merch item" />}
+            <div class="card shop-event-card">
+              <h3 class="first">Merch</h3>
+              <p class="muted">{describeTrack(rules.merch, 'merch')}</p>
+              <table class="shop-table">
+                <tbody>
+                  <ShopRow
+                    field="merch"
+                    name={merch.readyLabel || 'Merch'}
+                    what=""
+                    where=""
+                    kind="merch"
+                    available={merch.available}
+                    note={merch.available === 0 ? (merch.nextIn !== null ? `${merch.nextLabel || 'Merch'} unlocks in ${plural(merch.nextIn, 'more ticket')}` : 'All merch unlocked') : undefined}
+                  >
+                    <input type="hidden" name="merch.details" value={merch.readyLabel ? `${merch.readyLabel}, ` : ''} data-merch-field />
+                  </ShopRow>
+                </tbody>
+              </table>
             </div>
           )}
         </div>
-        <div class="card cart" data-cart>
+        <a class="cart-jump" href="#cart" data-cart-jump hidden>
+          Your cart
+        </a>
+        <div class="card cart" id="cart" data-cart>
           <h3>Your cart</h3>
-          <ul class="cart-lines" data-cart-lines>
-            <li class="muted">Pick how many of a reward you want, then send your request.</li>
-          </ul>
+          <div class="cart-lines" data-cart-lines>
+            <p class="muted">Press + next to a reward to add it here.</p>
+          </div>
           <button type="submit" formaction="/rewards/checkout" data-cart-send>
             Review my request →
           </button>

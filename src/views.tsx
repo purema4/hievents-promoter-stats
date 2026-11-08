@@ -599,19 +599,39 @@ ${chartCss}
 .rule-history li { font-size: 13px; }
 .rule-pending { color: var(--muted); font-size: 13px; margin: 0; }
 /* Payouts & rewards: the rewards shop */
-.shop { display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr) 280px; align-items: start; margin: 0; }
-/* On phones the cart stays at the bottom of the screen while scrolling the shop. */
+.shop { display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr) 320px; align-items: start; margin: 0; }
+/* On phones the cart comes after the events; a bar at the bottom of the screen leads to it. */
 @media (max-width: 899px) {
   .shop { grid-template-columns: 1fr; }
-  .cart { top: auto; bottom: calc(8px + env(safe-area-inset-bottom)); z-index: 5; box-shadow: 0 -6px 24px rgb(0 0 0 / 0.18); }
+  .cart { position: static; }
+  .cart-jump:not([hidden]) { display: block; position: sticky; bottom: calc(8px + env(safe-area-inset-bottom)); z-index: 5; text-align: center; padding: 12px 16px; border-radius: 10px; background: var(--accent); color: var(--accent-text); font-weight: 700; text-decoration: none; box-shadow: 0 -6px 24px rgb(0 0 0 / 0.18); }
 }
-.shop-grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 240px), 1fr)); }
-.shop-item { display: grid; gap: 10px; align-content: start; }
-.shop-item.locked { opacity: 0.7; }
+.shop-events { display: grid; gap: 16px; align-content: start; }
+.shop-event-card h3 { margin: 0; font-size: 18px; }
+.shop-event-card > p.muted { margin: 2px 0 10px; }
+.bank-card { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 6%, var(--surface)); }
+table.shop-table { width: 100%; }
+table.shop-table td { vertical-align: middle; padding: 12px 8px; }
+table.shop-table tr:last-child td { border-bottom: 0; }
+table.shop-table tr.locked { opacity: 0.6; }
+table.shop-table tr.in-cart td { background: color-mix(in srgb, var(--accent) 6%, transparent); }
+td.shop-avail { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+td.shop-avail .big { font-size: 22px; font-weight: 650; }
+td.shop-add { width: 1%; text-align: right; white-space: nowrap; }
+button.plus { width: 44px; height: 44px; padding: 0; border-radius: 50%; font-size: 26px; line-height: 1; font-weight: 600; }
+button.plus:disabled { opacity: 0.35; cursor: not-allowed; }
+.cart-jump { display: none; }
+.cart-line { display: grid; gap: 8px; padding: 10px 0; border-bottom: 1px solid var(--border); }
+.cart-line:last-child { border-bottom: 0; }
+.cart-steps { display: flex; gap: 8px; align-items: center; }
+button.step { width: 32px; height: 32px; padding: 0; border-radius: 50%; font-size: 18px; line-height: 1; background: var(--bg); color: var(--text); border: 1px solid var(--border); }
+.cart-n { min-width: 20px; text-align: center; font-weight: 700; font-variant-numeric: tabular-nums; }
+.cart-steps .link { margin-left: auto; }
+.cart-field { display: grid; gap: 4px; font-size: 13px; color: var(--muted); }
+.cart .check.for-me { padding: 8px 10px; border-radius: 8px; background: color-mix(in srgb, var(--accent) 10%, var(--surface)); }
 .shop-type { font-size: 20px; font-weight: 700; line-height: 1.2; }
 .shop-what { margin: 0; font-size: 14px; }
 .shop-event { margin: 0; font-size: 14px; }
-.shop-item label.for-me { padding: 8px 10px; border-radius: 8px; background: color-mix(in srgb, var(--accent) 10%, var(--surface)); }
 .who { margin: 0; font-size: 14px; font-weight: 600; color: var(--accent); }
 .checkout-lines { display: grid; gap: 12px; margin: 16px 0; }
 .checkout-line { display: flex; gap: 16px; align-items: flex-start; }
@@ -628,11 +648,6 @@ dialog.notice-modal { max-width: min(520px, calc(100vw - 32px)); border: 1px sol
 dialog.notice-modal::backdrop { background: rgb(0 0 0 / 0.55); }
 dialog.notice-modal h2 { margin-top: 0; }
 .notice-text { white-space: pre-line; font-size: 16px; }
-.bank-item { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 6%, var(--surface)); }
-.shop-item-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
-.shop-count .big { font-size: 24px; font-weight: 650; font-variant-numeric: tabular-nums; }
-.shop-item label { display: grid; gap: 4px; font-size: 14px; }
-.shop-item label.check { display: flex; gap: 8px; align-items: center; }
 .cart { position: sticky; top: 72px; display: grid; gap: 10px; }
 .cart h3 { margin: 0; }
 .cart-lines { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; font-size: 14px; }
