@@ -35,6 +35,7 @@ describeIntegration('invite links', () => {
     visitor.post(`/join/${token}`, { first_name: 'Jo', last_name: `Doe${uid()}`, email: `join-${uid()}@example.test`, ...body });
   const sql = (query: string, ...args: (string | number)[]) => {
     const db = new Database(join(server.dataDir, 'promoters.sqlite'));
+    db.exec('PRAGMA busy_timeout = 5000'); // the server writes too
     db.query(query).run(...args);
     db.close();
   };

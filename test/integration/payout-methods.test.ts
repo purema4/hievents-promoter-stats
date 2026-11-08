@@ -36,6 +36,7 @@ describeIntegration('payout methods by default', () => {
     const p = await newPromoter(server, admin);
     // Saved while cash was offered.
     const db = new Database(join(server.dataDir, 'promoters.sqlite'));
+    db.exec('PRAGMA busy_timeout = 5000'); // the server writes too
     db.query("UPDATE users SET payout_method = 'Cash' WHERE id = ?").run(p.id);
     db.close();
     // The amount is their whole balance, not rounded down to cash steps ($0 here).

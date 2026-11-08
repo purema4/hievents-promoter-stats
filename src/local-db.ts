@@ -8,6 +8,8 @@ mkdirSync(config.dataDir, { recursive: true });
 export const db = new Database(join(config.dataDir, 'promoters.sqlite'), { create: true, strict: true });
 
 db.exec('PRAGMA journal_mode = WAL');
+// Another connection writing (a second process, a backup): wait up to 5 s instead of failing with SQLITE_BUSY.
+db.exec('PRAGMA busy_timeout = 5000');
 db.exec('PRAGMA foreign_keys = ON');
 db.exec(`
   CREATE TABLE IF NOT EXISTS users (

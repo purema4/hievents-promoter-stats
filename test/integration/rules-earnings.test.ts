@@ -34,6 +34,8 @@ describeIntegration('earnings from rules', () => {
     admin = await signInAdmin(server);
     maya = await newPromoter(server, admin, { name: `Maya ${uid()}`, codes: 'DJMAX' });
     db = new Database(join(server.dataDir, 'promoters.sqlite'));
+    // The server writes too (notifications, milestones…): wait for it rather than fail with SQLITE_BUSY.
+    db.exec('PRAGMA busy_timeout = 5000');
     db.query("INSERT INTO reward_types (key, label_en, label_fr) VALUES ('vip_tickets', 'VIP', 'VIP'), ('ga_list', 'GA list', 'Liste GA')").run();
     setRule('event', 1, ash);
   }, 60_000);

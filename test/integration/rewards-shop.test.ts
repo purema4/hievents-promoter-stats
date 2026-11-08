@@ -21,6 +21,8 @@ describeIntegration('rewards shop', () => {
     admin = await signInAdmin(server);
     maya = await newPromoter(server, admin, { name: `Maya ${uid()}`, codes: 'DJMAX' });
     db = new Database(join(server.dataDir, 'promoters.sqlite'));
+    // The server writes too (notifications, milestones…): wait for it rather than fail with SQLITE_BUSY.
+    db.exec('PRAGMA busy_timeout = 5000');
     db.query("INSERT INTO reward_types (key, label_en, label_fr) VALUES ('vip_tickets', 'VIP', 'VIP'), ('ga_list', 'GA list', 'Liste GA')").run();
     db.query("INSERT INTO rule_versions (scope, event_id, text) VALUES ('event', 1, ?)").run('vip_tickets = tickets_sold >= 1 ? 2 : 0\nga_list = floor(tickets_sold / 5)');
     // One merch item, given by hand.

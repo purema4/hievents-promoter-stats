@@ -38,6 +38,8 @@ describeIntegration('rules screens', () => {
     admin = await signInAdmin(server);
     maya = await newPromoter(server, admin, { name: `Maya ${uid()}`, codes: 'DJMAX' });
     db = new Database(join(server.dataDir, 'promoters.sqlite'));
+    // The server writes too (notifications, milestones…): wait for it rather than fail with SQLITE_BUSY.
+    db.exec('PRAGMA busy_timeout = 5000');
   }, 60_000);
   afterAll(async () => {
     db?.close();

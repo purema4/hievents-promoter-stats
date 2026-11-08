@@ -38,6 +38,8 @@ describeIntegration('rule writer', () => {
     // Events show on Rules once a promoter has a code on them.
     await createPromoter(admin, { codes: 'DJMAX' });
     db = new Database(join(server.dataDir, 'promoters.sqlite'));
+    // The server writes too (notifications, milestones…): wait for it rather than fail with SQLITE_BUSY.
+    db.exec('PRAGMA busy_timeout = 5000');
     db.query("INSERT INTO reward_types (key, label_en, label_fr) VALUES ('vip_tickets', 'VIP', 'VIP'), ('ga_list', 'GA list', 'Liste GA')").run();
   }, 60_000);
   afterAll(async () => {
