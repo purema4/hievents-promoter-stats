@@ -31,6 +31,8 @@ const VAR_WORDS: Record<string, { en: string; fr: string }> = {
   team_size: { en: 'promoters on the team', fr: 'promoteurs dans l’équipe' },
   team_tickets_sold: { en: 'tickets sold by the team', fr: 'billets vendus par l’équipe' },
   team_full_price_sales: { en: 'the team’s sales at full price', fr: 'ventes au plein prix de l’équipe' },
+  team_commission: { en: 'the team’s commission', fr: 'commission de l’équipe' },
+  commission: { en: 'your commission', fr: 'ta commission' },
 };
 
 const TICKETS = new Set(['tickets_sold', 'outside_tickets']);
@@ -121,6 +123,14 @@ function linearWords(l: { vars: string[]; factor: number }, ctx: Ctx): string | 
 
 /** "from 5 tickets sold", "from your first sale", "if your level is Gold"… for a condition. */
 function condition(n: RuleNode, ctx: Ctx): string | null {
+  if (call(n, '_>_') || call(n, '_!=_')) {
+    const [a, b] = args(n);
+    // "commission > 0": whether a commission is earned at all.
+    if (a?.k === 'var' && b && isNum(b) && num(b) === 0) {
+      if (a.s === 'commission') return w(ctx, 'if you earn a commission', 'si tu touches une commission');
+      if (a.s === 'team_commission') return w(ctx, 'if your team earns a commission', 'si ton équipe touche une commission');
+    }
+  }
   if (call(n, '_>=_') || call(n, '_>_')) {
     const [a, b] = args(n);
     if (a?.k === 'var' && b && isNum(b)) {

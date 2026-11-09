@@ -75,6 +75,7 @@ function probes(): RuleInputs[] {
           team_size: lead ? 4 : 0,
           team_tickets_sold: lead ? sold * 4 : sold,
           team_full_price_sales: lead ? sold * 3 * 25 : 0,
+          team_commission: lead ? sold * 3 * 2.5 : 0,
         });
       }
     }
@@ -158,7 +159,7 @@ export async function checkDraft(scope: RuleScope, target: RuleTarget, text: str
   }
   const tickets = [1, 5, 12, 20, ...(testTickets !== undefined && Number.isFinite(testTickets) ? [testTickets] : [])];
   for (const sold of [...new Set(tickets)].sort((a, b) => a - b)) {
-    const variables: RuleInputs = { ...emptyInputs(), tickets_sold: sold, orders: sold, full_price_sales: sold * 25, codes_used: 1, event_tickets_sold: sold, event_promoters: 1, event_dates: 1, lifetime_tickets: sold, events_promoted: 1, level: levelFor(sold).level.name, team_tickets_sold: scope === 'team' ? sold * 2 : sold, team_full_price_sales: scope === 'team' ? sold * 25 : 0 };
+    const variables: RuleInputs = { ...emptyInputs(), tickets_sold: sold, orders: sold, full_price_sales: sold * 25, codes_used: 1, event_tickets_sold: sold, event_promoters: 1, event_dates: 1, lifetime_tickets: sold, events_promoted: 1, level: levelFor(sold).level.name, team_tickets_sold: scope === 'team' ? sold * 2 : sold, team_full_price_sales: scope === 'team' ? sold * 25 : 0, team_commission: scope === 'team' ? sold * 2.5 : 0 };
     const label = scope === 'team' ? `Team sold ${sold} at $25` : `${sold} tickets at $25`;
     items.push({ subject: `test:${sold}`, variables, row: { label, tickets: sold, values: {}, made_up: true }, currency: 'CAD' });
   }

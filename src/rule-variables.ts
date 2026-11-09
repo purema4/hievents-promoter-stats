@@ -35,6 +35,7 @@ export const RULE_VARIABLES: readonly RuleVariable[] = [
   { name: 'is_team_lead', type: 'bool', group: 'promoter', en: 'True for a team lead.', fr: 'Vrai pour un chef d’équipe.' },
   { name: 'team_size', type: 'number', group: 'promoter', en: 'Promoters on their team (0 when not a team lead).', fr: 'Promoteurs dans son équipe (0 s’il n’est pas chef d’équipe).' },
   { name: 'team_full_price_sales', type: 'number', group: 'promoter', en: 'Sales at full price by their team’s promoters for this event, since each joined, in dollars. Not the team lead’s own sales (0 when not a team lead).', fr: 'Ventes au plein prix des promoteurs de son équipe pour cet événement, depuis leur arrivée, en dollars. Sans les ventes du chef d’équipe (0 s’il n’est pas chef d’équipe).' },
+  { name: 'team_commission', type: 'number', group: 'promoter', en: 'Commission their team’s promoters earned on this event, from their own rules, since each joined, in dollars. Not the team lead’s own (0 when not a team lead).', fr: 'Commission gagnée par les promoteurs de son équipe sur cet événement, selon leurs propres règles, depuis leur arrivée, en dollars. Sans celle du chef d’équipe (0 s’il n’est pas chef d’équipe).' },
   { name: 'team_tickets_sold', type: 'number', group: 'promoter', en: 'Tickets sold for this event by the team lead and their promoters (each since they joined).', fr: 'Billets vendus pour cet événement par le chef d’équipe et ses promoteurs (chacun depuis son arrivée).' },
 ];
 

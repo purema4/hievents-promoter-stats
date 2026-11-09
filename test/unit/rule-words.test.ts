@@ -19,6 +19,14 @@ describe('rules in words', () => {
     expect(describeLine('Liste GA', ga, 'count', 'fr')).toBe('Liste GA : 1 par tranche de 5 billets vendus.');
   });
 
+  test('whether a commission is earned', () => {
+    const vip = c('_?_:_', c('_>_', v('commission'), n(0)), n(2), n(0));
+    expect(describeLine('VIP', vip, 'count', 'en')).toBe('VIP: 2 if you earn a commission.');
+    expect(describeLine('VIP', vip, 'count', 'fr')).toBe('VIP : 2 si tu touches une commission.');
+    const team = c('_?_:_', c('_>_', v('team_commission'), n(0)), c('_*_', v('team_full_price_sales'), n(0.05)), n(0));
+    expect(describeLine('Commission', team, 'money', 'en')).toContain('if your team earns a commission');
+  });
+
   test('caps and floors', () => {
     const capped = c('min', c('floor', c('_/_', v('tickets_sold'), n(5))), n(10));
     expect(describeLine('Liste GA', capped, 'count', 'fr')).toBe('Liste GA : 1 par tranche de 5 billets vendus, jusqu’à 10.');

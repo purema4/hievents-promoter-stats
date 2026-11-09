@@ -144,6 +144,16 @@ describeIntegration('earnings from rules', () => {
   });
 
 
+  test('other lines read the commission: rewards only when one is earned', async () => {
+    setRule('event', 2, 'commission = tickets_sold * 5\nvip_tickets = commission > 0 ? 2 : 0');
+    expect(text(await maya.client.page('/events/2'))).toContain('2 VIP ready for this event');
+    // No commission on the event: no VIP either.
+    setRule('event', 2, 'commission = 0\nvip_tickets = commission > 0 ? 2 : 0');
+    expect(text(await maya.client.page('/events/2'))).not.toContain('VIP ready');
+    // A line without commission in the rule reads 0 (the default rule here gives one: 10%).
+    setRule('event', 2, 'commission = 0');
+  });
+
   test('a team rule is added on top of the team lead\'s own rule', async () => {
     // From the test above: Luna leads, Maya joined today ($25 sold since). Luna's own rule stays as it is.
     setRule('event', 1, ash);
@@ -162,5 +172,23 @@ describeIntegration('earnings from rules', () => {
     const earned = [...stats(home)].find(([label]) => label.startsWith('Commission earned'))!;
     expect(earned[0]).toContain('incl. $2.50 team commission');
     expect(stats(await lunaClient.page('/events/1')).get('Commission')).toBe('$5.00');
+  });
+
+  test('team_commission: the team lead earns only when their promoters do', async () => {
+    // Maya (on Luna's team since today) earns $5 a ticket on Warehouse Night: $20, of which today's sale
+    // (a quarter of her sales there) counts for the team.
+    setRule('event', 1, ash);
+    const rule = 'commission = team_commission > 0 ? team_full_price_sales * 0.1 : 0';
+    expect(location(await admin.post(`/admin/rules/edit?scope=team&user=${luna.id}`, { text: rule }))).toContain('ok=rule_saved');
+    const earned = async () => [...stats(await luna.client.page('/'))].find(([label]) => label.startsWith('Commission earned'))![0];
+    expect(await earned()).toContain('incl. $2.50 team commission');
+    // Maya gets nothing on the event: Luna gets nothing from her there either.
+    setRule('promoter_event', 1, 'commission = 0');
+    db.query("UPDATE rule_versions SET user_id = ? WHERE id = (SELECT max(id) FROM rule_versions)").run(maya.id);
+    expect(await earned()).not.toContain('team commission');
+    // A commission line cannot read itself.
+    const res = await admin.post(`/admin/rules/edit?scope=team&user=${luna.id}`, { text: 'commission = commission + 1' });
+    expect(res.status).toBe(400);
+    expect(text(await res.text())).toContain('The commission cannot be worked out from itself.');
   });
 });

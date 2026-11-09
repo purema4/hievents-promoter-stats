@@ -57,6 +57,34 @@ export function parseRule(text: string): { lines: RuleLine[]; problems: RuleProb
 }
 
 const variables = RULE_VARIABLES.map((v) => ({ name: v.name, type: v.type }));
+// When checking, the other lines of a rule may also read `commission`: what its commission line gives.
+const checkVariables = [...variables, { name: 'commission', type: 'number' }];
+
+// --- Reading `commission` in other lines -----------------------------------------------------------
+
+const COMMISSION_WORD = /(?<![A-Za-z0-9_.])commission(?![A-Za-z0-9_])/g;
+
+/** An expression with `commission` replaced, outside quoted strings. */
+function replaceCommission(expr: string, by: string): string {
+  return expr
+    .split(/("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')/)
+    .map((part, i) => (i % 2 === 1 ? part : part.replace(COMMISSION_WORD, by)))
+    .join('');
+}
+
+/** Whether an expression reads `commission` (outside quoted strings). */
+export const readsCommission = (expr: string) => replaceCommission(expr, '\u0000') !== expr;
+
+/**
+ * The expressions sent to the engine: in every line but commission's own, `commission` is replaced by
+ * what the commission line gives (never below 0, as the app counts it), or 0 when the rule has none.
+ * So `free_tickets = commission > 0 ? 2 : 0` is worked out in the same single call.
+ */
+export function expressionsOf(lines: RuleLine[]): Record<string, string> {
+  const own = lines.find((l) => l.name === 'commission');
+  const value = own ? `max(0, (${own.expr}))` : '0';
+  return Object.fromEntries(lines.map((l) => [l.name, l.name === 'commission' ? l.expr : replaceCommission(l.expr, value)]));
+}
 
 async function call<T>(path: string, body: unknown): Promise<T> {
   // Just failed: answer at once instead of waiting seconds again on every call of every page (a missing
@@ -129,9 +157,10 @@ export async function checkRule(text: string, outputs: readonly string[]): Promi
   if (lines.length > 0) {
     const res = await call<{ results: Record<string, { errors?: { message: string; column: number }[]; tree?: RuleNode }> }>('/check', {
       expressions: Object.fromEntries(lines.map((l) => [l.name, l.expr])),
-      variables,
+      variables: checkVariables,
     });
     for (const l of lines) {
+      if (l.name === 'commission' && readsCommission(l.expr)) problems.push({ line: l.line, message: 'The commission cannot be worked out from itself.' });
       const r = res.results[l.name];
       for (const e of r?.errors ?? []) problems.push({ line: l.line, message: friendly(e.message, e.column, l) });
       if (r?.tree) trees.set(l.name, r.tree);
@@ -186,7 +215,7 @@ export async function evaluateRules(
   if (opts.cache === false) {
     if (rule.lines.length === 0) return { results: new Map(inputs.map((i) => [i.subject, { outputs: {}, errors: {} }])), stale: false };
     const res = await call<{ results: { key: string; outputs: Record<string, number>; errors?: Record<string, string> }[] }>('/evaluate', {
-      expressions: Object.fromEntries(rule.lines.map((l) => [l.name, l.expr])),
+      expressions: expressionsOf(rule.lines),
       variables,
       inputs: inputs.slice(0, 5000).map((t) => ({ key: t.subject, variables: t.variables })),
     });
@@ -213,7 +242,7 @@ export async function evaluateRules(
     return { results, stale: false };
   }
 
-  const expressions = Object.fromEntries(rule.lines.map((l) => [l.name, l.expr]));
+  const expressions = expressionsOf(rule.lines);
   try {
     const write = db.query(
       'INSERT INTO rule_results (subject, input_hash, outputs, errors, updated_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT (subject) DO UPDATE SET input_hash = excluded.input_hash, outputs = excluded.outputs, errors = excluded.errors, updated_at = excluded.updated_at',

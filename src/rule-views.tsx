@@ -150,6 +150,11 @@ function Variables(props: { rewardTypes: RewardType[] }) {
           </>
         ))}
       </dl>
+      <p class="muted">
+        The other lines can also read <code>commission</code>: what the commission line gives (0 without one). For
+        example <code>free_tickets = commission &gt; 0 ? 2 : 0</code>. In a team rule, <code>team_commission</code> is
+        what the team’s promoters earned: <code>commission = team_commission &gt; 0 ? team_full_price_sales * 0.05 : 0</code>.
+      </p>
       <p class="muted">Each line gives one of these:</p>
       <dl class="rule-vars">
         {FIXED_OUTPUTS.map((o) => (

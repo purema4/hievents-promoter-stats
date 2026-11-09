@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { parseRule, RULE_MAX_LINES } from '../../src/rules-engine';
+import { expressionsOf, parseRule, readsCommission, RULE_MAX_LINES } from '../../src/rules-engine';
 import { emptyInputs, RULE_VARIABLES } from '../../src/rule-variables';
 
 describe('parseRule: lines, without the engine', () => {
@@ -38,4 +38,27 @@ test('one list of variables, each explained in both languages', () => {
   expect(new Set(names).size).toBe(names.length);
   for (const v of RULE_VARIABLES) expect(v.en.length * v.fr.length).toBeGreaterThan(0);
   expect(emptyInputs()).toMatchObject({ tickets_sold: 0, level: '', is_team_lead: false });
+});
+
+describe('other lines reading commission', () => {
+  const lines = [
+    { line: 1, name: 'commission', expr: 'tickets_sold * 5' },
+    { line: 2, name: 'free_tickets', expr: 'commission > 0 ? 2 : 0' },
+    { line: 3, name: 'bonus', expr: 'team_commission + (level == "commission" ? 1 : 0)' },
+  ];
+  test("is replaced by the commission line, never below 0; strings and team_commission are left alone", () => {
+    expect(expressionsOf(lines)).toEqual({
+      commission: 'tickets_sold * 5',
+      free_tickets: 'max(0, (tickets_sold * 5)) > 0 ? 2 : 0',
+      bonus: 'team_commission + (level == "commission" ? 1 : 0)',
+    });
+  });
+  test('reads 0 when the rule has no commission line', () => {
+    expect(expressionsOf(lines.slice(1)).free_tickets).toBe('0 > 0 ? 2 : 0');
+  });
+  test('readsCommission', () => {
+    expect(readsCommission('commission * 2')).toBe(true);
+    expect(readsCommission('team_commission * 2')).toBe(false);
+    expect(readsCommission('"commission"')).toBe(false);
+  });
 });

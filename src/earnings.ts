@@ -1,6 +1,6 @@
 import { outsideByEvent, outsideTickets } from './adjustments';
-import { codesFor, listUsers, type User } from './local-db';
-import { statsForCodes, ticketsByEventAndCode, type CodeStats } from './hievents';
+import { codesFor, db, findUser, listUsers, type User } from './local-db';
+import { dailyForCodes, statsForCodes, ticketsByEventAndCode, type CodeStats } from './hievents';
 import { toCents, type EventEarning, type Rate } from './money';
 import { levelFor } from './reward-rules';
 import { evaluateRules } from './rules-engine';
@@ -72,6 +72,49 @@ async function eventFacts(eventIds: number[]): Promise<Map<number, { tickets: nu
 }
 
 
+/**
+ * What a team lead's promoters earned in commission, per event (cents), from their own rules. Like the
+ * team's sales, only for the days each was on the team: an event's commission is counted in the share of
+ * its sales (or tickets, for free ones) made while they were. Never the team lead's own commission.
+ * Promoters deleted since have no rules any more and are left out.
+ */
+async function teamCommissionByEvent(lead: User): Promise<Map<number, number>> {
+  const rows = db
+    .query<{ member_id: number; from_day: string; to_day: string | null }, [number]>(
+      'SELECT member_id, from_day, to_day FROM team_memberships WHERE lead_id = ? AND member_id IS NOT NULL',
+    )
+    .all(lead.id);
+  const windows = new Map<number, { from: string; to: string | null }[]>();
+  for (const r of rows) windows.set(r.member_id, [...(windows.get(r.member_id) ?? []), { from: r.from_day, to: r.to_day }]);
+  const out = new Map<number, number>();
+  for (const [memberId, spans] of windows) {
+    const member = findUser(memberId);
+    const codes = member ? codesFor(member.id) : [];
+    if (!member || isTeamLead(member) || codes.length === 0) continue;
+    const rate = await earningsFor(member, await statsForCodes(codes));
+    const sold = new Map<number, { tickets: number; fp: number; inTickets: number; inFp: number }>();
+    for (const d of await dailyForCodes(codes)) {
+      if (d.event_id === undefined) continue;
+      const s = sold.get(d.event_id) ?? { tickets: 0, fp: 0, inTickets: 0, inFp: 0 };
+      const fp = toCents(d.full_price);
+      s.tickets += d.tickets;
+      s.fp += fp;
+      if (spans.some((w) => d.day >= w.from && (!w.to || d.day <= w.to))) {
+        s.inTickets += d.tickets;
+        s.inFp += fp;
+      }
+      sold.set(d.event_id, s);
+    }
+    for (const [eventId, earning] of rate.events) {
+      const s = sold.get(eventId);
+      if (!s || earning.commission <= 0) continue;
+      const share = s.fp > 0 ? s.inFp / s.fp : s.tickets > 0 ? s.inTickets / s.tickets : 0;
+      if (share > 0) out.set(eventId, (out.get(eventId) ?? 0) + Math.round(earning.commission * share));
+    }
+  }
+  return out;
+}
+
 /** The variables of each event for a promoter, with `sold` tickets instead of the real number when given. */
 async function inputsBuilder(promoter: User, events: EventBasics[], allRules: { lines: { expr: string }[] }[]) {
   const outside = outsideByEvent(promoter.id);
@@ -82,6 +125,7 @@ async function inputsBuilder(promoter: User, events: EventBasics[], allRules: { 
     lead && (uses(allRules, 'team_tickets_sold') || uses(allRules, 'team_full_price_sales'))
       ? await teamSalesByEvent(promoter)
       : new Map<number, { tickets: number; fullPrice: number }>();
+  const teamCommission = lead && uses(allRules, 'team_commission') ? await teamCommissionByEvent(promoter) : new Map<number, number>();
   const general: RuleInputs = {
     lifetime_tickets: lifetime,
     events_promoted: events.filter((e) => e.tickets > 0).length,
@@ -112,6 +156,7 @@ async function inputsBuilder(promoter: User, events: EventBasics[], allRules: { 
       // The team lead's own tickets and their promoters'; the sales are their promoters' alone (what team commission is on).
       team_tickets_sold: e.tickets + (team.get(e.id)?.tickets ?? 0) + extra,
       team_full_price_sales: (team.get(e.id)?.fullPrice ?? 0) / 100,
+      team_commission: (teamCommission.get(e.id) ?? 0) / 100,
     };
   };
 
