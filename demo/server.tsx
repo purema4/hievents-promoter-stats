@@ -149,6 +149,8 @@ demo.post('/__demo/reset', (c) => {
 });
 
 const canonical = new URL(config.appUrl);
+// Where the demo is published on this computer (see docker-compose.demo.yml).
+const local = new URL(process.env.DEMO_LOCAL_URL ?? 'http://127.0.0.1:3100');
 
 async function withBar(req: Request, res: Response): Promise<Response> {
   if (!res.headers.get('content-type')?.includes('text/html') || req.headers.get('sec-fetch-dest') === 'iframe') return res;
@@ -186,10 +188,15 @@ export default {
   idleTimeout: app.idleTimeout,
   async fetch(req: Request, server: unknown) {
     const url = new URL(req.url);
-    // Sessions and links follow APP_URL; a cookie for "localhost" would also collide with the dev stack's.
-    // Through ngrok (an https APP_URL), every other address goes there too, except Docker's health check.
-    const elsewhere = canonical.protocol === 'https:' && url.host !== canonical.host && url.pathname !== '/healthz';
-    if (url.hostname === 'localhost' || elsewhere) return Response.redirect(`${canonical.origin}${url.pathname}${url.search}`, 307);
+    // A cookie for "localhost" would collide with the dev stack's: it goes to 127.0.0.1:3100.
+    if (url.hostname === 'localhost') return Response.redirect(`${local.origin}${url.pathname}${url.search}`, 307);
+    // Through ngrok, the demo answers on both its ngrok address (APP_URL) and on 127.0.0.1:3100. Forms
+    // only accept APP_URL's origin, so a post from this computer's own address is passed on as one.
+    if (url.host === local.host && url.host !== canonical.host && req.headers.get('origin') === local.origin) {
+      const headers = new Headers(req.headers);
+      headers.set('origin', canonical.origin);
+      req = new Request(req, { headers });
+    }
     if (url.pathname.startsWith('/__demo/')) return gzipped(req, await demo.fetch(req, server));
     return gzipped(req, await withBar(req, await app.fetch(req, server)));
   },

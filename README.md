@@ -374,7 +374,7 @@ None of it can reach production: everything is in `demo/`, which only `demo/Dock
 ./demo-ngrok.sh down                    # stop
 ```
 
-The demo is then at your reserved ngrok address (`NGROK_DOMAIN` and `NGROK_AUTHTOKEN` from the Hi.Events dev `.env`, as for `dev-ngrok.sh`). Since anyone who reaches it can become admin, ngrok asks for a password before anything reaches the app: user `demo`, password `DEMO_NGROK_PASSWORD` from `.env`. While it runs, http://127.0.0.1:3100 redirects to the ngrok address, since forms only accept that one.
+The demo is then at your reserved ngrok address (`NGROK_DOMAIN` and `NGROK_AUTHTOKEN` from the Hi.Events dev `.env`, as for `dev-ngrok.sh`). Since anyone who reaches it can become admin, ngrok asks for a password before anything reaches the app: user `demo`, password `DEMO_NGROK_PASSWORD` from `.env`. While it runs, the demo stays at http://127.0.0.1:3100 on this computer too.
 
 ## File storage (S3 and CDN)
 

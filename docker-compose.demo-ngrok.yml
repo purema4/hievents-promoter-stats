@@ -9,7 +9,9 @@ services:
   demo:
     environment:
       APP_URL: https://${NGROK_DOMAIN:?set NGROK_DOMAIN in the Hi.Events dev .env}
-      COOKIE_SECURE: "true"
+      # The demo stays on http://127.0.0.1:3100 too, where a Secure cookie would not be kept everywhere.
+      # Behind ngrok's password, a session cookie without the Secure flag is acceptable for a demo.
+      COOKIE_SECURE: "false"
 
   demo-ngrok:
     image: ngrok/ngrok:3
