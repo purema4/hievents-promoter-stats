@@ -439,6 +439,7 @@ export function AdminRulesPage(props: {
               <th>Key</th>
               <th>Name</th>
               <th>What it is (promoters see it)</th>
+              <th>Guest list</th>
             </tr>
           </thead>
           <tbody>
@@ -455,6 +456,7 @@ export function AdminRulesPage(props: {
                   {t.description_en ?? <span class="muted">Not said yet</span>}
                   {t.description_fr && t.description_fr !== t.description_en && <div class="muted">{t.description_fr}</div>}
                 </td>
+                <td>{t.guest_list ? 'Yes: asks for names' : <span class="muted">No: tickets sent to the promoter</span>}</td>
               </tr>
             ))}
           </tbody>
@@ -483,6 +485,13 @@ export function AdminRulesPage(props: {
         <label>
           Same, in French
           <input name="description_fr" maxlength={200} placeholder="Passe devant la file et accès à la zone VIP." />
+        </label>
+        <label class="check">
+          <input type="checkbox" name="guest_list" value="1" />
+          <span>
+            <strong>Guest list</strong>: names at the door instead of tickets. Promoters are asked for the names. Otherwise
+            the tickets are sent to the promoter, who hands them out.
+          </span>
         </label>
         <button type="submit">Save</button>
       </form>

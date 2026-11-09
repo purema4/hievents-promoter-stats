@@ -256,7 +256,7 @@ async function addHistory(adminId: number, ids: Map<string, number>, eventIds: n
   setEventRule(ids.get('Noah')!, eventIds[3]!, { kind: 'percent', value: 15 });
   setMediaDrive(eventIds[3]!, 'https://drive.example.com/warehouse-night', adminId);
   setMediaDrive(eventIds[4]!, 'https://drive.example.com/winter-opening', adminId);
-  setCheckoutNotice('Free and VIP tickets are under your name at the door: bring ID. GA list spots go under each guest’s name, so check the spelling.');
+  setCheckoutNotice('Free and VIP tickets are sent to you by email: hand them out to your guests. GA list spots go under each guest’s name, so check the spelling.');
   setGeneralBanner('Payouts for last month go out this Friday. Send your request before Thursday at noon.');
   setEventBanner(eventIds[3]!, 'Early bird tickets end Sunday. Push your link this week!', adminId);
   setEventBanner(eventIds[4]!, 'New venue: doors open at 9 pm at the Old Port.', adminId);
@@ -292,7 +292,7 @@ async function addHistory(adminId: number, ids: Map<string, number>, eventIds: n
 function addRules(adminId: number, eventIds: number[]) {
   saveRewardType('free_tickets', 'Free GA ticket', 'Billet GA gratuit', 'A regular general admission ticket, free.', 'Un billet d’admission générale régulier, gratuit.');
   saveRewardType('vip_tickets', 'VIP ticket', 'Billet VIP', 'Skip the line and get into the VIP area.', 'Passe devant la file et accès à la zone VIP.');
-  saveRewardType('ga_list', 'GA guest list spot', 'Place liste GA', 'A name on the general admission guest list at the door: no ticket needed.', 'Un nom sur la liste d’invités GA à la porte : pas besoin de billet.');
+  saveRewardType('ga_list', 'GA guest list spot', 'Place liste GA', 'A name on the general admission guest list at the door: no ticket needed.', 'Un nom sur la liste d’invités GA à la porte : pas besoin de billet.', true);
   const ash = ['# 2 VIP from the first ticket, a GA list spot every 5, $5 a ticket', 'commission  = tickets_sold * 5.00', 'vip_tickets = tickets_sold >= 1 ? 2 : 0', 'ga_list     = floor(tickets_sold / 5)', 'free_tickets = 0'].join('\n');
   saveRuleVersion('event', { eventId: eventIds[5]! }, ash, adminId);
   saveTemplate('Big show', ash, adminId);

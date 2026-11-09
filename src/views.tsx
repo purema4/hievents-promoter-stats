@@ -667,7 +667,6 @@ button.step { display: inline-grid; place-items: center; width: 32px; height: 32
 .cart-n { min-width: 20px; text-align: center; font-weight: 700; font-variant-numeric: tabular-nums; }
 .cart-steps .link { margin-left: auto; }
 .cart-field { display: grid; gap: 4px; font-size: 13px; color: var(--muted); }
-.cart .check.for-me { padding: 8px 10px; border-radius: 8px; background: color-mix(in srgb, var(--accent) 10%, var(--surface)); }
 .shop-type { font-size: 20px; font-weight: 700; line-height: 1.2; }
 .shop-what { margin: 0; font-size: 14px; }
 .shop-event { margin: 0; font-size: 14px; }

@@ -1106,29 +1106,26 @@ app.post('/payouts', async (c) => {
   return c.redirect('/payouts?ok=requested');
 });
 
-/** Who the tickets of a shop item are for: "Maya + 2 guests: Ann, Bob". */
+/** "Ann, Bob" from what was typed, one name after another. */
 function guestNames(guests: string): string {
   return guests.split(/[,;\n]+/).map((g) => g.trim()).filter(Boolean).join(', ');
 }
 
-/** Who the tickets of a shop item are for, for the team: "Maya + 2 guests: Ann, Bob". */
-function ticketsFor(user: User, quantity: number, forMe: boolean, guests: string): string {
-  const names = guestNames(guests);
-  const others = forMe ? quantity - 1 : quantity;
-  const guestPart = others > 0 ? `${others} ${others === 1 ? 'guest' : 'guests'}${names ? `: ${names}` : ''}` : '';
-  return [forMe ? user.name : '', guestPart].filter(Boolean).join(' + ').slice(0, 120);
+/**
+ * Who a shop item is for. Tickets are sent to the promoter, who hands them out; a guest list is names at
+ * the door, which only guest list rewards ask for. For the team ("Guest list: Ann, Bob" or the
+ * promoter's name), and for the promoter at checkout ("On the guest list: Ann, Bob" or "Sent to you").
+ */
+function ticketsFor(user: User, guestList: boolean, guests: string): string {
+  return (guestList ? `Guest list: ${guestNames(guests)}` : user.name).slice(0, 120);
 }
-
-/** The same, for the promoter: "1 for you (Maya Tremblay) + 1 guest: Ana". */
-function whoFor(user: User, quantity: number, forMe: boolean, guests: string): string {
-  const names = guestNames(guests);
-  const others = forMe ? quantity - 1 : quantity;
-  const guestPart = others > 0 ? `${others} for ${others === 1 ? 'a guest' : 'guests'}${names ? ` (${names})` : ''}` : '';
-  return [forMe ? `1 for you (${user.name})` : '', guestPart].filter(Boolean).join(' + ');
+function whoFor(user: User, guestList: boolean, guests: string): string {
+  return guestList ? `On the guest list: ${guestNames(guests)}` : `Sent to you (${user.name})`;
 }
 
 // Shop fields carried from the shop to checkout and on to the order.
-const CART_FIELD = /^(qty|me|guests|for|event)\.[a-z0-9_.]+$|^merch\.details$/;
+const CART_FIELD = /^(qty|guests|for|event)\.[a-z0-9_.]+$|^merch\.details$/;
+const NAMES_NEEDED = 'Add the names for the guest list.';
 
 /** The cart sent from the shop: the requests to make, and each line in plain words for checkout. */
 function cartFrom(body: Record<string, unknown>, data: Awaited<ReturnType<typeof promoterData>>, user: User): { items: RewardInput[]; lines: CartLine[]; fields: [string, string][]; error?: string } {
@@ -1139,19 +1136,20 @@ function cartFrom(body: Record<string, unknown>, data: Awaited<ReturnType<typeof
     const key = `${t.event.id}.${t.type.key}`;
     const quantity = Number(field(`qty.${key}`) || 0);
     if (!quantity) continue;
-    const forMe = field(`me.${key}`) === '1';
     // "Use them for": this event, or the bank (the team accepts it; then it keeps until asked for).
     const toBank = field(`for.${key}`) === 'bank';
+    const guestList = !!t.type.guest_list && !toBank;
+    if (guestList && !guestNames(field(`guests.${key}`))) return { items, lines, fields: [], error: NAMES_NEEDED };
     items.push({
       kind: 'ticket',
       eventId: t.event.id,
       rewardType: t.type.key,
       toBank,
       quantity,
-      details: ticketsFor(user, quantity, forMe, field(`guests.${key}`)),
+      details: ticketsFor(user, guestList, field(`guests.${key}`)),
       ruleVersions: data.percent.events.get(t.event.id)?.versionIds,
     });
-    lines.push({ quantity, type: t.type, event: t.event, toBank, who: toBank ? '' : whoFor(user, quantity, forMe, field(`guests.${key}`)) });
+    lines.push({ quantity, type: t.type, event: t.event, toBank, who: toBank ? '' : whoFor(user, guestList, field(`guests.${key}`)) });
   }
   // Out of the bank, for an upcoming event of their choice; the type stays.
   for (const b of data.rewards.bank) {
@@ -1160,9 +1158,10 @@ function cartFrom(body: Record<string, unknown>, data: Awaited<ReturnType<typeof
     if (!quantity) continue;
     const event = data.ticketEvents.find((e) => e.id === Number(field(`event.${key}`)));
     if (!event) return { items, lines, fields: [], error: 'Pick the event to use your banked rewards for.' };
-    const forMe = field(`me.${key}`) === '1';
-    items.push({ kind: 'ticket', rewardType: b.type.key, fromBank: event, quantity, details: ticketsFor(user, quantity, forMe, field(`guests.${key}`)) });
-    lines.push({ quantity, type: b.type, event, fromBank: true, who: whoFor(user, quantity, forMe, field(`guests.${key}`)) });
+    const guestList = !!b.type.guest_list;
+    if (guestList && !guestNames(field(`guests.${key}`))) return { items, lines, fields: [], error: NAMES_NEEDED };
+    items.push({ kind: 'ticket', rewardType: b.type.key, fromBank: event, quantity, details: ticketsFor(user, guestList, field(`guests.${key}`)) });
+    lines.push({ quantity, type: b.type, event, fromBank: true, who: whoFor(user, guestList, field(`guests.${key}`)) });
   }
   const merch = Number(field('qty.merch') || 0);
   if (merch) {
@@ -2007,7 +2006,7 @@ app.post('/admin/rules/check', async (c) => {
 app.post('/admin/rules/types', async (c) => {
   const body = await c.req.parseBody();
   const key = String(body.key ?? '').trim();
-  const result = saveRewardType(key, String(body.label_en ?? ''), String(body.label_fr ?? ''), String(body.description_en ?? ''), String(body.description_fr ?? ''));
+  const result = saveRewardType(key, String(body.label_en ?? ''), String(body.label_fr ?? ''), String(body.description_en ?? ''), String(body.description_fr ?? ''), body.guest_list === '1');
   if (result !== 'ok') return c.redirect('/admin/rules?error=reward_type#types');
   audit(c, 'admin.reward_type_saved', { by: c.get('user').id, key });
   return c.redirect('/admin/rules?ok=reward_type_saved#types');

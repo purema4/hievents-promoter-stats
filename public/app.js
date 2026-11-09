@@ -411,8 +411,9 @@ if (ruleForm) {
 }
 
 // Payouts & rewards: the rewards shop, by event. "+" adds one of a reward to the cart; each cart line
-// then says exactly what it is and who it is for, and holds the choices: how many, "1 of them is for me",
-// guest names, this event or the bank (or, for banked rewards, which event). The choices are written back
+// then says exactly what it is and who it is for, and holds the choices: how many, the names for a guest
+// list (other rewards are tickets sent to the promoter), this event or the bank (or, for banked rewards,
+// which event). The choices are written back
 // to the fields in the reward's row, which is what the form sends. Without scripts, the "How many" boxes
 // in the rows do the job.
 const shop = document.querySelector('form[data-shop]');
@@ -448,16 +449,12 @@ if (shop) {
   const PLUS = 'M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z';
   const MINUS = 'M5 11h14v2H5z';
   const names = (value) => value.split(/[,;]+/).map((g) => g.trim()).filter(Boolean);
-  // "1 for you + 1 for a guest (Ana)"
-  const whoOf = (row, n) => {
-    const me = row.querySelector('[data-me-field]');
-    const forMe = me && me.value === '1' ? 1 : 0;
-    const others = n - forMe;
-    const guests = names(row.querySelector('[data-guests-field]')?.value ?? '');
-    const parts = [];
-    if (forMe) parts.push('1 for you');
-    if (others > 0) parts.push(`${others} for ${others === 1 ? 'a guest' : 'guests'}${guests.length ? ` (${guests.join(', ')})` : ''}`);
-    return parts.join(' + ');
+  // "Sent to you (Maya Tremblay)", or for a guest list "On the guest list: Ana, Ben"
+  const whoOf = (row) => {
+    const field = row.querySelector('[data-guests-field]');
+    if (!field) return `Sent to you (${promoter})`;
+    const guests = names(field.value);
+    return guests.length ? `On the guest list: ${guests.join(', ')}` : 'Add the names for the guest list';
   };
   const qtyOf = (row) => Number(row.querySelector('[data-qty]').value);
   const setQty = (row, n) => {
@@ -515,25 +512,16 @@ if (shop) {
         line.append(el('label', { class: 'cart-field' }, 'Use them for', pick));
       }
       if (!banking) {
-        const me = row.querySelector('[data-me-field]');
-        const box = el('input', { type: 'checkbox' });
-        box.checked = me.value === '1';
-        box.addEventListener('change', () => {
-          me.value = box.checked ? '1' : '';
-          refresh();
-        });
-        const strong = el('strong', { text: '1 of them is for me' });
-        line.append(el('label', { class: 'check for-me' }, box, el('span', {}, strong, ` (${promoter})`)));
-        if (n - (me.value === '1' ? 1 : 0) > 0) {
-          const guestsField = row.querySelector('[data-guests-field]');
-          const guests = el('input', { maxlength: '100', placeholder: 'Ana, Ben', value: guestsField.value });
+        const guestsField = row.querySelector('[data-guests-field]');
+        const who = el('p', { class: 'who', text: whoOf(row) });
+        if (guestsField) {
+          const guests = el('input', { maxlength: '200', placeholder: n > 1 ? 'Ana, Ben' : 'Ana Roy', value: guestsField.value, required: '' });
           guests.addEventListener('input', () => {
             guestsField.value = guests.value;
-            who.textContent = whoOf(row, qtyOf(row));
+            who.textContent = whoOf(row);
           });
-          line.append(el('label', { class: 'cart-field' }, 'Guest names (optional)', guests));
+          line.append(el('label', { class: 'cart-field' }, n > 1 ? `Names on the guest list (${n})` : 'Name on the guest list', guests));
         }
-        const who = el('p', { class: 'who', text: whoOf(row, n) });
         line.append(who);
       } else {
         line.append(el('p', { class: 'who', text: `${n} into your bank, for a later event` }));
@@ -612,6 +600,9 @@ if (shop) {
 
   for (const row of rows) {
     row.querySelector('[data-qty]').hidden = true;
+    // The cart asks for guest list names; the box in the row is for when scripts do not run.
+    const guestsField = row.querySelector('[data-guests-field]');
+    if (guestsField) guestsField.hidden = true;
     const add = row.querySelector('[data-add]');
     add.hidden = false;
     add.addEventListener('click', () => {

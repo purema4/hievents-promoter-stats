@@ -243,25 +243,32 @@ export function removeTemplate(id: number) {
 // What one is, in a sentence, shown to promoters so they know exactly what they ask for.
 addColumn('reward_types', 'description_en', 'TEXT');
 addColumn('reward_types', 'description_fr', 'TEXT');
+// A guest list: names at the door instead of tickets. Only those ask promoters for names; other rewards
+// are tickets sent to the promoter. Types made before this flag get it when their key says so.
+{
+  const had = db.query<{ name: string }, []>('PRAGMA table_info(reward_types)').all().some((c) => c.name === 'guest_list');
+  addColumn('reward_types', 'guest_list', 'INTEGER NOT NULL DEFAULT 0');
+  if (!had) db.query("UPDATE reward_types SET guest_list = 1 WHERE key LIKE 'gl\\_%' ESCAPE '\\' OR key LIKE '%\\_list' ESCAPE '\\' OR key LIKE '%guest%'").run();
+}
 // The first label of plain free tickets said nothing of what they are: given a clear one, unless changed.
 db.query(
   "UPDATE reward_types SET label_en = 'Free ticket', label_fr = 'Billet gratuit', description_en = 'A regular entry ticket to the event, free.', description_fr = 'Un billet d’entrée régulier pour l’événement, gratuit.' WHERE key = 'free_tickets' AND label_en = 'Free tickets' AND description_en IS NULL",
 ).run();
 
-export type RewardType = { key: string; label_en: string; label_fr: string; description_en?: string | null; description_fr?: string | null };
+export type RewardType = { key: string; label_en: string; label_fr: string; description_en?: string | null; description_fr?: string | null; guest_list?: number };
 
 export const REWARD_KEY = /^[a-z][a-z0-9_]{1,39}$/;
 
 export function listRewardTypes(): RewardType[] {
-  return db.query<RewardType, []>('SELECT key, label_en, label_fr, description_en, description_fr FROM reward_types ORDER BY created_at, key').all();
+  return db.query<RewardType, []>('SELECT key, label_en, label_fr, description_en, description_fr, guest_list FROM reward_types ORDER BY created_at, key').all();
 }
 
 export function rewardTypeOf(key: string): RewardType | null {
-  return db.query<RewardType, [string]>('SELECT key, label_en, label_fr, description_en, description_fr FROM reward_types WHERE key = ?').get(key);
+  return db.query<RewardType, [string]>('SELECT key, label_en, label_fr, description_en, description_fr, guest_list FROM reward_types WHERE key = ?').get(key);
 }
 
 /** Adds or renames a reward type. Its key is what rules use and cannot be one of the fixed outputs. */
-export function saveRewardType(key: string, labelEn: string, labelFr: string, descriptionEn = '', descriptionFr = ''): 'ok' | 'invalid' {
+export function saveRewardType(key: string, labelEn: string, labelFr: string, descriptionEn = '', descriptionFr = '', guestList = false): 'ok' | 'invalid' {
   if (!REWARD_KEY.test(key) || FIXED_OUTPUTS.some((o) => o.name === key)) return 'invalid';
   const en = labelEn.trim().slice(0, 40);
   const fr = labelFr.trim().slice(0, 40) || en;
@@ -269,8 +276,8 @@ export function saveRewardType(key: string, labelEn: string, labelFr: string, de
   const dEn = descriptionEn.trim().slice(0, 200) || null;
   const dFr = descriptionFr.trim().slice(0, 200) || dEn;
   db.query(
-    'INSERT INTO reward_types (key, label_en, label_fr, description_en, description_fr) VALUES (?, ?, ?, ?, ?) ON CONFLICT (key) DO UPDATE SET label_en = excluded.label_en, label_fr = excluded.label_fr, description_en = excluded.description_en, description_fr = excluded.description_fr',
-  ).run(key, en, fr, dEn, dFr);
+    'INSERT INTO reward_types (key, label_en, label_fr, description_en, description_fr, guest_list) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (key) DO UPDATE SET label_en = excluded.label_en, label_fr = excluded.label_fr, description_en = excluded.description_en, description_fr = excluded.description_fr, guest_list = excluded.guest_list',
+  ).run(key, en, fr, dEn, dFr, guestList ? 1 : 0);
   return 'ok';
 }
 

@@ -48,13 +48,14 @@ describeIntegration('rewards shop', () => {
     expect(text(page)).toContain('Your cart');
   });
 
-  test('a whole cart in one request: for me and a guest, into the bank, and merch', async () => {
+  test('a whole cart in one request: tickets sent to the promoter, into the bank, and merch', async () => {
+    const page = await maya.client.page('/payouts');
+    // Tickets go to the promoter, who hands them out: no "for me", no guest names.
+    expect(page).not.toContain('name="me.');
+    expect(page).not.toContain('name="guests.1.vip_tickets"');
     const res = await order({
       'qty.1.vip_tickets': '2',
-      'me.1.vip_tickets': '1',
-      'guests.1.vip_tickets': 'Ana',
       'qty.1.free_tickets': '1',
-      'me.1.free_tickets': '1',
       'for.1.free_tickets': 'bank',
       'qty.merch': '1',
       'merch.details': 'Hoodie, size M',
@@ -67,7 +68,7 @@ describeIntegration('rewards shop', () => {
       .all();
     expect(rows).toEqual([
       { kind: 'ticket', reward_type: null, event_title: null, source_event_title: 'Warehouse Night', quantity: 1, details: maya.name },
-      { kind: 'ticket', reward_type: 'vip_tickets', event_title: 'Warehouse Night', source_event_title: 'Warehouse Night', quantity: 2, details: `${maya.name} + 1 guest: Ana` },
+      { kind: 'ticket', reward_type: 'vip_tickets', event_title: 'Warehouse Night', source_event_title: 'Warehouse Night', quantity: 2, details: maya.name },
       { kind: 'merch', reward_type: null, event_title: null, source_event_title: null, quantity: 1, details: 'Hoodie, size M' },
     ]);
     // One email to the admins for the whole cart.
@@ -114,7 +115,7 @@ describeIntegration('rewards shop', () => {
     expect((await order({ 'qty.bank.free_tickets': '2', 'event.bank.free_tickets': '2' })).status).toBe(400);
     expect(requests()).toBe(before);
     // Used for Winter Opening: still a free ticket.
-    expect(location(await order({ 'qty.bank.free_tickets': '1', 'event.bank.free_tickets': '2', 'me.bank.free_tickets': '1' }))).toBe('/payouts?ok=reward_ordered#rewards');
+    expect(location(await order({ 'qty.bank.free_tickets': '1', 'event.bank.free_tickets': '2' }))).toBe('/payouts?ok=reward_ordered#rewards');
     expect(text(await admin.page('/admin/payouts'))).toContain('1 free ticket for Winter Opening, from the bank');
     expect(await maya.client.page('/payouts')).not.toContain('name="qty.bank.free_tickets"');
     // An event that is over, or no event at all, cannot take banked rewards.
@@ -145,13 +146,12 @@ describeIntegration('rewards shop', () => {
     expect(card).toContain('VIP ticket');
     expect(card).toContain('Skip the line and get into the VIP area.');
     expect(card).toMatch(/2 available/);
-    // "+" says exactly what it adds; one is for the promoter unless they untick it in the cart.
+    // "+" says exactly what it adds; the tickets are sent to the promoter.
     expect(shop).toContain('aria-label="Add one VIP ticket for Warehouse Night"');
-    expect(shop).toContain('<input type="hidden" name="me.1.vip_tickets" value="1"');
     expect(shop).toContain(`data-promoter="${maya.name}"`);
     expect(shop).toContain('formaction="/rewards/checkout"');
 
-    const cart = { 'qty.1.vip_tickets': '2', 'me.1.vip_tickets': '1', 'guests.1.vip_tickets': 'Ana' };
+    const cart = { 'qty.1.vip_tickets': '2' };
     const res = await maya.client.post('/rewards/checkout', cart);
     expect(res.status).toBe(200);
     const page = await res.text();
@@ -160,7 +160,7 @@ describeIntegration('rewards shop', () => {
     expect(words).toContain('2 × VIP ticket');
     expect(words).toContain('Skip the line and get into the VIP area.');
     expect(words).toContain('Warehouse Night');
-    expect(words).toContain(`1 for you (${maya.name}) + 1 for a guest (Ana)`);
+    expect(words).toContain(`Sent to you (${maya.name})`);
     expect(page).toContain('<dialog class="notice-modal"');
     expect(words).toContain('Tickets are under your name at the door: bring ID.');
     expect(page).toContain('<input type="hidden" name="qty.1.vip_tickets" value="2"/>');
@@ -176,6 +176,26 @@ describeIntegration('rewards shop', () => {
     expect(requests()).toBe(before + 1);
     expect(text(await admin.page('/admin/payouts'))).toContain('2 VIP ticket for Warehouse Night');
     await admin.post('/admin/banners/checkout', { message: '' });
+  });
+
+  test('a guest list reward asks for the names; the others do not', async () => {
+    expect(location(await admin.post('/admin/rules/types', { key: 'ga_list', label_en: 'GA list', label_fr: 'Liste GA', guest_list: '1' }))).toContain('ok=reward_type_saved');
+    expect(text(await admin.page('/admin/rules'))).toContain('Yes: asks for names');
+    await admin.post(`/admin/promoters/${maya.id}/adjust`, { kind: 'free_tickets', event_id: '1', reward_type: 'ga_list', quantity: '2', label: 'Crew' });
+    const shop = await maya.client.page('/payouts');
+    expect(shop).toContain('name="guests.1.ga_list"');
+    // Without names: refused, at checkout and on sending.
+    const before = requests();
+    for (const path of ['/rewards/checkout', '/rewards/order']) {
+      const res = await maya.client.post(path, { 'qty.1.ga_list': '1', ack: '1' });
+      expect(res.status).toBe(400);
+      expect(text(await res.text())).toContain('Add the names for the guest list.');
+    }
+    expect(requests()).toBe(before);
+    const checkout = text(await (await maya.client.post('/rewards/checkout', { 'qty.1.ga_list': '1', 'guests.1.ga_list': 'Ana Roy' })).text());
+    expect(checkout).toContain('On the guest list: Ana Roy');
+    expect(location(await order({ 'qty.1.ga_list': '1', 'guests.1.ga_list': 'Ana Roy' }))).toBe('/payouts?ok=reward_ordered#rewards');
+    expect(db.query<{ details: string }, []>('SELECT details FROM reward_requests ORDER BY id DESC LIMIT 1').get()!.details).toBe('Guest list: Ana Roy');
   });
 
   test('checkout refuses a cart that would not go through', async () => {

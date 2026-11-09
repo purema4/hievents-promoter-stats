@@ -805,8 +805,9 @@ const typeWhat = (t: { description_en?: string | null }) => t.description_en ?? 
 
 /**
  * One reward in an event's table: what it is on the left, how many are available, and "+" on the right.
- * The fields the cart sets (how many, for me, guests, this event or the bank) live here, so the form works
- * without scripts too: then "How many" is a box instead of "+".
+ * The fields the cart sets (how many, guest list names, this event or the bank) live here, so the form
+ * works without scripts too: then "How many" is a box instead of "+". Tickets are sent to the promoter;
+ * only a guest list reward asks for names.
  */
 function ShopRow(props: {
   field: string;
@@ -816,6 +817,7 @@ function ShopRow(props: {
   kind: 'event' | 'bank' | 'merch';
   available: number;
   note?: string; // like "2 more sales for the next one"
+  guestList?: boolean;
   children?: unknown;
 }) {
   const ready = props.available > 0;
@@ -827,6 +829,7 @@ function ShopRow(props: {
       data-type={props.name}
       data-where={props.where}
       data-kind={props.kind}
+      data-guest-list={props.guestList ? '' : undefined}
     >
       <td>
         <div class="shop-type">{props.name}</div>
@@ -872,11 +875,8 @@ function ShopRow(props: {
                 </svg>
               </button>
             </div>
-            {props.kind !== 'merch' && (
-              <>
-                <input type="hidden" name={`me.${props.field}`} value="1" data-me-field />
-                <input type="hidden" name={`guests.${props.field}`} value="" data-guests-field />
-              </>
+            {props.guestList && (
+              <input name={`guests.${props.field}`} value="" maxlength={200} placeholder="Names on the guest list" aria-label={`Names on the guest list: ${props.name}`} data-guests-field />
             )}
             {props.children as never}
           </>
@@ -895,7 +895,7 @@ function ShopRow(props: {
 /**
  * Payouts & rewards: a shop, by event. Each event lists its rewards (free tickets, VIP, GA list…) with
  * how many are available and "+" to add one to the cart; the bank and merch come the same way. The cart
- * holds the rest: how many, "1 of them is for me", guests, and this event or the bank.
+ * holds the rest: how many, the names for a guest list, and this event or the bank.
  */
 function RewardsShop(props: { rewards: Rewards; ticketEvents: TicketEvent[]; promoter: string }) {
   const { tickets, merch, bank } = props.rewards;
@@ -928,6 +928,7 @@ function RewardsShop(props: { rewards: Rewards; ticketEvents: TicketEvent[]; pro
                       what={typeWhat(b.type)}
                       where="your bank"
                       kind="bank"
+                      guestList={!!b.type.guest_list}
                       available={props.ticketEvents.length > 0 ? b.balance : 0}
                       note={b.pending > 0 ? `${b.pending} more waiting for the team to bank` : props.ticketEvents.length === 0 ? 'No upcoming event to use them for yet' : undefined}
                     >
@@ -962,6 +963,7 @@ function RewardsShop(props: { rewards: Rewards; ticketEvents: TicketEvent[]; pro
                       what={typeWhat(t.type)}
                       where={t.event.title}
                       kind="event"
+                      guestList={!!t.type.guest_list}
                       available={t.available}
                       note={t.available === 0 && t.used > 0 ? `All ${t.used} requested` : t.nextIn !== null ? `${plural(t.nextIn, 'more sale')} for the next one` : undefined}
                     >
