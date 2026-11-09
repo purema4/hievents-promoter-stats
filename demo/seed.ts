@@ -10,7 +10,7 @@ import { config } from '../src/config';
 import { createInvite } from '../src/invites';
 import { defaultTemplate, ensureAliases, saveLinkSettings } from '../src/links';
 import { createUser, db, findUser, findUserByEmail, markAppInstalled, markOnboarded, normalizeCodes, setCodes, updateProfile, type User } from '../src/local-db';
-import { setEventBanner, setGeneralBanner } from '../src/banners';
+import { setCheckoutNotice, setEventBanner, setGeneralBanner } from '../src/banners';
 import { setMediaDrive } from '../src/media-drives';
 import { checkAllMilestones } from '../src/milestones';
 import { notify } from '../src/notifications';
@@ -66,6 +66,9 @@ export const personas = [
 ];
 
 // Past events first; `share` splits a promoter's tickets across the events that have sales.
+// Hi.Events records the owner of an image by class name, backslashes included: sent as a parameter so they stay.
+const EVENT_ENTITY = String.raw`HiEvents\DomainObjects\EventDomainObject`;
+
 const events = [
   { title: 'Neon Harvest', days: -75, price: 25, share: 0.2, cover: null },
   { title: 'Rooftop Sessions', days: -40, price: 30, share: 0.2, cover: 'rooftop.png' },
@@ -121,7 +124,7 @@ async function addEvents() {
     }
     if (event.cover) {
       await writer`INSERT INTO images (entity_id, entity_type, type, path)
-        VALUES (${id}, 'HiEvents\DomainObjects\EventDomainObject', 'EVENT_COVER', ${`event_cover/${event.cover}`})`;
+        VALUES (${id}, ${EVENT_ENTITY}, 'EVENT_COVER', ${`event_cover/${event.cover}`})`;
     }
   }
   return ids;
@@ -253,6 +256,7 @@ async function addHistory(adminId: number, ids: Map<string, number>, eventIds: n
   setEventRule(ids.get('Noah')!, eventIds[3]!, { kind: 'percent', value: 15 });
   setMediaDrive(eventIds[3]!, 'https://drive.example.com/warehouse-night', adminId);
   setMediaDrive(eventIds[4]!, 'https://drive.example.com/winter-opening', adminId);
+  setCheckoutNotice('Free and VIP tickets are sent to you by email: hand them out to your guests. GA list spots go under each guest’s name, so check the spelling.');
   setGeneralBanner('Payouts for last month go out this Friday. Send your request before Thursday at noon.');
   setEventBanner(eventIds[3]!, 'Early bird tickets end Sunday. Push your link this week!', adminId);
   setEventBanner(eventIds[4]!, 'New venue: doors open at 9 pm at the Old Port.', adminId);
@@ -274,9 +278,8 @@ async function addHistory(adminId: number, ids: Map<string, number>, eventIds: n
   const kai = await promoterData(person('Kai'));
   const [first, second] = kai.rewards.tickets.filter((t) => t.available > 0);
   if (first) requestReward(person('Kai'), kai.rewards, { kind: 'ticket', eventId: first.event.id, quantity: 1, details: '' });
-  // A roll over for the admins to accept or decline.
-  const later = kai.ticketEvents.find((e) => e.id !== first?.event.id && e.id !== second?.event.id);
-  if (second && later) requestReward(person('Kai'), kai.rewards, { kind: 'ticket', eventId: second.event.id, useFor: later, quantity: 1, details: '' });
+  // Into the bank, for the admins to accept or decline.
+  if (second) requestReward(person('Kai'), kai.rewards, { kind: 'ticket', eventId: second.event.id, toBank: true, quantity: 1, details: '' });
 
   createInvite(admin, { label: 'Spring street team', teamLeadId: null, maxUses: 20, days: 30 });
   createInvite(person('Maya'), { label: 'Maya’s crew', teamLeadId: ids.get('Maya')!, maxUses: null, days: null });
@@ -287,8 +290,9 @@ async function addHistory(adminId: number, ids: Map<string, number>, eventIds: n
 
 // Ash's deal on Midnight Market, VIP and GA list rewards, and a template to copy.
 function addRules(adminId: number, eventIds: number[]) {
-  saveRewardType('vip_tickets', 'VIP', 'VIP');
-  saveRewardType('ga_list', 'GA list', 'Liste GA');
+  saveRewardType('free_tickets', 'Free GA ticket', 'Billet GA gratuit', 'A regular general admission ticket, free.', 'Un billet d’admission générale régulier, gratuit.');
+  saveRewardType('vip_tickets', 'VIP ticket', 'Billet VIP', 'Skip the line and get into the VIP area.', 'Passe devant la file et accès à la zone VIP.');
+  saveRewardType('ga_list', 'GA guest list spot', 'Place liste GA', 'A name on the general admission guest list at the door: no ticket needed.', 'Un nom sur la liste d’invités GA à la porte : pas besoin de billet.', true);
   const ash = ['# 2 VIP from the first ticket, a GA list spot every 5, $5 a ticket', 'commission  = tickets_sold * 5.00', 'vip_tickets = tickets_sold >= 1 ? 2 : 0', 'ga_list     = floor(tickets_sold / 5)', 'free_tickets = 0'].join('\n');
   saveRuleVersion('event', { eventId: eventIds[5]! }, ash, adminId);
   saveTemplate('Big show', ash, adminId);

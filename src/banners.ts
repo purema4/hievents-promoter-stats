@@ -34,6 +34,21 @@ export function setGeneralBanner(message: string) {
   db.query('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value').run(generalKey, message);
 }
 
+const checkoutKey = 'rewardCheckoutNotice';
+
+/** Shown in a pop-up before a promoter confirms a reward request, to read and accept; '' when none. */
+export function checkoutNotice(): string {
+  return db.query<{ value: string }, [string]>('SELECT value FROM settings WHERE key = ?').get(checkoutKey)?.value ?? '';
+}
+
+export function setCheckoutNotice(message: string) {
+  if (!message) {
+    db.query('DELETE FROM settings WHERE key = ?').run(checkoutKey);
+    return;
+  }
+  db.query('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value').run(checkoutKey, message);
+}
+
 /** Every event's notice, by event id. */
 export function allEventBanners(): Map<number, string> {
   const rows = db.query<{ event_id: number; message: string }, []>('SELECT event_id, message FROM event_banners').all();

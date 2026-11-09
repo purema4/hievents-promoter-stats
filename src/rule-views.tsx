@@ -37,6 +37,8 @@ function titleOf(t: RuleTargetInfo): string {
       return `${t.promoterName} on ${t.eventTitle}`;
     case 'template':
       return t.templateName ? `Template: ${t.templateName}` : 'New template';
+    case 'team':
+      return `${t.promoterName}’s team rule`;
   }
 }
 
@@ -52,6 +54,8 @@ function whatItIs(t: RuleTargetInfo): string {
       return `Lines for ${t.promoterName} on this event only: they win over everything else.`;
     case 'template':
       return 'A rule to copy into an event’s rule. Changing a template changes no event.';
+    case 'team':
+      return `Added on top of ${t.promoterName}’s own rule, on every event their team sells: their commission and this together. Write their team commission here, like commission = team_full_price_sales * 0.05 (team_full_price_sales is what their promoters sold, never their own sales). Its commission shows as team commission.`;
   }
 }
 
@@ -214,8 +218,8 @@ export function AdminRuleEditPage(props: {
         </form>
       )}
       {props.canWrite && (
-        <details class="card write-card" open={!!props.description || undefined}>
-          <summary>Write it for me</summary>
+        <details class="card write-card" open>
+          <summary>Ask Claude to write it</summary>
           <form class="stack" method="post" action={`/admin/rules/write?${href.split('?')[1]}`}>
             <label>
               Describe the deal, in French or English
@@ -224,7 +228,7 @@ export function AdminRuleEditPage(props: {
               </textarea>
             </label>
             <button class="secondary" type="submit">
-              Write the rule
+              Ask Claude
             </button>
             <p class="muted">Claude writes it into the box below. It is checked like a rule you type, and nothing is saved until you save.</p>
           </form>
@@ -307,6 +311,8 @@ export function AdminRulesPage(props: {
   rewardTypes: RewardType[];
   events: { id: number; title: string; start: Date | null; timezone: string | null; promoters: User[]; hasRule: boolean; overrides: number }[];
   promotersWithRules: User[];
+  teamLeads: { lead: User; hasRule: boolean }[];
+  canAsk?: boolean;
   ok?: string;
   error?: string;
 }) {
@@ -318,6 +324,27 @@ export function AdminRulesPage(props: {
         line wins: a promoter on an event, then the event, then the promoter, then the default rule.
       </p>
       <Flash error={props.error} ok={props.ok} />
+      {props.canAsk && (
+        <form class="card stack-card ask-card" method="post" action="/admin/rules/write">
+          <h2 class="first">Ask Claude</h2>
+          <p class="muted">Describe a deal in French or English. Claude writes the rule; you check it and save it.</p>
+          <label>
+            For
+            <select name="rule">
+              {props.events.map((e) => (
+                <option value={`event:${e.id}`}>{e.title}</option>
+              ))}
+              <option value="default">The default rule (everyone, every event)</option>
+              <option value="template">A new template</option>
+            </select>
+          </label>
+          <label>
+            The deal
+            <textarea name="description" rows={3} maxlength={2000} required placeholder="1 billet vendu = 2 VIP (lui et son +1), puis 1 place liste GA par 5 billets, 5 $ par billet" />
+          </label>
+          <button type="submit">Ask Claude</button>
+        </form>
+      )}
 
       <div class="card rate-card">
         <h2 class="first">Default rule</h2>
@@ -368,6 +395,24 @@ export function AdminRulesPage(props: {
         </ul>
       )}
 
+      <h2>Team leads</h2>
+      <p class="muted">
+        A team lead’s team rule is added on top of their own rule: their own commission, plus what the team rule gives on
+        their team’s sales.
+      </p>
+      {props.teamLeads.length === 0 ? (
+        <p class="muted">No team leads yet. Make one on Teams.</p>
+      ) : (
+        <ul>
+          {props.teamLeads.map((l) => (
+            <li>
+              <a href={ruleEditHref({ scope: 'team', userId: l.lead.id })}>{l.lead.name}</a>
+              <span class="muted"> · {l.hasRule ? 'team rule set' : 'no team rule yet'}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+
       <h2>Templates</h2>
       <p class="muted">Named rules to copy into an event’s rule, like “Big show” or “Free event”.</p>
       <ul>
@@ -384,15 +429,17 @@ export function AdminRulesPage(props: {
       <h2 id="types">Reward types</h2>
       <p class="muted">
         What a rule can give besides commission, bonus and merch. The key is the name a rule uses (like vip_tickets);
-        promoters see the label.
+        promoters see the name, like "VIP ticket" or "GA list spot", and what it is. Make both clear: it is how promoters
+        know exactly what they ask for. To change one, save it again with the same key.
       </p>
       <div class="card table-wrap">
         <table>
           <thead>
             <tr>
               <th>Key</th>
-              <th>Label</th>
-              <th>En français</th>
+              <th>Name</th>
+              <th>What it is (promoters see it)</th>
+              <th>Guest list</th>
             </tr>
           </thead>
           <tbody>
@@ -401,8 +448,15 @@ export function AdminRulesPage(props: {
                 <td>
                   <code>{t.key}</code>
                 </td>
-                <td>{t.label_en}</td>
-                <td>{t.label_fr}</td>
+                <td>
+                  {t.label_en}
+                  <div class="muted">{t.label_fr}</div>
+                </td>
+                <td>
+                  {t.description_en ?? <span class="muted">Not said yet</span>}
+                  {t.description_fr && t.description_fr !== t.description_en && <div class="muted">{t.description_fr}</div>}
+                </td>
+                <td>{t.guest_list ? 'Yes: asks for names' : <span class="muted">No: tickets sent to the promoter</span>}</td>
               </tr>
             ))}
           </tbody>
@@ -421,8 +475,23 @@ export function AdminRulesPage(props: {
           </label>
         </div>
         <label>
-          En français
+          Name in French
           <input name="label_fr" maxlength={40} placeholder="VIP" />
+        </label>
+        <label>
+          What it is, in one sentence (shown on the reward and at checkout)
+          <input name="description_en" maxlength={200} placeholder="Skip the line and get into the VIP area." />
+        </label>
+        <label>
+          Same, in French
+          <input name="description_fr" maxlength={200} placeholder="Passe devant la file et accès à la zone VIP." />
+        </label>
+        <label class="check">
+          <input type="checkbox" name="guest_list" value="1" />
+          <span>
+            <strong>Guest list</strong>: names at the door instead of tickets. Promoters are asked for the names. Otherwise
+            the tickets are sent to the promoter, who hands them out.
+          </span>
         </label>
         <button type="submit">Save</button>
       </form>

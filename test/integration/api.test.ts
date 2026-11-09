@@ -305,7 +305,11 @@ describeIntegration('API, MCP and connected apps', () => {
     });
   });
   describe('OWASP API Security Top 10', () => {
-    const sqlite = () => new Database(join(server.dataDir, 'promoters.sqlite'));
+    const sqlite = () => {
+      const db = new Database(join(server.dataDir, 'promoters.sqlite'));
+      db.exec('PRAGMA busy_timeout = 5000'); // the server writes too
+      return db;
+    };
 
     test('API1: a team lead reaches their own promoters only, and never their payouts', async () => {
       const lead = await newPromoter(server, admin, { name: `Lead ${uid()}`, codes: 'NOVA' });

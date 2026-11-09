@@ -11,9 +11,9 @@ import { allEventBanners } from './banners';
 import { allMediaDrives } from './media-drives';
 import { formatMoney, totalsByCurrency } from './money';
 import { notify } from './notifications';
-import { balances, settlePayout, type PayoutRequest } from './payouts';
+import { balances, settlePayout, type PayoutRequest, withTeamRule } from './payouts';
 import { summarizeEvents } from './promoter-views';
-import { describeReward, rewardsFor, settleReward, type RewardRequest } from './rewards';
+import { describeReward, isDeposit, rewardsFor, settleReward, type RewardRequest } from './rewards';
 import { hadTeam, teamCommission } from './teams';
 
 /*
@@ -51,7 +51,7 @@ export async function promoterData(promoter: User) {
     stale: percent.stale,
     rows,
     team,
-    balances: balances(promoter.id, totalsByCurrency(rows, percent), team),
+    balances: balances(promoter.id, totalsByCurrency(rows, percent), withTeamRule(team, percent.team)),
     rewards: rewardsFor(promoter.id, summarizeEvents(rows, percent), percent),
     ticketEvents,
     media: allMediaDrives(),
@@ -162,7 +162,13 @@ export function finishReward(c: Context, admin: User, reward: RewardRequest, sta
   const what = describeReward(reward);
   if (reward.user_id) {
     notify(reward.user_id, {
-      title: status === 'fulfilled' ? 'Reward on its way' : 'Reward request declined',
+      title: isDeposit(reward)
+        ? status === 'fulfilled'
+          ? 'Rewards in your bank'
+          : 'Not put in your bank'
+        : status === 'fulfilled'
+          ? 'Reward on its way'
+          : 'Reward request declined',
       body: `${what}${adminNote.trim() ? `: ${adminNote.trim()}` : ''}`,
       link: '/payouts#rewards',
     });

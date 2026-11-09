@@ -59,6 +59,9 @@ export function parseRule(text: string): { lines: RuleLine[]; problems: RuleProb
 const variables = RULE_VARIABLES.map((v) => ({ name: v.name, type: v.type }));
 
 async function call<T>(path: string, body: unknown): Promise<T> {
+  // Just failed: answer at once instead of waiting seconds again on every call of every page (a missing
+  // engine costs 5 s of DNS each time). The health check, every minute, tells when it is back.
+  if (lastFailure && Date.now() - lastFailure < RETRY_AFTER_MS) throw new RulesEngineUnavailable(new Error('The rules engine failed less than 30 s ago'));
   let res: Response;
   try {
     res = await fetch(`${config.rulesEngineUrl}${path}`, {
@@ -83,8 +86,11 @@ async function call<T>(path: string, body: unknown): Promise<T> {
 // --- Up or down -----------------------------------------------------------------------------------
 
 let engineDownSince: number | null = null;
+let lastFailure = 0;
+const RETRY_AFTER_MS = 30_000;
 const markDown = () => {
   engineDownSince ??= Date.now();
+  lastFailure = Date.now();
 };
 
 /** True when the engine answered its last call (or a health check now). Payouts wait while it is down. */
@@ -93,6 +99,7 @@ export async function rulesEngineUp(): Promise<boolean> {
     const res = await fetch(`${config.rulesEngineUrl}/health`, { signal: AbortSignal.timeout(2000), redirect: 'error' });
     if (res.ok) {
       engineDownSince = null;
+      lastFailure = 0;
       return true;
     }
   } catch {

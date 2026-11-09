@@ -27,7 +27,7 @@ Add-on products (non-ticket items) are not counted as tickets, but they are incl
 
 - **Dashboard:** their upcoming events first, each on a card with its own small dashboard: tickets sold, commission, tickets in the last 7 days and a chart of the last 30. Below that, their totals (commission earned, what is available to request, full-price sales and tickets), then their past events. Each event opens to its own page with the full tickets-per-day chart (7 / 30 / 90 days / all time).
 - **Event page:** the same numbers for one event, its own chart, a breakdown per code when they have several, and previous / next links to move between events.
-- **Payouts:** their balance (earned − paid − requested), a form to request a payout with how they want to be paid, and the history of requests. Below it, the **rewards shop**: a card for every reward they can ask for (free tickets, VIP, GA list… per upcoming event, and merch), with how many are ready and how many more sales the next one needs. They pick how many (ticked by default: one is for them, the rest for guests, whose names they can add), can roll tickets over to another upcoming event, add them to the cart and send the whole cart as one request. Every item of the cart is requested, or none is; admins get one email for it and see each item under **Requests**. When money or rewards are waiting, the dashboard shows the amount under the events with big **Request my payout** / **Claim rewards** buttons, and the menu always has a **Request payout** button.
+- **Payouts:** their balance (earned − paid − requested), a form to request a payout with how they want to be paid, and the history of requests. Below it, the **rewards shop**, by event: each upcoming event lists its rewards in a table (the kind of reward and what it is, how many are available, and how many more sales the next one needs) with a **+** button on the right to add one to the cart; their bank and merch come the same way. On phones the cart slides up from the bottom of the screen from a **View cart** bar. In the cart, each line says what it is and who it is for, with − / + , **1 of them is for me** (ticked by default), guest names, and **Use them for**: that event or their **bank**. **Review my request** opens a checkout that spells out each line (the kind of reward and what it is, the event and its date, and who each one is for: "1 for you (Maya) + 1 for a guest (Ana)"), and the note admins write on **Banners → Before a reward request** in a pop-up the promoter must accept with **I understand**; nothing is sent before **Confirm**. Give every reward type a clear name and a sentence saying what it is (Rules → Reward types): promoters see both on the shop and at checkout. Every item of the cart is requested, or none is; admins get one email for it and see each item under **Requests**. **The bank:** asking to bank rewards is a request admins accept or decline (declined, they go back to their event). Banked rewards keep their type (2 VIP stay 2 VIP), are not lost when the event is over, and show at the top of the shop, to be asked for any upcoming event like the rest. When money or rewards are waiting, the dashboard shows the amount under the events with big **Request my payout** / **Claim rewards** buttons, and the menu always has a **Request payout** button.
 
 Admins see any promoter's dashboard exactly as they do from the promoter's page (**Open … dashboard**).
 
@@ -119,11 +119,12 @@ ga_list     = floor(tickets_sold / 5)
 | 20 | $100 | 2 | 4 |
 
 - **The language** is [CEL](https://cel.dev) (Google's Common Expression Language): arithmetic, comparisons, `a ? b : c`, `&&`, `||`, plus `floor()`, `ceil()`, `round()`, `min()` and `max()`. Numbers like `5` and `5.0` mean the same.
-- **What a rule reads:** the promoter's sales on the event (`tickets_sold`, `tickets_awaiting`, `orders`, `full_price_sales`, `paid_by_customers`, `codes_used`, `outside_tickets`, `outside_sales`), the whole event (`event_tickets_sold`, `event_promoters`, `days_before_event`, `event_dates`) and the promoter (`lifetime_tickets`, `events_promoted`, `level`, `is_team_lead`, `team_size`, `team_tickets_sold`). The editor lists each one with what it means (`src/rule-variables.ts` is the one list).
+- **What a rule reads:** the promoter's sales on the event (`tickets_sold`, `tickets_awaiting`, `orders`, `full_price_sales`, `paid_by_customers`, `codes_used`, `outside_tickets`, `outside_sales`), the whole event (`event_tickets_sold`, `event_promoters`, `days_before_event`, `event_dates`) and the promoter (`lifetime_tickets`, `events_promoted`, `level`, `is_team_lead`, `team_size`, `team_tickets_sold`, and `team_full_price_sales`: what the team lead's promoters sold at full price since each joined, not the team lead's own sales, like team commission). The editor lists each one with what it means (`src/rule-variables.ts` is the one list).
 - **What a rule gives:** `commission` and `bonus` (dollars; the bonus is counted apart from the commission), `merch` (on top of the merch track of Levels & rewards), and any **reward type** added on the Rules page, like `vip_tickets` (VIP) or `ga_list` (GA list). `free_tickets` is the plain free tickets of before. A name that is none of these, or a line that gives less than 0 on made-up sales, is refused when saving, with its line number.
+- **Team leads** can also have a **team rule** (Rules → Team leads, or their promoter page), added on top of their own rule on every event their team sells, like `commission = team_full_price_sales * 0.05`: their own commission, plus this. Its commission and bonus count as team commission in their balance; rewards it gives land on their own events. The team commission percentage on Teams still applies too.
 - **Which rule applies, line by line:** a promoter on one event, then the event, then the promoter, then the default rule. A more specific rule only replaces the lines it gives, so an event that gives VIP still gives the default free tickets unless it says `free_tickets = 0`.
 - **The editor** checks the rule about a second after the last key: problems by line, the rule in plain English and French (worked out from the rule, not by AI), and a preview with each promoter's real numbers on the event plus made-up sales (1, 5, 12, 20 tickets, and any number typed in "Also try with"). Nothing is saved while the rule has a problem. **Templates** (like "Big show") are copied into an event's rule.
-- **Write it for me:** with `ANTHROPIC_API_KEY` set, the editor has a **Write it for me** box. Describe the deal in French or English ("1 billet vendu = 2 VIP, puis 1 place liste GA par 5 billets, 5 $ par billet") and Claude (Claude Opus 5.5, through the Anthropic API) writes the rule into the box, with a short note. It is checked and previewed like a rule you type, and nothing is saved until you save. Each call costs a few cents; an admin can make 30 an hour. Without the key, the box is not shown.
+- **Ask Claude:** with `ANTHROPIC_API_KEY` set, the Rules page and every rule editor have an **Ask Claude** box. Describe the deal in French or English ("1 billet vendu = 2 VIP, puis 1 place liste GA par 5 billets, 5 $ par billet") and Claude (Claude Opus 5.5, through the Anthropic API) writes the rule into the box, with a short note. It is checked and previewed like a rule you type, and nothing is saved until you save. Each call costs a few cents; an admin can make 30 an hour. Without the key, the box is not shown.
 - **Versions:** every save is a new version; nothing is overwritten. Each payout and reward request keeps the versions it was worked out with.
 - **Rewards** are counted per event and type. Promoters see "2 VIP + 2 GA list ready" on the event card, and how many more sales the next one needs (found by trying the rule with more sales). They request them, or roll them over to another upcoming event, on **Payouts & rewards**; admins see the type under **Requests** and can give or take back each type by hand.
 - **Before rules:** at the first start, `COMMISSION_PERCENT` and the free-ticket track of Levels & rewards became the default rule, each promoter's own rate a promoter rule, and each rate set on Commissions a promoter-on-event rule, with the same results (a test compares them on the seed data). The Commissions page, a promoter's usual rate and the free-ticket track still work: they write those rule lines. Changing `COMMISSION_PERCENT` afterwards does nothing; edit the default rule.
@@ -302,7 +303,7 @@ Every sign-in, failed attempt and admin change is logged as a JSON line; read th
    ```sh
    docker compose up -d --build
    ```
-   Optional: set `ANTHROPIC_API_KEY` to get **Write it for me** on the rule editor (see [Rules](#rules)).
+   Optional: set `ANTHROPIC_API_KEY` to get **Ask Claude** on the rule editor (see [Rules](#rules)).
 4. Put it behind your HTTPS reverse proxy at the `APP_URL` you configured, sign in with `ADMIN_EMAIL` / `ADMIN_PASSWORD`, and add promoters on the Promoters page.
 
 The container must be able to reach the database host. If Hi.Events runs in Docker on the same server, either expose Postgres to the host, or attach this service to the Hi.Events compose network:
@@ -366,6 +367,15 @@ The data is rebuilt on every start, with dates relative to today, and the number
 
 None of it can reach production: everything is in `demo/`, which only `demo/Dockerfile` copies. The production `Dockerfile` copies `src` and `public`, nothing in `src` refers to the demo (`test/unit/demo-isolation.test.ts` checks both), and `demo/server.tsx` wraps the app rather than changing it. Anyone who reaches the demo can become admin, so its ports only listen on this machine, and `demo/guard.ts` refuses to start unless both database URLs point at the `demo-db` container. Do not publish those ports.
 
+### Showing the demo remotely, through ngrok
+
+```sh
+./demo-ngrok.sh up -d --build --wait    # start (stop any other ngrok tunnel first: the free plan allows one)
+./demo-ngrok.sh down                    # stop
+```
+
+The demo is then at your reserved ngrok address (`NGROK_DOMAIN` and `NGROK_AUTHTOKEN` from the Hi.Events dev `.env`, as for `dev-ngrok.sh`). Since anyone who reaches it can become admin, ngrok asks for a password before anything reaches the app: user `demo`, password `DEMO_NGROK_PASSWORD` from `.env`. While it runs, the demo stays at http://127.0.0.1:3100 on this computer too.
+
 ## File storage (S3 and CDN)
 
 Profile photos and the logo are kept in the `promoter-data` volume and served by the app, unless you set up a bucket:
@@ -406,10 +416,10 @@ The code lives in the public repository `purema4/hievents-promoter-stats`. GitHu
 
 ### The image
 
-Every commit on `main` that passes CI is published twice:
+Every commit on `main` that passes CI publishes two images, each twice:
 
-- `ghcr.io/purema4/hievents-promoter-stats:<full commit sha>`, which never changes. Use it to pin a version or roll back.
-- `ghcr.io/purema4/hievents-promoter-stats:latest`
+- the app: `ghcr.io/purema4/hievents-promoter-stats:<full commit sha>`, which never changes (use it to pin a version or roll back), and `:latest`;
+- the rules engine it needs: `ghcr.io/purema4/hievents-promoter-stats-rules:<full commit sha>` and `:latest`. Run both from the same commit.
 
 The package is private (GHCR's default, even for a public repository). To pull it on a server, create a classic personal access token with only the `read:packages` scope, then:
 
@@ -426,7 +436,31 @@ docker run -d --name promoter-stats --restart unless-stopped \
   ghcr.io/purema4/hievents-promoter-stats:latest
 ```
 
-With Compose, replace `build: .` in `docker-compose.yml` with `image: ghcr.io/purema4/hievents-promoter-stats:latest` and run `docker compose pull && docker compose up -d`. To go back to an earlier version, use its `:<sha>` tag instead of `:latest`.
+The app reaches the rules engine at `RULES_ENGINE_URL` (default `http://rules-engine:8080`). Without it, numbers stay at the last ones computed, payouts cannot be approved, and the admin pages say so. In production, run it next to the app with Compose, on a network of their own that nothing else joins:
+
+```yaml
+services:
+  rules-engine:
+    image: ghcr.io/purema4/hievents-promoter-stats-rules:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 256m
+    networks: [rules]
+
+  promoter-stats:
+    image: ghcr.io/purema4/hievents-promoter-stats:${IMAGE_TAG:-latest}
+    # …as before, plus:
+    networks: [rules]      # next to the networks it already has
+    depends_on: [rules-engine]
+
+networks:
+  rules:
+    internal: true         # no way in or out: only the app reaches the engine
+```
+
+Then `docker compose pull && docker compose up -d`. To go back to an earlier version, set `IMAGE_TAG` to its commit sha: both images follow.
 
 ### Settings to make by hand
 

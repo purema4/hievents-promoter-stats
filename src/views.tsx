@@ -20,6 +20,7 @@ import { hiddenByTeam } from './promoter-page';
 import { rateFor } from './commission';
 import { findInvite, inviteState, type InviteLink } from './invites';
 import { BANNER_MAX_LENGTH, generalBanner } from './banners';
+import { jsVersion } from './js-version';
 import type { RewardType } from './rules';
 import { rulesEngineSeemsDown } from './rules-engine';
 import { isTeamLead, teamCommissionPercentFor, type TeamCommission } from './teams';
@@ -29,7 +30,7 @@ import { describeRate, describeRule, formatMoney, formatPercent, type EventRule 
 import { countPendingPayouts, type Balance, type PayoutRequest } from './payouts';
 import { LinkField, PayoutHistory, RewardHistory } from './promoter-views';
 import { countPendingRewards, describeReward, type RewardRequest } from './rewards';
-import { unreadCount, type Notification } from './notifications';
+import { ANNOUNCEMENT_BODY_MAX, ANNOUNCEMENT_TITLE_MAX, unreadCount, type Announcement, type Notification } from './notifications';
 import { definitions, emailTypes, getReplyTo, getTemplate, isCustomized, type EmailType } from './email-templates';
 import type { EmailLogEntry } from './mail';
 import { tokensFor, type ApiToken } from './api-tokens';
@@ -240,9 +241,13 @@ details.alert-box > summary { cursor: pointer; font-weight: 600; padding: 4px 0 
 .bell { position: relative; display: inline-flex; color: var(--text); }
 .bell-count { position: absolute; top: -6px; right: -9px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: var(--danger); color: #fff; font: 700 11px/18px system-ui; text-align: center; }
 .notification-list { display: grid; gap: 8px; }
-a.notification { display: grid; gap: 2px; color: inherit; text-decoration: none; }
+a.notification, div.notification { display: grid; gap: 2px; color: inherit; text-decoration: none; }
 a.notification:hover { border-color: var(--accent); }
 a.notification.unread { border-left: 4px solid var(--accent); }
+.notification-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 16px 0 8px; }
+.notification-head h2 { margin: 0; }
+.audience { display: grid; gap: 10px; }
+.audience .check select { flex: 1; min-width: 0; }
 .push-box { display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; margin-bottom: 20px; }
 .push-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .push-devices { flex-basis: 100%; margin: 0; }
@@ -599,19 +604,92 @@ ${chartCss}
 .rule-history li { font-size: 13px; }
 .rule-pending { color: var(--muted); font-size: 13px; margin: 0; }
 /* Payouts & rewards: the rewards shop */
-.shop { display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr) 280px; align-items: start; margin: 0; }
-/* On phones the cart stays at the bottom of the screen while scrolling the shop. */
+.shop { display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr) 320px; align-items: start; margin: 0; }
+/* On phones the cart is a sheet that slides up from the bottom, opened from a bar that stays at the bottom
+   of the screen (set up by app.js: without scripts the cart simply comes after the events). */
 @media (max-width: 899px) {
   .shop { grid-template-columns: 1fr; }
-  .cart { top: auto; bottom: calc(8px + env(safe-area-inset-bottom)); z-index: 5; box-shadow: 0 -6px 24px rgb(0 0 0 / 0.18); }
+  .shop .cart { position: static; }
+  .shop.sheet .cart { position: fixed; left: 0; right: 0; bottom: 0; top: auto; z-index: 70; max-height: 85vh; overflow-y: auto; border-radius: 16px 16px 0 0; border-bottom: 0; padding-bottom: calc(16px + env(safe-area-inset-bottom)); box-shadow: 0 -12px 40px rgb(0 0 0 / 0.3); transform: translateY(105%); transition: transform 0.25s ease; visibility: hidden; }
+  .shop.sheet .cart.open { transform: none; visibility: visible; }
+  .shop.sheet .cart-close { display: grid; }
+  .shop.sheet .cart-jump:not([hidden]) { display: flex; }
+  .shop.sheet { padding-bottom: 72px; }
 }
-.shop-grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 240px), 1fr)); }
-.shop-item { display: grid; gap: 10px; align-content: start; }
-.shop-item.locked { opacity: 0.7; }
-.shop-item-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
-.shop-count .big { font-size: 24px; font-weight: 650; font-variant-numeric: tabular-nums; }
-.shop-item label { display: grid; gap: 4px; font-size: 14px; }
-.shop-item label.check { display: flex; gap: 8px; align-items: center; }
+@media (prefers-reduced-motion: reduce) { .shop.sheet .cart { transition: none; } }
+.shop-events { display: grid; gap: 16px; align-content: start; }
+.shop-event-card h3 { margin: 0; font-size: 18px; }
+.shop-event-card { overflow: hidden; }
+.shop-event-head { position: relative; overflow: hidden; display: flex; gap: 14px; align-items: center; margin: -16px -16px 8px; padding: 16px; }
+.shop-event-head > :not(.shop-event-backdrop) { position: relative; z-index: 1; }
+.shop-event-head p.muted { margin: 2px 0 0; color: var(--text); opacity: 0.75; }
+.shop-event-backdrop { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; filter: blur(28px) saturate(1.6); transform: scale(1.4); opacity: 0.45; pointer-events: none; }
+.with-cover .shop-event-head { border-bottom: 1px solid var(--border); }
+.shop-event-head .cover-thumb { width: 72px; height: 72px; border-radius: 10px; box-shadow: 0 4px 14px rgb(0 0 0 / 0.25); }
+.shop-event-card > p.muted { margin: 2px 0 10px; }
+.bank-card { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 6%, var(--surface)); }
+table.shop-table { width: 100%; }
+table.shop-table td { vertical-align: middle; padding: 12px 8px; }
+table.shop-table tr:last-child td { border-bottom: 0; }
+table.shop-table tr.locked { opacity: 0.6; }
+/* A reward in the cart: the whole row is tinted, never its cells one by one (they wrap on phones). */
+table.shop-table tr.in-cart { background: color-mix(in srgb, var(--accent) 8%, transparent); }
+table.shop-table tr.in-cart td { background: none; }
+@keyframes cart-pop { 0% { transform: translateY(12px) scale(0.96); } 60% { transform: translateY(-3px) scale(1.02); } 100% { transform: none; } }
+.cart-jump.pop { animation: cart-pop 0.35s ease-out; }
+@media (prefers-reduced-motion: reduce) { .cart-jump.pop { animation: none; } }
+td.shop-avail { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+td.shop-avail .big { font-size: 22px; font-weight: 650; }
+td.shop-add { width: 1%; text-align: right; white-space: nowrap; }
+.stepper:not([hidden]) { display: inline-flex; align-items: stretch; height: 44px; border-radius: 999px; overflow: hidden; background: var(--accent); color: var(--accent-text); box-shadow: 0 2px 8px color-mix(in srgb, var(--accent) 35%, transparent); }
+.stepper button { display: grid; place-items: center; width: 44px; padding: 0; border-radius: 0; background: transparent; color: inherit; }
+.stepper button:hover:not(:disabled) { background: rgb(255 255 255 / 0.14); }
+.stepper button:disabled { opacity: 0.4; cursor: not-allowed; }
+.stepper-n { display: grid; place-items: center; min-width: 40px; padding: 0 6px; font-weight: 700; font-size: 17px; font-variant-numeric: tabular-nums; border-left: 1px solid rgb(255 255 255 / 0.35); border-right: 1px solid rgb(255 255 255 / 0.35); }
+/* Narrow screens: the reward on its own line, then how many are available and the button. */
+@media (max-width: 600px) {
+  table.shop-table tr { display: grid; grid-template-columns: 1fr auto; align-items: center; column-gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--border); border-radius: 10px; }
+  table.shop-table tr:last-child { border-bottom: 0; }
+  table.shop-table td { border-bottom: 0; padding: 4px 8px; }
+  table.shop-table td:first-child { grid-column: 1 / -1; }
+  td.shop-avail { text-align: left; }
+}
+td.shop-avail .of { font-size: 16px; font-weight: 600; color: var(--muted); }
+button.plus[hidden] { display: none; }
+button.plus { display: inline-grid; place-items: center; width: 44px; height: 44px; padding: 0; border-radius: 50%; }
+button.plus svg, button.step svg { display: block; }
+button.plus:disabled { opacity: 0.35; cursor: not-allowed; }
+.cart-jump { display: none; position: fixed; left: 12px; right: 12px; width: calc(100% - 24px); bottom: calc(12px + env(safe-area-inset-bottom)); z-index: 65; justify-content: center; align-items: center; gap: 8px; padding: 14px 16px; border-radius: 12px; background: var(--accent); color: var(--accent-text); font-weight: 700; font-size: 16px; box-shadow: 0 8px 24px rgb(0 0 0 / 0.25); }
+.cart-backdrop { position: fixed; inset: 0; z-index: 68; background: rgb(0 0 0 / 0.5); }
+.cart-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.cart-head h3 { margin: 0; }
+.cart-close { display: none; place-items: center; width: 36px; height: 36px; padding: 0; border-radius: 50%; font-size: 22px; line-height: 1; background: var(--bg); color: var(--text); border: 1px solid var(--border); }
+.cart-line { display: grid; gap: 8px; padding: 10px 0; border-bottom: 1px solid var(--border); }
+.cart-line:last-child { border-bottom: 0; }
+.cart-steps { display: flex; gap: 8px; align-items: center; }
+button.step { display: inline-grid; place-items: center; width: 32px; height: 32px; padding: 0; border-radius: 50%; background: var(--bg); color: var(--text); border: 1px solid var(--border); }
+.cart-n { min-width: 20px; text-align: center; font-weight: 700; font-variant-numeric: tabular-nums; }
+.cart-steps .link { margin-left: auto; }
+.cart-field { display: grid; gap: 4px; font-size: 13px; color: var(--muted); }
+.shop-type { font-size: 20px; font-weight: 700; line-height: 1.2; }
+.shop-what { margin: 0; font-size: 14px; }
+.shop-event { margin: 0; font-size: 14px; }
+.who { margin: 0; font-size: 14px; font-weight: 600; color: var(--accent); }
+.checkout-lines { display: grid; gap: 12px; margin: 16px 0; }
+.checkout-line { display: flex; gap: 16px; align-items: flex-start; }
+.checkout-qty { font-size: 28px; font-weight: 700; font-variant-numeric: tabular-nums; min-width: 56px; }
+.checkout-body { display: grid; gap: 6px; min-width: 0; }
+.checkout-type { font-size: 22px; font-weight: 700; }
+.checkout-facts { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 4px 0 0; font-size: 15px; }
+.checkout-facts dt { color: var(--muted); }
+.checkout-facts dd { margin: 0; }
+.who-strong { font-weight: 700; }
+.checkout-confirm { display: grid; gap: 12px; margin: 16px 0; }
+.checkout-actions { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+dialog.notice-modal { max-width: min(520px, calc(100vw - 32px)); border: 1px solid var(--border); border-radius: 12px; padding: 20px; background: var(--surface); color: var(--text); }
+dialog.notice-modal::backdrop { background: rgb(0 0 0 / 0.55); }
+dialog.notice-modal h2 { margin-top: 0; }
+.notice-text { white-space: pre-line; font-size: 16px; }
 .cart { position: sticky; top: 72px; display: grid; gap: 10px; }
 .cart h3 { margin: 0; }
 .cart-lines { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; font-size: 14px; }
@@ -717,7 +795,7 @@ export function Layout(props: {
         <meta name="theme-color" content={brand.accent} />
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-title" content={brand.name} />
-        <script src="/app.js" defer></script>
+        <script src={`/app.js?v=${jsVersion}`} defer></script>
       </head>
       <body class={props.user ? (props.user.impersonator ? 'with-nav impersonating' : 'with-nav') : undefined}>
         {props.user?.impersonator && <ImpersonationBanner user={props.user} />}
@@ -926,6 +1004,7 @@ function Sidebar(props: { user: User }) {
             <a href="/admin/commissions">Commissions</a>
             <a href="/admin/media">Media drives</a>
             <a href="/admin/banners">Banners</a>
+            <a href="/admin/notifications">Send a notification</a>
             <a href="/admin/rules">Rules</a>
             <a href="/admin/invites">Invite links</a>
             <a href="/admin/pages">Promoter pages</a>
@@ -1855,6 +1934,12 @@ export function PromoterPage(props: {
         <a href={`/admin/rules/edit?scope=promoter&user=${p.id}`}>{p.name}'s rule</a>
         <span class="muted"> · their own commission or rewards on every event, on top of the default rule</span>
       </p>
+      {isTeamLead(p) && (
+        <p>
+          <a href={`/admin/rules/edit?scope=team&user=${p.id}`}>{p.name}'s team rule</a>
+          <span class="muted"> · added on top of their rule, on their team's sales: their team commission</span>
+        </p>
+      )}
       {!p.is_admin && (
         <form class="inline-form" method="post" action={`/admin/promoters/${p.id}/impersonate`}>
           <button class="secondary" type="submit">
@@ -2323,6 +2408,7 @@ export function NotificationsPage(props: {
   ok?: string;
   error?: string;
 }) {
+  const unread = props.notifications.filter((n) => !n.read_at).length;
   return (
     <Layout title="Notifications" user={props.user}>
       <h1>Notifications</h1>
@@ -2352,12 +2438,25 @@ export function NotificationsPage(props: {
             : `Phone notifications are on for ${props.devices === 1 ? '1 device' : `${props.devices} devices`}.`}
         </p>
       </div>
+      {props.notifications.length > 0 && (
+        <div class="notification-head">
+          <h2>{unread > 0 ? `${unread} unread` : 'All read'}</h2>
+          {unread > 0 && (
+            <form class="inline" method="post" action="/notifications/read">
+              <button class="secondary" type="submit">
+                Mark all as read
+              </button>
+            </form>
+          )}
+        </div>
+      )}
       {props.notifications.length === 0 ? (
         <p class="muted">Nothing yet. Payouts, rewards and milestones will show up here.</p>
       ) : (
         <div class="notification-list">
           {props.notifications.map((n) => (
-            <a class={`card notification${n.read_at ? '' : ' unread'}`} href={n.link ?? '/'}>
+            // Through /notifications/<id>: marked as read on the way.
+            <a class={`card notification${n.read_at ? '' : ' unread'}`} href={`/notifications/${n.id}`}>
               <strong>{n.title}</strong>
               <span>{n.body}</span>
               <span class="muted">{timeLabel(n.created_at)}</span>
@@ -3777,9 +3876,99 @@ export function AdminMediaPage(props: {
   );
 }
 
+/** Admins write to one promoter, a team (its lead and members), or every promoter: in the app and on their phones. */
+export function AdminNotifyPage(props: {
+  user: User;
+  promoters: User[];
+  leads: { lead: User; members: number }[];
+  sent: Announcement[];
+  values: Record<string, string>;
+  ok?: string;
+  error?: string;
+}) {
+  const v = props.values;
+  const to = v.to || 'everyone';
+  return (
+    <Layout title="Send a notification" user={props.user}>
+      <h1>Send a notification</h1>
+      <p class="muted">
+        It shows up in their notifications, and on their phone when they turned phone notifications on.
+      </p>
+      <Flash ok={props.ok} error={props.error} />
+      <form class="card stack-card" method="post" action="/admin/notifications">
+        <fieldset class="audience">
+          <legend>Send to</legend>
+          <label class="check">
+            <input type="radio" name="to" value="everyone" checked={to === 'everyone'} />
+            <span>
+              Every promoter <span class="muted">({props.promoters.length})</span>
+            </span>
+          </label>
+          <label class="check">
+            <input type="radio" name="to" value="team" checked={to === 'team'} disabled={props.leads.length === 0} />
+            <span>A team</span>
+            <select name="lead" aria-label="Which team" data-picks="team" disabled={props.leads.length === 0}>
+              {props.leads.length === 0 && <option value="">No team yet</option>}
+              {props.leads.map(({ lead, members }) => (
+                <option value={String(lead.id)} selected={v.lead === String(lead.id)}>
+                  {lead.name}’s team ({members + 1})
+                </option>
+              ))}
+            </select>
+          </label>
+          <label class="check">
+            <input type="radio" name="to" value="one" checked={to === 'one'} />
+            <span>One promoter</span>
+            <select name="user" aria-label="Which promoter" data-picks="one">
+              {props.promoters.map((p) => (
+                <option value={String(p.id)} selected={v.user === String(p.id)}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        </fieldset>
+        <label>
+          Title
+          <input name="title" maxlength={ANNOUNCEMENT_TITLE_MAX} required value={v.title ?? ''} placeholder="Doors open at 9 p.m. on Saturday" />
+        </label>
+        <label>
+          Message
+          <textarea name="body" maxlength={ANNOUNCEMENT_BODY_MAX} required rows={3} placeholder="Come early: the first 50 get in free.">
+            {v.body ?? ''}
+          </textarea>
+        </label>
+        <label>
+          Opens (optional: a page of this app, like /payouts)
+          <input name="link" maxlength={200} value={v.link ?? ''} placeholder="/payouts" />
+        </label>
+        <button type="submit">Send</button>
+      </form>
+      <h2>Sent</h2>
+      {props.sent.length === 0 ? (
+        <p class="muted">Nothing sent yet.</p>
+      ) : (
+        <div class="notification-list">
+          {props.sent.map((a) => (
+            <div class="card notification">
+              <strong>{a.title}</strong>
+              <span>{a.body}</span>
+              <span class="muted">
+                To {a.audience} ({a.recipients === 1 ? '1 promoter' : `${a.recipients} promoters`}) · {timeLabel(a.created_at)}
+                {a.sender ? ` · by ${a.sender}` : ''}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </Layout>
+  );
+}
+
 export function AdminBannersPage(props: {
   user: User;
   general: string;
+  checkout: string;
   events: { id: number; title: string; start: Date | null; timezone: string | null; promoters: User[] }[];
   banners: Map<number, string>;
   ok?: string;
@@ -3799,6 +3988,22 @@ export function AdminBannersPage(props: {
         <form class="banner-form" method="post" action="/admin/banners/general">
           <textarea name="message" rows={3} maxlength={BANNER_MAX_LENGTH} aria-label="Banner for all promoters">
             {props.general}
+          </textarea>
+          <button class="secondary" type="submit">
+            Save
+          </button>
+        </form>
+      </div>
+      <div class="card rate-card" id="checkout">
+        <h2 class="first">Before a reward request</h2>
+        <p class="muted">
+          Shown in a pop-up when a promoter reviews their reward request: they must click “I understand” before they can
+          send it. Say what they need to know, like “Tickets are under your name at the door: bring ID.”
+        </p>
+        {props.checkout && <Banner text={props.checkout} label="Current notice before a reward request" />}
+        <form class="banner-form" method="post" action="/admin/banners/checkout">
+          <textarea name="message" rows={3} maxlength={BANNER_MAX_LENGTH} aria-label="Notice before a reward request">
+            {props.checkout}
           </textarea>
           <button class="secondary" type="submit">
             Save

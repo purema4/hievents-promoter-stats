@@ -61,6 +61,8 @@ services:
       MAIL_FROM: Demo Nights <promoters@example.com>
       HIEVENTS_IMAGE_BASE_URL: http://demo-cdn
       RULES_ENGINE_URL: http://demo-rules-engine:8080
+      # From .env, never written here: "Ask Claude" on the rule editor. Each call is a real, paid API call.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
     ports:
       - "127.0.0.1:3100:3000"
     healthcheck:

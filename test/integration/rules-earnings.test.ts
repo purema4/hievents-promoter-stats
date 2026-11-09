@@ -13,6 +13,7 @@ describeIntegration('earnings from rules', () => {
   let server: Server;
   let admin: Client;
   let maya: Awaited<ReturnType<typeof newPromoter>>;
+  let luna: Awaited<ReturnType<typeof newPromoter>>;
   let engineUp = true;
   const proxy = Bun.serve({
     port: 0,
@@ -33,6 +34,8 @@ describeIntegration('earnings from rules', () => {
     admin = await signInAdmin(server);
     maya = await newPromoter(server, admin, { name: `Maya ${uid()}`, codes: 'DJMAX' });
     db = new Database(join(server.dataDir, 'promoters.sqlite'));
+    // The server writes too (notifications, milestones…): wait for it rather than fail with SQLITE_BUSY.
+    db.exec('PRAGMA busy_timeout = 5000');
     db.query("INSERT INTO reward_types (key, label_en, label_fr) VALUES ('vip_tickets', 'VIP', 'VIP'), ('ga_list', 'GA list', 'Liste GA')").run();
     setRule('event', 1, ash);
   }, 60_000);
@@ -126,5 +129,38 @@ describeIntegration('earnings from rules', () => {
   test('a rule that gives a negative amount counts it as 0', async () => {
     setRule('event', 2, 'commission = 0 - 5');
     expect(stats(await maya.client.page('/events/2')).get('Commission')).toBe('$0.00');
+  });
+
+  test('team_full_price_sales: what a team lead\'s promoters sold since joining, not the team lead\'s own', async () => {
+    // Luna (LUNA, $25 on Warehouse Night) leads; Maya (DJMAX) joins today. Maya sold $100 there in all, but
+    // only today's $25 sale comes after she joined; Luna's own $25 does not count either.
+    luna = await newPromoter(server, admin, { name: `Luna ${uid()}`, codes: 'LUNA' });
+    await admin.post('/admin/teams/lead', { user_id: String(luna.id), lead: '1' });
+    await admin.post('/admin/teams/add', { user_id: String(maya.id), team_lead_id: String(luna.id) });
+    setRule('event', 1, `${ash}\nbonus = team_full_price_sales * 0.1`);
+    expect(stats(await luna.client.page('/events/1')).get('Bonus')).toBe('$2.50');
+    // Maya is not a team lead: 0 for her, so no bonus.
+    expect(stats(await maya.client.page('/events/1')).get('Bonus')).toBeUndefined();
+  });
+
+
+  test('a team rule is added on top of the team lead\'s own rule', async () => {
+    // From the test above: Luna leads, Maya joined today ($25 sold since). Luna's own rule stays as it is.
+    setRule('event', 1, ash);
+    const page = (p: string) => admin.page(p);
+    expect((await admin.get(`/admin/rules/edit?scope=team&user=${maya.id}`)).status).toBe(404); // not a team lead
+    expect(text(await page(`/admin/rules/edit?scope=team&user=${luna.id}`))).toContain(`${luna.name}’s team rule`);
+    expect(text(await page('/admin/rules'))).toContain('Team leads');
+    const before = db.query<{ n: number }, []>('SELECT count(*) AS n FROM rule_versions').get()!.n;
+    expect(location(await admin.post(`/admin/rules/edit?scope=team&user=${luna.id}`, { text: 'commission = team_full_price_sales * 0.1' }))).toBe(
+      `/admin/rules/edit?scope=team&user=${luna.id}&ok=rule_saved`,
+    );
+    expect(db.query<{ n: number }, []>('SELECT count(*) AS n FROM rule_versions').get()!.n).toBe(before + 1);
+    // Luna's own commission on Warehouse Night (Ash: 1 ticket × $5) is unchanged; the team part comes on top.
+    const lunaClient = luna.client;
+    const home = await lunaClient.page('/');
+    const earned = [...stats(home)].find(([label]) => label.startsWith('Commission earned'))!;
+    expect(earned[0]).toContain('incl. $2.50 team commission');
+    expect(stats(await lunaClient.page('/events/1')).get('Commission')).toBe('$5.00');
   });
 });

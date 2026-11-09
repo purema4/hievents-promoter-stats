@@ -3,6 +3,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { iconVersion } from './icons';
 import { cssVersion } from './views';
+import { jsVersion } from './js-version';
 
 const types: Record<string, string> = {
   js: 'text/javascript; charset=utf-8',
@@ -42,6 +43,7 @@ export function serviceWorker(c: Context) {
     .toString()
     .replaceAll('__VERSION__', version)
     .replaceAll('__CSS_VERSION__', cssVersion)
+    .replaceAll('__JS_VERSION__', jsVersion)
     .replaceAll('__ICON_VERSION__', iconVersion);
   c.header('Content-Type', types.js);
   c.header('Cache-Control', 'no-cache');

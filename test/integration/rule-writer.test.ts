@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { Client, createPromoter, describeIntegration, signInAdmin, startServer, text, type Server } from './harness';
 
 /*
- * "Write it for me", against a stand-in for the Claude API (ANTHROPIC_BASE_URL), so the tests spend
+ * "Ask Claude", against a stand-in for the Claude API (ANTHROPIC_BASE_URL), so the tests spend
  * nothing. What the app sends is checked, and what comes back goes through the usual rule checks.
  */
 describeIntegration('rule writer', () => {
@@ -38,6 +38,8 @@ describeIntegration('rule writer', () => {
     // Events show on Rules once a promoter has a code on them.
     await createPromoter(admin, { codes: 'DJMAX' });
     db = new Database(join(server.dataDir, 'promoters.sqlite'));
+    // The server writes too (notifications, milestones…): wait for it rather than fail with SQLITE_BUSY.
+    db.exec('PRAGMA busy_timeout = 5000');
     db.query("INSERT INTO reward_types (key, label_en, label_fr) VALUES ('vip_tickets', 'VIP', 'VIP'), ('ga_list', 'GA list', 'Liste GA')").run();
   }, 60_000);
   afterAll(async () => {
@@ -55,7 +57,7 @@ describeIntegration('rule writer', () => {
         '# 2 VIP dès la première vente, 1 place GA par 5 billets, 5 $ par billet\ncommission = tickets_sold * 5.00\nvip_tickets = tickets_sold >= 1 ? 2 : 0\nga_list = floor(tickets_sold / 5)',
         'J’ai compté la place GA à partir de 5 billets vendus.',
       );
-    expect(text(await admin.page('/admin/rules/edit?scope=event&event=1'))).toContain('Write it for me');
+    expect(text(await admin.page('/admin/rules/edit?scope=event&event=1'))).toContain('Ask Claude');
     const res = await write('1 billet vendu = 2 VIP, puis 1 place liste GA par 5 billets, 5 $ par billet');
     expect(res.status).toBe(200);
     const html = await res.text();
@@ -72,6 +74,15 @@ describeIntegration('rule writer', () => {
     expect(prompt).toContain('1 billet vendu = 2 VIP');
     expect(prompt).toContain('- tickets_sold (number)');
     expect(prompt).toContain('- vip_tickets: reward "VIP"');
+  });
+
+  test('from the Rules page: pick the rule, describe the deal', async () => {
+    expect(text(await admin.page('/admin/rules'))).toContain('Ask Claude');
+    answer = () => message('commission = tickets_sold * 4', 'Done.');
+    const html = await (await admin.post('/admin/rules/write', { rule: 'event:1', description: '4 $ par billet' })).text();
+    expect(text(html)).toContain('Warehouse Night: rule');
+    expect(html).toContain('commission = tickets_sold * 4</textarea>');
+    expect((await admin.post('/admin/rules/write', { rule: 'event:4', description: 'x' })).status).toBe(404); // over
   });
 
   test('a rule with a problem shows it, like a typed one', async () => {

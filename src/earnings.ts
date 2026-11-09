@@ -4,9 +4,9 @@ import { statsForCodes, ticketsByEventAndCode, type CodeStats } from './hievents
 import { toCents, type EventEarning, type Rate } from './money';
 import { levelFor } from './reward-rules';
 import { evaluateRules } from './rules-engine';
-import { ruleFor, type AppliedRule } from './rules';
+import { ruleFor, teamRuleFor, type AppliedRule } from './rules';
 import { FIXED_OUTPUTS, type RuleInputs } from './rule-variables';
-import { isTeamLead, teamMembers } from './teams';
+import { isTeamLead, teamCodes, teamMembers, teamSalesByEvent } from './teams';
 
 /*
  * What each promoter earns, event by event, from their rules: commission, bonus, merch and rewards by
@@ -71,13 +71,6 @@ async function eventFacts(eventIds: number[]): Promise<Map<number, { tickets: nu
   return out;
 }
 
-/** Tickets the team (the team lead included) sold per event. */
-async function teamTicketsByEvent(lead: User, own: EventBasics[]): Promise<Map<number, number>> {
-  const out = new Map(own.map((e) => [e.id, e.tickets]));
-  const codes = teamMembers(lead.id).flatMap((m) => codesFor(m.id));
-  for (const r of await statsForCodes([...new Set(codes)])) out.set(r.event_id, (out.get(r.event_id) ?? 0) + r.tickets_sold);
-  return out;
-}
 
 /** The variables of each event for a promoter, with `sold` tickets instead of the real number when given. */
 async function inputsBuilder(promoter: User, events: EventBasics[], allRules: { lines: { expr: string }[] }[]) {
@@ -85,7 +78,10 @@ async function inputsBuilder(promoter: User, events: EventBasics[], allRules: { 
   const lifetime = events.reduce((sum, e) => sum + e.tickets, 0) + outsideTickets(promoter.id);
   const lead = isTeamLead(promoter);
   const facts = uses(allRules, 'event_tickets_sold') || uses(allRules, 'event_promoters') ? await eventFacts(events.map((e) => e.id)) : new Map();
-  const team = lead && uses(allRules, 'team_tickets_sold') ? await teamTicketsByEvent(promoter, events) : new Map<number, number>();
+  const team =
+    lead && (uses(allRules, 'team_tickets_sold') || uses(allRules, 'team_full_price_sales'))
+      ? await teamSalesByEvent(promoter)
+      : new Map<number, { tickets: number; fullPrice: number }>();
   const general: RuleInputs = {
     lifetime_tickets: lifetime,
     events_promoted: events.filter((e) => e.tickets > 0).length,
@@ -113,7 +109,9 @@ async function inputsBuilder(promoter: User, events: EventBasics[], allRules: { 
       days_before_event: e.start ? Math.floor((e.start.getTime() - Date.now()) / DAY) : 0,
       event_dates: e.dates,
       lifetime_tickets: lifetime + extra,
-      team_tickets_sold: (team.get(e.id) ?? e.tickets) + extra,
+      // The team lead's own tickets and their promoters'; the sales are their promoters' alone (what team commission is on).
+      team_tickets_sold: e.tickets + (team.get(e.id)?.tickets ?? 0) + extra,
+      team_full_price_sales: (team.get(e.id)?.fullPrice ?? 0) / 100,
     };
   };
 
@@ -203,5 +201,39 @@ export async function earningsFor(promoter: User, rows: CodeStats[], opts: { nex
       byEvent.set(e.id, earning);
     }
   }
-  return { events: byEvent, stale, versionIds: [...new Set(allRules.flatMap((r) => r.versionIds))].sort((a, b) => a - b) };
+  // Team leads: their team rule, on top, on every event their team sells (and their own).
+  const team = new Map<string, number>();
+  const teamRule = isTeamLead(promoter) ? teamRuleFor(promoter.id) : null;
+  if (teamRule && teamRule.lines.length > 0) {
+    const memberRows = await statsForCodes(teamCodes(promoter.id));
+    const currencyOf = new Map([...rows, ...memberRows].map((r) => [r.event_id, r.currency]));
+    // Events only the team sold: their dates, none of the team lead's own sales.
+    const teamOnly = basics(memberRows)
+      .filter((e) => !events.some((x) => x.id === e.id))
+      .map((e) => ({ ...e, tickets: 0, pending: 0, orders: 0, fullPrice: 0, paid: 0, codesUsed: 0 }));
+    const all = [...events, ...teamOnly];
+    const { inputsFor: teamInputs } = await inputsBuilder(promoter, all, [teamRule]);
+    const { results, stale: teamStale } = await evaluateRules(
+      { version: teamRule.key, lines: teamRule.lines },
+      all.map((e) => ({ subject: `u${promoter.id}:e${e.id}:team`, variables: teamInputs(e) })),
+    );
+    stale ||= teamStale;
+    for (const e of all) {
+      const r = results.get(`u${promoter.id}:e${e.id}:team`);
+      const currency = currencyOf.get(e.id) ?? 'CAD';
+      for (const [name, value] of Object.entries(r?.outputs ?? {})) {
+        if (!(value >= 0)) continue;
+        if (name === 'commission' || name === 'bonus') team.set(currency, (team.get(currency) ?? 0) + Math.round(value * 100));
+        else {
+          // Rewards from the team rule land on the team lead's own events only.
+          const own = byEvent.get(e.id);
+          if (!own) continue;
+          if (name === 'merch') own.merch += Math.floor(value);
+          else own.rewards[name] = (own.rewards[name] ?? 0) + Math.floor(value);
+        }
+      }
+    }
+  }
+  const versionIds = [...new Set([...allRules, ...(teamRule ? [teamRule] : [])].flatMap((r) => r.versionIds))].sort((a, b) => a - b);
+  return { events: byEvent, stale, versionIds, team };
 }

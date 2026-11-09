@@ -410,56 +410,235 @@ if (ruleForm) {
   test.addEventListener('input', later);
 }
 
-// Payouts & rewards: the rewards shop. "Add to cart" adds one of an item (up to what is ready); the cart
-// lists what is picked, each with Remove. Without scripts, the "How many" boxes do the same job.
+// Payouts & rewards: the rewards shop, by event. "+" adds one of a reward to the cart; each cart line
+// then says exactly what it is and who it is for, and holds the choices: how many, the names for a guest
+// list (other rewards are tickets sent to the promoter), this event or the bank (or, for banked rewards,
+// which event). The choices are written back
+// to the fields in the reward's row, which is what the form sends. Without scripts, the "How many" boxes
+// in the rows do the job.
 const shop = document.querySelector('form[data-shop]');
 if (shop) {
+  const promoter = shop.dataset.promoter || 'you';
   const lines = shop.querySelector('[data-cart-lines]');
   const send = shop.querySelector('[data-cart-send]');
-  const items = [...shop.querySelectorAll('[data-shop-item]')].filter((item) => item.querySelector('[data-qty]'));
+  const jump = shop.querySelector('[data-cart-jump]');
+  const rows = [...shop.querySelectorAll('[data-shop-item]')].filter((row) => row.querySelector('[data-qty]'));
+  const el = (tag, props = {}, ...children) => {
+    const node = document.createElement(tag);
+    for (const [k, v] of Object.entries(props)) {
+      if (k === 'text') node.textContent = v;
+      else if (k === 'class') node.className = v;
+      else node.setAttribute(k, v);
+    }
+    node.append(...children);
+    return node;
+  };
+  // + and − drawn as icons, so they sit in the middle of their round buttons.
+  const icon = (d) => {
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('width', '18');
+    svg.setAttribute('height', '18');
+    svg.setAttribute('aria-hidden', 'true');
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('fill', 'currentColor');
+    path.setAttribute('d', d);
+    svg.append(path);
+    return svg;
+  };
+  const PLUS = 'M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z';
+  const MINUS = 'M5 11h14v2H5z';
+  const names = (value) => value.split(/[,;]+/).map((g) => g.trim()).filter(Boolean);
+  // "Sent to you (Maya Tremblay)", or for a guest list "On the guest list: Ana, Ben"
+  const whoOf = (row) => {
+    const field = row.querySelector('[data-guests-field]');
+    if (!field) return `Sent to you (${promoter})`;
+    const guests = names(field.value);
+    return guests.length ? `On the guest list: ${guests.join(', ')}` : 'Add the names for the guest list';
+  };
+  const qtyOf = (row) => Number(row.querySelector('[data-qty]').value);
+  const setQty = (row, n) => {
+    const qty = row.querySelector('[data-qty]');
+    qty.value = String(Math.max(0, Math.min(qty.options.length - 1, n)));
+  };
+
+  const lineFor = (row) => {
+    const n = qtyOf(row);
+    const kind = row.dataset.kind;
+    const line = el('div', { class: 'cart-line' });
+    const head = el('div', { class: 'cart-line-head' });
+    head.append(el('strong', { text: `${n} × ${row.dataset.type}` }));
+    if (row.dataset.where) head.append(el('span', { class: 'muted', text: ` · ${row.dataset.where}` }));
+    line.append(head);
+
+    const minus = el('button', { type: 'button', class: 'step', 'aria-label': `One less ${row.dataset.type}` }, icon(MINUS));
+    const plus = el('button', { type: 'button', class: 'step', 'aria-label': `One more ${row.dataset.type}` }, icon(PLUS));
+    const remove = el('button', { type: 'button', class: 'link', text: 'Remove' });
+    minus.addEventListener('click', () => {
+      setQty(row, n - 1);
+      refresh();
+    });
+    plus.addEventListener('click', () => {
+      setQty(row, n + 1);
+      refresh();
+    });
+    plus.disabled = n >= row.querySelector('[data-qty]').options.length - 1;
+    remove.addEventListener('click', () => {
+      setQty(row, 0);
+      refresh();
+    });
+    line.append(el('div', { class: 'cart-steps' }, minus, el('span', { class: 'cart-n', text: String(n) }), plus, remove));
+
+    if (kind === 'event' || kind === 'bank') {
+      const use = row.querySelector('[data-use-field]');
+      const banking = use && use.value === 'bank';
+      if (kind === 'bank') {
+        const source = row.querySelector('[data-event-field]');
+        const pick = el('select', { 'aria-label': 'For which event' });
+        for (const option of source.options) pick.append(el('option', { value: option.value, text: option.text }));
+        pick.value = source.value;
+        pick.addEventListener('change', () => {
+          source.value = pick.value;
+        });
+        line.append(el('label', { class: 'cart-field' }, 'For which event', pick));
+      } else {
+        const pick = el('select', { 'aria-label': 'Use them for' });
+        pick.append(el('option', { value: '', text: `${row.dataset.where}` }), el('option', { value: 'bank', text: 'My bank, for a later event' }));
+        pick.value = use.value;
+        pick.addEventListener('change', () => {
+          use.value = pick.value;
+          refresh();
+        });
+        line.append(el('label', { class: 'cart-field' }, 'Use them for', pick));
+      }
+      if (!banking) {
+        const guestsField = row.querySelector('[data-guests-field]');
+        const who = el('p', { class: 'who', text: whoOf(row) });
+        if (guestsField) {
+          const guests = el('input', { maxlength: '200', placeholder: n > 1 ? 'Ana, Ben' : 'Ana Roy', value: guestsField.value, required: '' });
+          guests.addEventListener('input', () => {
+            guestsField.value = guests.value;
+            who.textContent = whoOf(row);
+          });
+          line.append(el('label', { class: 'cart-field' }, n > 1 ? `Names on the guest list (${n})` : 'Name on the guest list', guests));
+        }
+        line.append(who);
+      } else {
+        line.append(el('p', { class: 'who', text: `${n} into your bank, for a later event` }));
+      }
+    } else if (kind === 'merch') {
+      const field = row.querySelector('[data-merch-field]');
+      const details = el('input', { maxlength: '120', placeholder: 'T-shirt, size L', value: field.value, required: '' });
+      details.addEventListener('input', () => {
+        field.value = details.value;
+      });
+      line.append(el('label', { class: 'cart-field' }, 'Which item and size', details));
+    }
+    return line;
+  };
+
   const refresh = () => {
     lines.replaceChildren();
     let total = 0;
-    for (const item of items) {
-      const qty = item.querySelector('[data-qty]');
-      const n = Number(qty.value);
+    for (const row of rows) {
+      const n = qtyOf(row);
+      const max = row.querySelector('[data-qty]').options.length - 1;
+      row.classList.toggle('in-cart', n > 0);
+      // Round "+" while none are in the cart; then the pill (− n +) and "3/4 available".
+      const add = row.querySelector('[data-add]');
+      const stepper = row.querySelector('[data-stepper]');
+      add.hidden = n > 0;
+      stepper.hidden = n === 0;
+      stepper.querySelector('[data-count]').textContent = String(n);
+      stepper.querySelector('[data-plus]').disabled = n >= max;
+      row.querySelector('[data-left]').textContent = String(max - n);
+      row.querySelector('[data-of]').hidden = n === 0;
       if (!n) continue;
       total += n;
-      const li = document.createElement('li');
-      const what = document.createElement('span');
-      what.textContent = `${n} × ${item.dataset.name}`;
-      const remove = document.createElement('button');
-      remove.type = 'button';
-      remove.className = 'link';
-      remove.textContent = 'Remove';
-      remove.addEventListener('click', () => {
-        qty.value = '0';
-        refresh();
-      });
-      li.append(what, remove);
-      lines.append(li);
+      lines.append(lineFor(row));
     }
-    if (total === 0) {
-      const li = document.createElement('li');
-      li.className = 'muted';
-      li.textContent = 'Your cart is empty. Add a reward to it.';
-      lines.append(li);
-    }
+    if (total === 0) lines.append(el('p', { class: 'muted', text: 'Press + next to a reward to add it here.' }));
     send.disabled = total === 0;
-    send.textContent = total ? `Request ${total} ${total === 1 ? 'reward' : 'rewards'}` : 'Request my rewards';
-  };
-  for (const item of items) {
-    const qty = item.querySelector('[data-qty]');
-    const add = item.querySelector('[data-add]');
-    qty.addEventListener('change', refresh);
-    if (add) {
-      add.hidden = false;
-      add.addEventListener('click', () => {
-        const max = qty.options.length - 1;
-        qty.value = String(Math.min(max, Number(qty.value) + 1));
-        refresh();
-      });
+    send.textContent = total ? `Review my request (${total}) →` : 'Review my request →';
+    if (jump) {
+      const changed = jump.textContent !== `View cart (${total})`;
+      jump.hidden = total === 0;
+      jump.textContent = `View cart (${total})`;
+      // A little bounce each time the cart changes, so the bar is seen.
+      if (changed && total > 0) {
+        jump.classList.remove('pop');
+        void jump.offsetWidth;
+        jump.classList.add('pop');
+      }
     }
+    if (total === 0) closeSheet();
+  };
+
+  // Phones: the cart is a sheet that slides up from the bottom (styles in .shop.sheet).
+  const cart = shop.querySelector('[data-cart]');
+  const backdrop = shop.querySelector('[data-cart-backdrop]');
+  function openSheet() {
+    cart.classList.add('open');
+    backdrop.hidden = false;
+    cart.querySelector('[data-cart-close]')?.focus();
+  }
+  function closeSheet() {
+    if (!cart.classList.contains('open')) return;
+    cart.classList.remove('open');
+    backdrop.hidden = true;
+  }
+  shop.classList.add('sheet');
+  jump?.addEventListener('click', openSheet);
+  backdrop.addEventListener('click', closeSheet);
+  shop.querySelector('[data-cart-close]')?.addEventListener('click', () => {
+    closeSheet();
+    jump?.focus();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeSheet();
+  });
+
+  for (const row of rows) {
+    row.querySelector('[data-qty]').hidden = true;
+    // The cart asks for guest list names; the box in the row is for when scripts do not run.
+    const guestsField = row.querySelector('[data-guests-field]');
+    if (guestsField) guestsField.hidden = true;
+    const add = row.querySelector('[data-add]');
+    add.hidden = false;
+    add.addEventListener('click', () => {
+      setQty(row, qtyOf(row) + 1);
+      refresh();
+      row.querySelector('[data-plus]').focus();
+    });
+    row.querySelector('[data-plus]').addEventListener('click', () => {
+      setQty(row, qtyOf(row) + 1);
+      refresh();
+    });
+    row.querySelector('[data-minus]').addEventListener('click', () => {
+      setQty(row, qtyOf(row) - 1);
+      refresh();
+      // Back to the round "+" at 0: keep the focus on the row.
+      if (qtyOf(row) === 0) add.focus();
+    });
   }
   refresh();
+}
+
+// Checkout: the team's note opens in a pop-up; "I understand" ticks the box needed to send.
+const notice = document.querySelector('dialog[data-notice-modal]');
+if (notice && typeof notice.showModal === 'function') {
+  notice.showModal();
+  notice.querySelector('[data-notice-ok]').addEventListener('click', () => {
+    const ack = document.querySelector('[data-ack]');
+    if (ack) ack.checked = true;
+    notice.close();
+  });
+}
+
+// Send a notification: picking a team or a promoter in a list also picks that choice.
+for (const select of document.querySelectorAll('select[data-picks]')) {
+  select.addEventListener('change', () => {
+    const radio = select.form?.querySelector(`input[type=radio][value="${select.dataset.picks}"]`);
+    if (radio && !radio.disabled) radio.checked = true;
+  });
 }

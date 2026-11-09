@@ -58,11 +58,17 @@ import { allowImageUpload, maxImageSide, maxUploadBytes, processImage, purgeUplo
 import { parseRange } from './chart';
 import { checkAllMilestones, checkMilestones } from './milestones';
 import {
+  ANNOUNCEMENT_BODY_MAX,
+  ANNOUNCEMENT_TITLE_MAX,
+  announcementLink,
   isPushEndpoint,
   isPushKeys,
   markAllRead,
   notificationsFor,
   notify,
+  openNotification,
+  recentAnnouncements,
+  sendAnnouncement,
   purgeOldNotifications,
   pushDeviceCount,
   pushPublicKey,
@@ -81,12 +87,13 @@ import {
   payoutsFor,
   requestPayout,
 } from './payouts';
-import { DashboardPage, EventPage, PayoutsPage, summarizeEvents } from './promoter-views';
+import { CheckoutPage, DashboardPage, EventPage, PayoutsPage, summarizeEvents, type CartLine } from './promoter-views';
 import {
   findRewardRequest,
   listRewardRequests,
   requestReward,
   rewardRequestsFor,
+  checkRewards,
   requestRewards,
   type RewardInput,
 } from './rewards';
@@ -119,7 +126,7 @@ import { ruleWriterEnabled, writeRule } from './rule-writer';
 import { checkDraft, dealInWords, labelOf, langOf, resultSentence, ruleInWords, type RuleCheck } from './rule-admin';
 import { AdminRuleEditPage, AdminRulesPage, ruleEditHref, type RuleTargetInfo } from './rule-views';
 import { emptyInputs } from './rule-variables';
-import { allEventBanners, generalBanner, parseBanner, setEventBanner, setGeneralBanner } from './banners';
+import { allEventBanners, checkoutNotice, generalBanner, setCheckoutNotice, parseBanner, setEventBanner, setGeneralBanner } from './banners';
 import { allMediaDrives, parseMediaUrl, setMediaDrive } from './media-drives';
 import { filterCodes, parseCodeFilter } from './promo-code-list';
 import {
@@ -191,6 +198,7 @@ import {
   AdminCodesPage,
   AdminCommissionsPage,
   AdminBannersPage,
+  AdminNotifyPage,
   AdminMediaPage,
   InvitesPage,
   JoinPage,
@@ -935,7 +943,7 @@ app.post('/welcome/done', (c) => {
   return c.redirect('/');
 });
 
-// Opening the list marks everything as read.
+// Unread ones stay marked until opened, or until "Mark all as read".
 app.get('/notifications', (c) => {
   const user = c.get('user');
   const test = c.req.query('test');
@@ -951,9 +959,20 @@ app.get('/notifications', (c) => {
       error={failed ? testMessage(test) : undefined}
     />,
   );
-  // Reading them as an admin leaves them unread for the promoter.
-  if (!user.impersonator) markAllRead(user.id);
   return page;
+});
+
+// Opening one marks it as read, then goes where it points. Viewing as a promoter leaves it unread for them.
+app.get('/notifications/:id{[0-9]+}', (c) => {
+  const user = c.get('user');
+  const n = openNotification(user.id, Number(c.req.param('id')), !!user.impersonator);
+  if (!n) return c.redirect('/notifications');
+  return c.redirect(n.link && /^(\/(?![/\\])|https?:)/.test(n.link) ? n.link : '/notifications');
+});
+
+app.post('/notifications/read', (c) => {
+  markAllRead(c.get('user').id);
+  return c.redirect('/notifications');
 });
 
 function testMessage(key?: string): string | undefined {
@@ -1105,42 +1124,101 @@ app.post('/payouts', async (c) => {
   return c.redirect('/payouts?ok=requested');
 });
 
-/** Who the tickets of a shop item are for: "Maya + 2 guests: Ann, Bob". */
-function ticketsFor(user: User, quantity: number, forMe: boolean, guests: string): string {
-  const names = guests.split(/[,;\n]+/).map((g) => g.trim()).filter(Boolean).join(', ');
-  const others = forMe ? quantity - 1 : quantity;
-  const guestPart = others > 0 ? `${others} ${others === 1 ? 'guest' : 'guests'}${names ? `: ${names}` : ''}` : '';
-  return [forMe ? user.name : '', guestPart].filter(Boolean).join(' + ').slice(0, 120);
+/** "Ann, Bob" from what was typed, one name after another. */
+function guestNames(guests: string): string {
+  return guests.split(/[,;\n]+/).map((g) => g.trim()).filter(Boolean).join(', ');
 }
+
+/**
+ * Who a shop item is for. Tickets are sent to the promoter, who hands them out; a guest list is names at
+ * the door, which only guest list rewards ask for. For the team ("Guest list: Ann, Bob" or the
+ * promoter's name), and for the promoter at checkout ("On the guest list: Ann, Bob" or "Sent to you").
+ */
+function ticketsFor(user: User, guestList: boolean, guests: string): string {
+  return (guestList ? `Guest list: ${guestNames(guests)}` : user.name).slice(0, 120);
+}
+function whoFor(user: User, guestList: boolean, guests: string): string {
+  return guestList ? `On the guest list: ${guestNames(guests)}` : `Sent to you (${user.name})`;
+}
+
+// Shop fields carried from the shop to checkout and on to the order.
+const CART_FIELD = /^(qty|guests|for|event)\.[a-z0-9_.]+$|^merch\.details$/;
+const NAMES_NEEDED = 'Add the names for the guest list.';
+
+/** The cart sent from the shop: the requests to make, and each line in plain words for checkout. */
+function cartFrom(body: Record<string, unknown>, data: Awaited<ReturnType<typeof promoterData>>, user: User): { items: RewardInput[]; lines: CartLine[]; fields: [string, string][]; error?: string } {
+  const field = (name: string) => String(body[name] ?? '').trim();
+  const items: RewardInput[] = [];
+  const lines: CartLine[] = [];
+  for (const t of data.rewards.tickets) {
+    const key = `${t.event.id}.${t.type.key}`;
+    const quantity = Number(field(`qty.${key}`) || 0);
+    if (!quantity) continue;
+    // "Use them for": this event, or the bank (the team accepts it; then it keeps until asked for).
+    const toBank = field(`for.${key}`) === 'bank';
+    const guestList = !!t.type.guest_list && !toBank;
+    if (guestList && !guestNames(field(`guests.${key}`))) return { items, lines, fields: [], error: NAMES_NEEDED };
+    items.push({
+      kind: 'ticket',
+      eventId: t.event.id,
+      rewardType: t.type.key,
+      toBank,
+      quantity,
+      details: ticketsFor(user, guestList, field(`guests.${key}`)),
+      ruleVersions: data.percent.events.get(t.event.id)?.versionIds,
+    });
+    lines.push({ quantity, type: t.type, event: t.event, toBank, who: toBank ? '' : whoFor(user, guestList, field(`guests.${key}`)) });
+  }
+  // Out of the bank, for an upcoming event of their choice; the type stays.
+  for (const b of data.rewards.bank) {
+    const key = `bank.${b.type.key}`;
+    const quantity = Number(field(`qty.${key}`) || 0);
+    if (!quantity) continue;
+    const event = data.ticketEvents.find((e) => e.id === Number(field(`event.${key}`)));
+    if (!event) return { items, lines, fields: [], error: 'Pick the event to use your banked rewards for.' };
+    const guestList = !!b.type.guest_list;
+    if (guestList && !guestNames(field(`guests.${key}`))) return { items, lines, fields: [], error: NAMES_NEEDED };
+    items.push({ kind: 'ticket', rewardType: b.type.key, fromBank: event, quantity, details: ticketsFor(user, guestList, field(`guests.${key}`)) });
+    lines.push({ quantity, type: b.type, event, fromBank: true, who: whoFor(user, guestList, field(`guests.${key}`)) });
+  }
+  const merch = Number(field('qty.merch') || 0);
+  if (merch) {
+    items.push({ kind: 'merch', quantity: merch, details: field('merch.details').slice(0, 120) });
+    lines.push({ quantity: merch, merch: field('merch.details').slice(0, 120) });
+  }
+  const fields = Object.entries(body)
+    .filter(([k, v]) => CART_FIELD.test(k) && typeof v === 'string')
+    .map(([k, v]) => [k, String(v).slice(0, 200)] as [string, string]);
+  if (items.length === 0) return { items, lines, fields, error: 'Your cart is empty: pick how many of a reward you want first.' };
+  return { items, lines, fields };
+}
+
+// Checkout: the cart in plain words, and the team's notice to accept, before anything is sent.
+app.post('/rewards/checkout', async (c) => {
+  const user = c.get('user');
+  const body = await c.req.parseBody();
+  const data = await promoterData(user);
+  const cart = cartFrom(body, data, user);
+  if (cart.error) return renderPayouts(c, cart.error);
+  const result = checkRewards(user, data.rewards, cart.items);
+  if (result !== 'ok') return renderPayouts(c, messages[result]);
+  return c.html(<CheckoutPage user={user} lines={cart.lines} fields={cart.fields} notice={checkoutNotice()} />);
+});
 
 // The rewards shop (Payouts & rewards): the whole cart in one request; every item or none.
 app.post('/rewards/order', async (c) => {
   const user = c.get('user');
   const body = await c.req.parseBody();
   const data = await promoterData(user);
-  const field = (name: string) => String(body[name] ?? '').trim();
-  const items: RewardInput[] = [];
-  for (const t of data.rewards.tickets) {
-    const key = `${t.event.id}.${t.type.key}`;
-    const quantity = Number(field(`qty.${key}`) || 0);
-    if (!quantity) continue;
-    const useFor = rolloverTarget(data, body[`for.${key}`]);
-    if (useFor === null) return renderPayouts(c, messages.not_available);
-    items.push({
-      kind: 'ticket',
-      eventId: t.event.id,
-      rewardType: t.type.key,
-      useFor,
-      quantity,
-      details: ticketsFor(user, quantity, field(`me.${key}`) === '1', field(`guests.${key}`)),
-      ruleVersions: data.percent.events.get(t.event.id)?.versionIds,
-    });
+  const cart = cartFrom(body, data, user);
+  if (cart.error) return renderPayouts(c, cart.error);
+  // The team's notice must have been accepted at checkout.
+  const notice = checkoutNotice();
+  if (notice && body.ack !== '1') {
+    return c.html(<CheckoutPage user={user} lines={cart.lines} fields={cart.fields} notice={notice} error="Read the note from the team and tick “I understand” first." />, 400);
   }
-  const merch = Number(field('qty.merch') || 0);
-  if (merch) items.push({ kind: 'merch', quantity: merch, details: field('merch.details').slice(0, 120) });
-  if (items.length === 0) return renderPayouts(c, 'Your cart is empty: pick how many of a reward you want first.');
   const before = rewardRequestsFor(user.id).length;
-  const { result } = requestRewards(user, data.rewards, items);
+  const { result } = requestRewards(user, data.rewards, cart.items);
   if (result !== 'ok') return renderPayouts(c, messages[result]);
   // Newest first in the list: the cart's own, back in the order they were picked.
   const all = rewardRequestsFor(user.id);
@@ -1753,11 +1831,13 @@ app.post('/admin/media', async (c) => {
 /** Which rule a request is about, checked: the promoter and the event (one that is not over) must exist. */
 async function ruleTargetOf(get: (key: string) => string | undefined): Promise<RuleTargetInfo | null> {
   const scope = get('scope') as RuleScope;
-  if (!['default', 'promoter', 'event', 'promoter_event', 'template'].includes(scope)) return null;
+  if (!['default', 'promoter', 'event', 'promoter_event', 'template', 'team'].includes(scope)) return null;
   const target: RuleTargetInfo = { scope };
-  if (scope === 'promoter' || scope === 'promoter_event') {
+  if (scope === 'promoter' || scope === 'promoter_event' || scope === 'team') {
     const user = findUser(Number(get('user')));
     if (!user) return null;
+    // A team rule is only for a team lead.
+    if (scope === 'team' && !isTeamLead(user)) return null;
     target.userId = user.id;
     target.promoterName = user.name;
   }
@@ -1844,6 +1924,8 @@ app.get('/admin/rules', async (c) => {
       rewardTypes={listRewardTypes()}
       events={events.map((e) => ({ ...e, hasRule: !!currentRule('event', { eventId: e.id }), overrides: overrides.find((o) => o.event_id === e.id)?.n ?? 0 }))}
       promotersWithRules={listUsers().filter((u) => currentRule('promoter', { userId: u.id }))}
+      teamLeads={teamLeads().map((lead) => ({ lead, hasRule: !!currentRule('team', { userId: lead.id }) }))}
+      canAsk={ruleWriterEnabled()}
       ok={flash(c.req.query('ok'))}
       error={flash(c.req.query('error'))}
     />,
@@ -1897,13 +1979,16 @@ app.post('/admin/rules/edit', async (c) => {
   return c.redirect(`${back}&ok=rule_saved`);
 });
 
-// "Write it for me": Claude writes the rule from a description; it lands in the box, not saved.
+// "Ask Claude": Claude writes the rule from a description; it lands in the box, not saved.
 const writeCounts = new Map<number, number[]>();
 app.post('/admin/rules/write', async (c) => {
-  const target = await ruleTargetOf((k) => c.req.query(k));
+  const body = await c.req.parseBody();
+  // From a rule's editor the rule is in the address; from the Rules page, in the form ("default", "event:12", "template").
+  const [scope, id] = String(body.rule ?? '').split(':');
+  const fromForm: Record<string, string | undefined> = { scope, event: scope === 'event' ? id : undefined };
+  const target = await ruleTargetOf((k) => c.req.query(k) ?? fromForm[k]);
   if (!target || !ruleWriterEnabled()) return c.notFound();
   const admin = c.get('user');
-  const body = await c.req.parseBody();
   const description = String(body.description ?? '').trim().slice(0, 2000);
   const saved = target.scope === 'template' && !target.templateId ? '' : (currentRule(target.scope, target)?.text ?? '');
   if (!description) return renderRuleEdit(c, target, saved, { status: 400, error: 'Describe the deal first.' });
@@ -1939,10 +2024,66 @@ app.post('/admin/rules/check', async (c) => {
 app.post('/admin/rules/types', async (c) => {
   const body = await c.req.parseBody();
   const key = String(body.key ?? '').trim();
-  const result = saveRewardType(key, String(body.label_en ?? ''), String(body.label_fr ?? ''));
+  const result = saveRewardType(key, String(body.label_en ?? ''), String(body.label_fr ?? ''), String(body.description_en ?? ''), String(body.description_fr ?? ''), body.guest_list === '1');
   if (result !== 'ok') return c.redirect('/admin/rules?error=reward_type#types');
   audit(c, 'admin.reward_type_saved', { by: c.get('user').id, key });
   return c.redirect('/admin/rules?ok=reward_type_saved#types');
+});
+
+// --- Notifications sent by admins: to one promoter, a team, or every promoter -------------------------
+
+const promoters = () => listUsers().filter((u) => !u.is_admin);
+
+function renderNotify(c: Context, opts: { status?: 400; error?: string; ok?: string; values?: Record<string, string> } = {}) {
+  return c.html(
+    <AdminNotifyPage
+      user={c.get('user')}
+      promoters={promoters()}
+      leads={teamLeads().map((lead) => ({ lead, members: teamMembers(lead.id).length }))}
+      sent={recentAnnouncements()}
+      values={opts.values ?? {}}
+      ok={opts.ok}
+      error={opts.error}
+    />,
+    opts.status ?? 200,
+  );
+}
+
+app.get('/admin/notifications', (c) => {
+  const sent = Number(c.req.query('sent'));
+  return renderNotify(c, { ok: Number.isInteger(sent) && c.req.query('sent') ? `Sent to ${sent === 1 ? '1 promoter' : `${sent} promoters`}.` : undefined });
+});
+
+app.post('/admin/notifications', async (c) => {
+  const body = await c.req.parseBody();
+  const values = Object.fromEntries(['to', 'user', 'lead', 'title', 'body', 'link'].map((k) => [k, String(body[k] ?? '').trim()]));
+  const again = (error: string) => renderNotify(c, { status: 400, error, values });
+  if (!values.title || values.title.length > ANNOUNCEMENT_TITLE_MAX) return again(`Give it a title, up to ${ANNOUNCEMENT_TITLE_MAX} characters.`);
+  if (!values.body || values.body.length > ANNOUNCEMENT_BODY_MAX) return again(`Write the message, up to ${ANNOUNCEMENT_BODY_MAX} characters.`);
+  const link = announcementLink(values.link!);
+  if (link === undefined) return again('The link must be a page of this app, like /payouts.');
+  let audience: string;
+  let ids: number[];
+  if (values.to === 'everyone') {
+    audience = 'Every promoter';
+    ids = promoters().map((u) => u.id);
+  } else if (values.to === 'team') {
+    const lead = teamLeads().find((u) => u.id === Number(values.lead));
+    if (!lead) return again('Pick a team.');
+    audience = `${lead.name}’s team`;
+    ids = [lead.id, ...teamMembers(lead.id).filter((u) => !u.is_admin).map((u) => u.id)];
+  } else if (values.to === 'one') {
+    const promoter = promoters().find((u) => u.id === Number(values.user));
+    if (!promoter) return again('Pick a promoter.');
+    audience = promoter.name;
+    ids = [promoter.id];
+  } else {
+    return again('Pick who it goes to.');
+  }
+  if (ids.length === 0) return again('Nobody to send it to.');
+  const sent = sendAnnouncement(c.get('user').id, audience, ids, { title: values.title, body: values.body!, link });
+  audit(c, 'admin.notification_sent', { by: c.get('user').id, audience, recipients: sent, title: values.title });
+  return c.redirect(`/admin/notifications?sent=${sent}`);
 });
 
 // --- Banners for promoters ---------------------------------------------------------------------------
@@ -1952,6 +2093,7 @@ app.get('/admin/banners', async (c) =>
     <AdminBannersPage
       user={c.get('user')}
       general={generalBanner()}
+      checkout={checkoutNotice()}
       events={await commissionEvents()}
       banners={allEventBanners()}
       ok={flash(c.req.query('ok'))}
@@ -1959,6 +2101,13 @@ app.get('/admin/banners', async (c) =>
     />,
   ),
 );
+
+app.post('/admin/banners/checkout', async (c) => {
+  const message = parseBanner((await c.req.parseBody()).message);
+  setCheckoutNotice(message);
+  audit(c, 'admin.checkout_notice_changed', { by: c.get('user').id, message });
+  return c.redirect(`/admin/banners?ok=${message ? 'banner_saved' : 'banner_removed'}#checkout`);
+});
 
 app.post('/admin/banners/general', async (c) => {
   const message = parseBanner((await c.req.parseBody()).message);

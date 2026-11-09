@@ -275,8 +275,9 @@ export const ops: Op[] = [
             used: t.used,
             sales_to_next: t.nextIn,
           })),
-          // Events free tickets can be rolled over to (use_for_event_id when requesting them).
+          // Events free tickets can be rolled over to (use_for_event_id) or used on from the bank (from_bank).
           rollover_events: data.ticketEvents.map((e) => ({ event_id: e.id, event_title: e.title })),
+          bank: data.rewards.bank.map((b) => ({ reward_type: b.type.key, reward: b.type.label_en, balance: b.balance, pending: b.pending })),
           merch: {
             available: data.rewards.merch.available,
             earned: data.rewards.merch.earned,
@@ -551,6 +552,8 @@ export const ops: Op[] = [
         kind: { type: 'string', enum: ['ticket', 'merch'], description: 'Free tickets or merch.' },
         event_id: { type: 'integer', minimum: 1, description: 'For tickets: the event they were earned on.' },
         reward_type: { type: 'string', maxLength: 40, description: 'For tickets: which reward, like vip_tickets (see rewards.free_tickets in your stats). Plain free tickets if left out.' },
+        to_bank: { type: 'boolean', description: 'For tickets: put them in your bank instead (kept, with their type, for a later event). Admins accept or decline.' },
+        from_bank: { type: 'boolean', description: 'For tickets: take them out of your bank for event_id (any upcoming event). Give reward_type.' },
         use_for_event_id: {
           type: 'integer',
           minimum: 1,
@@ -561,7 +564,7 @@ export const ops: Op[] = [
       },
       required: ['kind'],
     },
-    run: async ({ user, c }, input: { kind: 'ticket' | 'merch'; event_id?: number; reward_type?: string; use_for_event_id?: number; quantity?: number; details?: string }) => {
+    run: async ({ user, c }, input: { kind: 'ticket' | 'merch'; event_id?: number; reward_type?: string; to_bank?: boolean; from_bank?: boolean; use_for_event_id?: number; quantity?: number; details?: string }) => {
       const data = await promoterData(user);
       const useFor = input.kind === 'ticket' && input.use_for_event_id !== undefined ? data.ticketEvents.find((e) => e.id === input.use_for_event_id) : undefined;
       if (input.kind === 'ticket' && input.use_for_event_id !== undefined && !useFor) throw new ApiError(400, 'not_available', rewardProblem.not_available);
@@ -569,6 +572,8 @@ export const ops: Op[] = [
         kind: input.kind,
         eventId: input.kind === 'ticket' ? input.event_id : undefined,
         rewardType: input.kind === 'ticket' ? input.reward_type : undefined,
+        toBank: input.kind === 'ticket' && !input.from_bank && !!input.to_bank,
+        fromBank: input.kind === 'ticket' && input.from_bank ? data.ticketEvents.find((e) => e.id === input.event_id) : undefined,
         ruleVersions: input.kind === 'ticket' && input.event_id ? data.percent.events.get(input.event_id)?.versionIds : undefined,
         useFor,
         quantity: input.kind === 'ticket' ? (input.quantity ?? 1) : 1,

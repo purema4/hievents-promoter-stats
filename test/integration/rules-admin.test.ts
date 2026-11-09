@@ -38,6 +38,8 @@ describeIntegration('rules screens', () => {
     admin = await signInAdmin(server);
     maya = await newPromoter(server, admin, { name: `Maya ${uid()}`, codes: 'DJMAX' });
     db = new Database(join(server.dataDir, 'promoters.sqlite'));
+    // The server writes too (notifications, milestones…): wait for it rather than fail with SQLITE_BUSY.
+    db.exec('PRAGMA busy_timeout = 5000');
   }, 60_000);
   afterAll(async () => {
     db?.close();
@@ -54,7 +56,7 @@ describeIntegration('rules screens', () => {
   test('the default rule, migrated from the old rates, in words', async () => {
     const page = text(await admin.page('/admin/rules'));
     expect(page).toContain('Commission: 10% of your sales at full price, outside Hi.Events too.');
-    expect(page).toContain('Free tickets: 1 from your first sale, then 1 more for every 5 tickets sold after the first one.');
+    expect(page).toContain('Free ticket: 1 from your first sale, then 1 more for every 5 tickets sold after the first one.');
     expect(page).toContain('Warehouse Night');
   });
 
@@ -86,7 +88,7 @@ describeIntegration('rules screens', () => {
     const live = await check('scope=event&event=1', ash, '4');
     expect(live.status).toBe(200);
     expect(live.body.problems).toEqual([]);
-    expect(live.body.en).toEqual(['Commission: $5.00 per ticket sold.', 'VIP: 2 from your first sale.', 'GA list: 1 for every 5 tickets sold.', 'Free tickets: 0.']);
+    expect(live.body.en).toEqual(['Commission: $5.00 per ticket sold.', 'VIP: 2 from your first sale.', 'GA list: 1 for every 5 tickets sold.', 'Free ticket: 0.']);
     expect(live.body.fr).toContain('Liste GA : 1 par tranche de 5 billets vendus.');
     const madeUp = Object.fromEntries((live.body.preview as { made_up?: boolean; tickets: number; values: Record<string, string> }[]).filter((r) => r.made_up).map((r) => [r.tickets, r.values]));
     const table = [1, 4, 5, 12, 20].map((sold) => [sold, madeUp[sold]!.commission, madeUp[sold]!.vip_tickets, madeUp[sold]!.ga_list]);
@@ -151,8 +153,8 @@ describeIntegration('rules screens', () => {
     expect(stats(await maya.client.page('/events/2')).get('Commission')).toBe('$1.00');
   });
 
-  test('without ANTHROPIC_API_KEY, no "Write it for me"', async () => {
-    expect(text(await admin.page('/admin/rules/edit?scope=default'))).not.toContain('Write it for me');
+  test('without ANTHROPIC_API_KEY, no "Ask Claude"', async () => {
+    expect(text(await admin.page('/admin/rules/edit?scope=default'))).not.toContain('Ask Claude');
     expect((await admin.post('/admin/rules/write?scope=default', { description: 'x' })).status).toBe(404);
   });
 

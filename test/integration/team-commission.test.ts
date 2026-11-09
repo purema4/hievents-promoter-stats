@@ -22,6 +22,7 @@ describeIntegration('team commission', () => {
   /** Moves the day they joined back, as if they had been on the team all along. */
   function joinedLongAgo(memberId: number) {
     const db = new Database(join(server.dataDir, 'promoters.sqlite'));
+    db.exec('PRAGMA busy_timeout = 5000'); // the server writes too
     db.query("UPDATE team_memberships SET from_day = '2000-01-01' WHERE member_id = ?").run(memberId);
     db.close();
   }

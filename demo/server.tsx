@@ -149,6 +149,8 @@ demo.post('/__demo/reset', (c) => {
 });
 
 const canonical = new URL(config.appUrl);
+// Where the demo is published on this computer (see docker-compose.demo.yml).
+const local = new URL(process.env.DEMO_LOCAL_URL ?? 'http://127.0.0.1:3100');
 
 async function withBar(req: Request, res: Response): Promise<Response> {
   if (!res.headers.get('content-type')?.includes('text/html') || req.headers.get('sec-fetch-dest') === 'iframe') return res;
@@ -164,6 +166,21 @@ async function withBar(req: Request, res: Response): Promise<Response> {
   return new Response(html, { status: res.status, headers });
 }
 
+// Text is sent gzipped when the browser accepts it: through ngrok's free plan, bytes are what is slow.
+const COMPRESSIBLE = /^(text\/(?!event-stream)|application\/(javascript|json|manifest\+json|xml)|image\/svg\+xml)/;
+
+async function gzipped(req: Request, res: Response): Promise<Response> {
+  const type = res.headers.get('content-type') ?? '';
+  if (!res.body || res.headers.has('content-encoding') || !COMPRESSIBLE.test(type) || !/\bgzip\b/.test(req.headers.get('accept-encoding') ?? '')) return res;
+  const body = new Uint8Array(await res.arrayBuffer());
+  const headers = new Headers(res.headers);
+  headers.append('vary', 'Accept-Encoding');
+  if (body.length < 1024) return new Response(body, { status: res.status, statusText: res.statusText, headers });
+  headers.set('content-encoding', 'gzip');
+  headers.delete('content-length');
+  return new Response(Bun.gzipSync(body), { status: res.status, statusText: res.statusText, headers });
+}
+
 console.log(`Demo ready on ${config.appUrl}`);
 
 export default {
@@ -171,9 +188,16 @@ export default {
   idleTimeout: app.idleTimeout,
   async fetch(req: Request, server: unknown) {
     const url = new URL(req.url);
-    // Sessions and links follow APP_URL; a cookie for "localhost" would also collide with the dev stack's.
-    if (url.hostname === 'localhost') return Response.redirect(`${canonical.origin}${url.pathname}${url.search}`, 307);
-    if (url.pathname.startsWith('/__demo/')) return demo.fetch(req, server);
-    return withBar(req, await app.fetch(req, server));
+    // A cookie for "localhost" would collide with the dev stack's: it goes to 127.0.0.1:3100.
+    if (url.hostname === 'localhost') return Response.redirect(`${local.origin}${url.pathname}${url.search}`, 307);
+    // Through ngrok, the demo answers on both its ngrok address (APP_URL) and on 127.0.0.1:3100. Forms
+    // only accept APP_URL's origin, so a post from this computer's own address is passed on as one.
+    if (url.host === local.host && url.host !== canonical.host && req.headers.get('origin') === local.origin) {
+      const headers = new Headers(req.headers);
+      headers.set('origin', canonical.origin);
+      req = new Request(req, { headers });
+    }
+    if (url.pathname.startsWith('/__demo/')) return gzipped(req, await demo.fetch(req, server));
+    return gzipped(req, await withBar(req, await app.fetch(req, server)));
   },
 };

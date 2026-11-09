@@ -102,6 +102,35 @@ export async function teamCommission(lead: User, range: Range = 'all'): Promise<
   return [...sales].map(([currency, cents]) => ({ currency, sales: cents, commission: Math.round((cents * percent) / 100) }));
 }
 
+/**
+ * What a team lead's promoters sold, per event: tickets, and sales at full price in cents. Like the team
+ * commission, it counts each promoter from the day they joined the team to the day they left, and never
+ * the team lead's own sales.
+ */
+export async function teamSalesByEvent(lead: User): Promise<Map<number, { tickets: number; fullPrice: number }>> {
+  const rows = db
+    .query<{ member_id: number | null; codes: string | null; from_day: string; to_day: string | null }, [number]>(
+      'SELECT member_id, codes, from_day, to_day FROM team_memberships WHERE lead_id = ?',
+    )
+    .all(lead.id);
+  const out = new Map<number, { tickets: number; fullPrice: number }>();
+  for (const row of rows) {
+    const codes: string[] = row.codes ? JSON.parse(row.codes) : row.member_id ? codesFor(row.member_id) : [];
+    for (const d of await dailyForCodes(codes)) {
+      if (d.event_id === undefined || d.day < row.from_day || (row.to_day && d.day > row.to_day)) continue;
+      const e = out.get(d.event_id) ?? { tickets: 0, fullPrice: 0 };
+      out.set(d.event_id, { tickets: e.tickets + d.tickets, fullPrice: e.fullPrice + toCents(d.full_price) });
+    }
+  }
+  return out;
+}
+
+/** Every promo code ever on a team lead's team (promoters who left included). */
+export function teamCodes(leadId: number): string[] {
+  const rows = db.query<{ member_id: number | null; codes: string | null }, [number]>('SELECT member_id, codes FROM team_memberships WHERE lead_id = ?').all(leadId);
+  return [...new Set(rows.flatMap((r) => (r.codes ? (JSON.parse(r.codes) as string[]) : r.member_id ? codesFor(r.member_id) : [])))];
+}
+
 /** True when someone ever was on this person's team, so they may have team commission. */
 export const hadTeam = (leadId: number) => !!db.query('SELECT 1 FROM team_memberships WHERE lead_id = ? LIMIT 1').get(leadId);
 

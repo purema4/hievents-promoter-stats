@@ -1,5 +1,5 @@
 import { config } from './config';
-import { db, listUsers } from './local-db';
+import { addColumn, db, listUsers } from './local-db';
 import type { EventRule } from './money';
 import { rewardRules, trackOn, type Track } from './reward-rules';
 import { parseRule, type RuleLine } from './rules-engine';
@@ -21,8 +21,8 @@ import { FIXED_OUTPUTS } from './rule-variables';
 db.exec(`
   CREATE TABLE IF NOT EXISTS rule_versions (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    scope       TEXT NOT NULL CHECK (scope IN ('default', 'promoter', 'event', 'promoter_event', 'template')),
-    user_id     INTEGER, -- promoter and promoter_event (kept when the promoter is deleted: history)
+    scope       TEXT NOT NULL CHECK (scope IN ('default', 'promoter', 'event', 'promoter_event', 'template', 'team')),
+    user_id     INTEGER, -- promoter, promoter_event and team (kept when the promoter is deleted: history)
     event_id    INTEGER, -- event and promoter_event (a Hi.Events event id)
     template_id INTEGER, -- template
     text        TEXT NOT NULL, -- '' when the rule was removed
@@ -44,7 +44,21 @@ db.exec(`
   );
 `);
 
-export type RuleScope = 'default' | 'promoter' | 'event' | 'promoter_event' | 'template';
+// Tables made before team rules: their CHECK lacks 'team'. Rebuilt once, every version kept with its id.
+{
+  const made = db.query<{ sql: string }, []>("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'rule_versions'").get();
+  if (made && !made.sql.includes("'team'")) {
+    db.transaction(() => {
+      db.exec('ALTER TABLE rule_versions RENAME TO rule_versions_before_teams');
+      db.exec(made.sql.replace("'template')", "'template', 'team')"));
+      db.exec('INSERT INTO rule_versions SELECT * FROM rule_versions_before_teams');
+      db.exec('DROP TABLE rule_versions_before_teams');
+      db.exec('CREATE INDEX IF NOT EXISTS rule_versions_lookup ON rule_versions (scope, user_id, event_id, template_id, id)');
+    })();
+  }
+}
+
+export type RuleScope = 'default' | 'promoter' | 'event' | 'promoter_event' | 'template' | 'team';
 export type RuleTarget = { userId?: number | null; eventId?: number | null; templateId?: number | null };
 export type RuleVersion = { id: number; scope: RuleScope; user_id: number | null; event_id: number | null; template_id: number | null; text: string; created_by: number | null; created_at: string };
 
@@ -97,7 +111,7 @@ export function saveRuleVersion(scope: RuleScope, target: RuleTarget, text: stri
 export function endRulesOf(userId: number, by: number | null) {
   const rows = db
     .query<{ scope: RuleScope; event_id: number | null }, [number]>(
-      "SELECT DISTINCT scope, event_id FROM rule_versions WHERE user_id = ? AND scope IN ('promoter', 'promoter_event')",
+      "SELECT DISTINCT scope, event_id FROM rule_versions WHERE user_id = ? AND scope IN ('promoter', 'promoter_event', 'team')",
     )
     .all(userId);
   for (const r of rows) saveRuleVersion(r.scope, { userId, eventId: r.event_id }, '', by);
@@ -161,6 +175,17 @@ export function ruleFor(userId: number, eventId: number): AppliedRule {
   return { lines: [...byName.values()], versionIds, key: versionIds.join('.') || 'none', from };
 }
 
+/**
+ * A team lead's team rule: lines added on top of their own rule (whatever it is), on every event their
+ * team sells. Its commission is their team commission; it reads team_full_price_sales and the like.
+ */
+export function teamRuleFor(leadId: number): AppliedRule | null {
+  const version = currentRule('team', { userId: leadId });
+  if (!version) return null;
+  const lines = parseRule(version.text).lines;
+  return { lines, versionIds: [version.id], key: `team${version.id}`, from: new Map(lines.map((l) => [l.name, 'team' as RuleScope])) };
+}
+
 /** The rule a promoter has outside any event (their own, else the default): sales entered by hand. */
 export function generalRuleFor(userId: number): AppliedRule {
   const levels: [RuleScope, RuleVersion | null][] = [
@@ -215,25 +240,44 @@ export function removeTemplate(id: number) {
 
 // --- Reward types -------------------------------------------------------------------------------------
 
-export type RewardType = { key: string; label_en: string; label_fr: string };
+// What one is, in a sentence, shown to promoters so they know exactly what they ask for.
+addColumn('reward_types', 'description_en', 'TEXT');
+addColumn('reward_types', 'description_fr', 'TEXT');
+// A guest list: names at the door instead of tickets. Only those ask promoters for names; other rewards
+// are tickets sent to the promoter. Types made before this flag get it when their key says so.
+{
+  const had = db.query<{ name: string }, []>('PRAGMA table_info(reward_types)').all().some((c) => c.name === 'guest_list');
+  addColumn('reward_types', 'guest_list', 'INTEGER NOT NULL DEFAULT 0');
+  if (!had) db.query("UPDATE reward_types SET guest_list = 1 WHERE key LIKE 'gl\\_%' ESCAPE '\\' OR key LIKE '%\\_list' ESCAPE '\\' OR key LIKE '%guest%'").run();
+}
+// The first label of plain free tickets said nothing of what they are: given a clear one, unless changed.
+db.query(
+  "UPDATE reward_types SET label_en = 'Free ticket', label_fr = 'Billet gratuit', description_en = 'A regular entry ticket to the event, free.', description_fr = 'Un billet d’entrée régulier pour l’événement, gratuit.' WHERE key = 'free_tickets' AND label_en = 'Free tickets' AND description_en IS NULL",
+).run();
+
+export type RewardType = { key: string; label_en: string; label_fr: string; description_en?: string | null; description_fr?: string | null; guest_list?: number };
 
 export const REWARD_KEY = /^[a-z][a-z0-9_]{1,39}$/;
 
 export function listRewardTypes(): RewardType[] {
-  return db.query<RewardType, []>('SELECT key, label_en, label_fr FROM reward_types ORDER BY created_at, key').all();
+  return db.query<RewardType, []>('SELECT key, label_en, label_fr, description_en, description_fr, guest_list FROM reward_types ORDER BY created_at, key').all();
 }
 
 export function rewardTypeOf(key: string): RewardType | null {
-  return db.query<RewardType, [string]>('SELECT key, label_en, label_fr FROM reward_types WHERE key = ?').get(key);
+  return db.query<RewardType, [string]>('SELECT key, label_en, label_fr, description_en, description_fr, guest_list FROM reward_types WHERE key = ?').get(key);
 }
 
 /** Adds or renames a reward type. Its key is what rules use and cannot be one of the fixed outputs. */
-export function saveRewardType(key: string, labelEn: string, labelFr: string): 'ok' | 'invalid' {
+export function saveRewardType(key: string, labelEn: string, labelFr: string, descriptionEn = '', descriptionFr = '', guestList = false): 'ok' | 'invalid' {
   if (!REWARD_KEY.test(key) || FIXED_OUTPUTS.some((o) => o.name === key)) return 'invalid';
   const en = labelEn.trim().slice(0, 40);
   const fr = labelFr.trim().slice(0, 40) || en;
   if (!en) return 'invalid';
-  db.query('INSERT INTO reward_types (key, label_en, label_fr) VALUES (?, ?, ?) ON CONFLICT (key) DO UPDATE SET label_en = excluded.label_en, label_fr = excluded.label_fr').run(key, en, fr);
+  const dEn = descriptionEn.trim().slice(0, 200) || null;
+  const dFr = descriptionFr.trim().slice(0, 200) || dEn;
+  db.query(
+    'INSERT INTO reward_types (key, label_en, label_fr, description_en, description_fr, guest_list) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (key) DO UPDATE SET label_en = excluded.label_en, label_fr = excluded.label_fr, description_en = excluded.description_en, description_fr = excluded.description_fr, guest_list = excluded.guest_list',
+  ).run(key, en, fr, dEn, dFr, guestList ? 1 : 0);
   return 'ok';
 }
 
@@ -277,7 +321,7 @@ export const FREE_TICKETS = 'free_tickets';
 export function migrateToRules() {
   if (db.query("SELECT 1 FROM settings WHERE key = 'rules:migrated'").get()) return;
   db.transaction(() => {
-    if (!rewardTypeOf(FREE_TICKETS)) saveRewardType(FREE_TICKETS, 'Free tickets', 'Billets gratuits');
+    if (!rewardTypeOf(FREE_TICKETS)) saveRewardType(FREE_TICKETS, 'Free ticket', 'Billet gratuit', 'A regular entry ticket to the event, free.', 'Un billet d’entrée régulier pour l’événement, gratuit.');
     const tickets = rewardRules().tickets;
     const defaultText = [
       '# Your usual deal. Events and promoters can have their own lines.',

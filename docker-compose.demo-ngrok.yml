@@ -1,0 +1,26 @@
+# The demo at your reserved ngrok address, to show it from anywhere. Start it with ./demo-ngrok.sh, which
+# reads NGROK_AUTHTOKEN and NGROK_DOMAIN from the Hi.Events dev .env, and DEMO_NGROK_PASSWORD from .env.
+# The free plan allows one tunnel at a time: stop the other ones first (./dev-ngrok.sh down, and
+# docker/development/dev-ngrok.sh down in Hi.Events).
+#
+# Anyone who reaches the demo can become admin from its bar, so ngrok asks for a password first
+# (user "demo", DEMO_NGROK_PASSWORD, 8 characters or more) before anything reaches the app.
+services:
+  demo:
+    environment:
+      APP_URL: https://${NGROK_DOMAIN:?set NGROK_DOMAIN in the Hi.Events dev .env}
+      # The demo stays on http://127.0.0.1:3100 too, where a Secure cookie would not be kept everywhere.
+      # Behind ngrok's password, a session cookie without the Secure flag is acceptable for a demo.
+      COOKIE_SECURE: "false"
+
+  demo-ngrok:
+    image: ngrok/ngrok:3
+    restart: unless-stopped
+    command: ["http", "demo:3000", "--url=${NGROK_DOMAIN}", "--inspect=false", "--basic-auth=demo:${DEMO_NGROK_PASSWORD:?set DEMO_NGROK_PASSWORD in .env}"]
+    environment:
+      NGROK_AUTHTOKEN: ${NGROK_AUTHTOKEN:?set NGROK_AUTHTOKEN in the Hi.Events dev .env}
+    ports:
+      - "127.0.0.1:4042:4040"
+    depends_on:
+      demo:
+        condition: service_healthy

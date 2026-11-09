@@ -35,6 +35,12 @@ addColumn('reward_requests', 'source_event_title', 'TEXT');
 addColumn('reward_requests', 'reward_type', 'TEXT');
 addColumn('reward_requests', 'reward_label', 'TEXT');
 addColumn('reward_requests', 'rule_versions', 'TEXT');
+/*
+ * The bank. A promoter can ask to put rewards of an event in their bank (event_id NULL, source_event_id
+ * the event): admins accept or decline, like any request. Accepted, they stay there whatever happens to
+ * the event, with their type, until asked for an upcoming event (from_bank = 1, source_event_id NULL).
+ */
+addColumn('reward_requests', 'from_bank', 'INTEGER');
 
 export const FREE_TICKETS = 'free_tickets';
 
@@ -53,6 +59,7 @@ export type RewardRequest = {
   reward_type: string | null;
   reward_label: string | null;
   rule_versions: string | null;
+  from_bank: number | null;
   status: 'pending' | 'fulfilled' | 'rejected';
   admin_note: string | null;
   created_at: string;
@@ -86,6 +93,8 @@ export type Rewards = {
   totalSold: number; // Hi.Events sales plus tickets sold outside it, entered by admins
   outsideSold: number;
   tickets: TicketReward[]; // per upcoming event and reward type: a free ticket for a past event is no use
+  /** What is in the bank, by type: kept whatever happens to the events they came from. */
+  bank: BankBalance[];
   merch: {
     earned: number;
     bonus: number;
@@ -102,14 +111,33 @@ export type Rewards = {
 
 const isUpcoming = (e: EventSummary) => !e.end || e.end.getTime() >= Date.now();
 
-const plainFreeTickets: RewardType = { key: FREE_TICKETS, label_en: 'Free tickets', label_fr: 'Billets gratuits' };
+export type BankBalance = { type: RewardType; balance: number; pending: number };
+
+/** Requested to go into the bank, still waiting for the team. */
+export const isDeposit = (r: RewardRequest) => r.kind === 'ticket' && r.event_id === null && r.source_event_id !== null;
+
+/** The bank, by reward type: accepted deposits, minus what was asked for out of it (not declined). */
+export function bankFor(userId: number): Map<string, { balance: number; pending: number }> {
+  const rows = db
+    .query<{ type: string; banked: number; pending: number; out: number }, [number]>(
+      `SELECT coalesce(reward_type, '${FREE_TICKETS}') AS type,
+         sum(CASE WHEN event_id IS NULL AND source_event_id IS NOT NULL AND status = 'fulfilled' THEN quantity ELSE 0 END) AS banked,
+         sum(CASE WHEN event_id IS NULL AND source_event_id IS NOT NULL AND status = 'pending' THEN quantity ELSE 0 END) AS pending,
+         sum(CASE WHEN from_bank = 1 AND status <> 'rejected' THEN quantity ELSE 0 END) AS out
+       FROM reward_requests WHERE user_id = ? AND kind = 'ticket' GROUP BY 1`,
+    )
+    .all(userId);
+  return new Map(rows.map((r) => [r.type, { balance: r.banked - r.out, pending: r.pending }]));
+}
+
+const plainFreeTickets: RewardType = { key: FREE_TICKETS, label_en: 'Free ticket', label_fr: 'Billet gratuit', description_en: 'A regular entry ticket to the event, free.' };
 
 /** Requested or given rewards (not declined), by "kind:sourceEvent:type". */
 function usedRewards(userId: number): Map<string, number> {
   const rows = db
     .query<{ kind: string; event_id: number | null; type: string; n: number }, [number]>(
       `SELECT kind, coalesce(source_event_id, event_id) AS event_id, coalesce(reward_type, '${FREE_TICKETS}') AS type, sum(quantity) AS n
-       FROM reward_requests WHERE user_id = ? AND status <> 'rejected' GROUP BY 1, 2, 3`,
+       FROM reward_requests WHERE user_id = ? AND status <> 'rejected' AND from_bank IS NOT 1 GROUP BY 1, 2, 3`,
     )
     .all(userId);
   return new Map(rows.map((r) => [`${r.kind}:${r.event_id}:${r.type}`, r.n]));
@@ -165,10 +193,16 @@ export function rewardsFor(userId: number, events: EventSummary[], rate: Rate | 
       });
     }
   }
+  const typeOf = (key: string) => types.get(key) ?? (key === FREE_TICKETS ? plainFreeTickets : { key, label_en: key, label_fr: key });
+  const bank = [...bankFor(userId)]
+    .filter(([, b]) => b.balance > 0 || b.pending > 0)
+    .map(([key, b]) => ({ type: typeOf(key), ...b }))
+    .sort((a, b) => (order.indexOf(a.type.key) + 1 || 999) - (order.indexOf(b.type.key) + 1 || 999));
   return {
     totalSold,
     outsideSold,
     tickets,
+    bank,
     merch: {
       earned: merch,
       bonus: extraMerch,
@@ -188,12 +222,16 @@ export function requestReward(
   user: User,
   rewards: Rewards,
   // eventId: the event the reward was earned on; rewardType: which reward (free tickets by default);
-  // useFor: another upcoming event to roll it over to; ruleVersions: the rule versions that gave it.
+  // useFor: another upcoming event to roll it over to (older requests; the shop uses the bank);
+  // toBank: put it in the bank; fromBank: take it out of the bank for this upcoming event;
+  // ruleVersions: the rule versions that gave it.
   input: {
     kind: 'ticket' | 'merch';
     eventId?: number;
     rewardType?: string;
     useFor?: { id: number; title: string };
+    toBank?: boolean;
+    fromBank?: { id: number; title: string };
     quantity: number;
     details: string;
     ruleVersions?: number[];
@@ -202,10 +240,23 @@ export function requestReward(
   const details = input.details.trim();
   if (input.kind === 'merch' && !details) return 'missing_details';
   const type = input.rewardType || FREE_TICKETS;
+  if (!Number.isInteger(input.quantity) || input.quantity < 1) return 'not_available';
+  if (input.kind === 'ticket' && input.fromBank) {
+    const event = input.fromBank;
+    const label = rewards.bank.find((b) => b.type.key === type)?.type.label_en ?? null;
+    return db.transaction((): RewardResult => {
+      if (input.quantity > (bankFor(user.id).get(type)?.balance ?? 0)) return 'not_available';
+      db.query(
+        `INSERT INTO reward_requests (user_id, promoter_name, promoter_email, kind, event_id, event_title, quantity, details,
+           reward_type, reward_label, from_bank) VALUES (?, ?, ?, 'ticket', ?, ?, ?, ?, ?, ?, 1)`,
+      ).run(user.id, user.name, user.email, event.id, event.title, input.quantity, details || null, type !== FREE_TICKETS ? type : null, type !== FREE_TICKETS ? label : null);
+      return 'ok';
+    })();
+  }
   const ticket = input.kind === 'ticket' ? rewards.tickets.find((t) => t.event.id === input.eventId && t.type.key === type) : undefined;
   if (input.kind === 'ticket' && !ticket) return 'not_available';
-  const target = ticket && input.useFor && input.useFor.id !== ticket.event.id ? input.useFor : null;
-  if (!Number.isInteger(input.quantity) || input.quantity < 1) return 'not_available';
+  const target = ticket && !input.toBank && input.useFor && input.useFor.id !== ticket.event.id ? input.useFor : null;
+  const toBank = !!ticket && !!input.toBank;
   // Re-counted inside the transaction so two quick submits cannot claim the same reward twice.
   return db.transaction((): RewardResult => {
     const used = usedRewards(user.id);
@@ -221,8 +272,8 @@ export function requestReward(
       user.name,
       user.email,
       input.kind,
-      target?.id ?? ticket?.event.id ?? null,
-      target?.title ?? ticket?.event.title ?? null,
+      toBank ? null : (target?.id ?? ticket?.event.id ?? null),
+      toBank ? null : (target?.title ?? ticket?.event.title ?? null),
       input.quantity,
       details || null,
       ticket?.event.id ?? null,
@@ -266,6 +317,24 @@ export function requestRewards(user: User, rewards: Rewards, items: RewardInput[
   }
 }
 
+/** Would this cart go through? The same checks as requestRewards, then everything is undone. */
+export function checkRewards(user: User, rewards: Rewards, items: RewardInput[]): RewardResult {
+  class Undo extends Error {
+    constructor(readonly result: RewardResult) {
+      super(result);
+    }
+  }
+  try {
+    db.transaction(() => {
+      throw new Undo(requestRewards(user, rewards, items).result);
+    })();
+  } catch (err) {
+    if (err instanceof Undo) return err.result;
+    throw err;
+  }
+  return 'not_available';
+}
+
 export function rewardRequestsFor(userId: number): RewardRequest[] {
   return db.query<RewardRequest, [number]>('SELECT * FROM reward_requests WHERE user_id = ? ORDER BY id DESC').all(userId);
 }
@@ -296,10 +365,13 @@ export function settleReward(id: number, adminId: number, status: 'fulfilled' | 
 }
 
 /** Free tickets asked for another event than the one they were earned on. */
-export const isRollover = (r: RewardRequest) => r.kind === 'ticket' && r.source_event_id !== null && r.source_event_id !== r.event_id;
+export const isRollover = (r: RewardRequest) =>
+  r.kind === 'ticket' && r.event_id !== null && r.source_event_id !== null && r.source_event_id !== r.event_id;
 
 export function describeReward(r: RewardRequest): string {
   if (r.kind === 'merch') return 'Merch';
   const tickets = r.reward_type ? `${r.quantity} ${r.reward_label ?? r.reward_type}` : `${r.quantity} free ${r.quantity === 1 ? 'ticket' : 'tickets'}`;
+  if (isDeposit(r)) return `${tickets} into the bank, from ${r.source_event_title}`;
+  if (r.from_bank) return `${tickets} for ${r.event_title}, from the bank`;
   return isRollover(r) ? `${tickets} for ${r.event_title}, rolled over from ${r.source_event_title}` : `${tickets} for ${r.event_title}`;
 }

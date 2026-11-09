@@ -104,6 +104,13 @@ export function balances(userId: number, totals: Totals[], team: { currency: str
   });
 }
 
+/** The team commission of before (a % on Teams) and what a team rule gives, added per currency. */
+export function withTeamRule(team: { currency: string; commission: number }[], rule: Map<string, number> | undefined): { currency: string; commission: number }[] {
+  const out = new Map(team.map((t) => [t.currency, t.commission]));
+  for (const [currency, cents] of rule ?? []) out.set(currency, (out.get(currency) ?? 0) + cents);
+  return [...out].map(([currency, commission]) => ({ currency, commission }));
+}
+
 export type RequestResult = 'ok' | 'invalid_amount' | 'too_much' | 'already_pending' | 'missing_method' | 'cash_step';
 
 // The most that can be taken in cash: the available balance rounded down to a whole CASH_STEP.

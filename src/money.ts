@@ -49,6 +49,8 @@ export type Rate = {
   stale: boolean;
   /** Every rule version used, for keeping with a payout. */
   versionIds: number[];
+  /** Team leads: what their team rule gave on their team's sales (commission and bonus), cents per currency. */
+  team?: Map<string, number>;
 };
 
 const percentOn = (fullPrice: string | number, percent: number) => Math.round(Number(fullPrice) * percent);
