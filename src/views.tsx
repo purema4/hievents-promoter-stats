@@ -30,7 +30,7 @@ import { describeRate, describeRule, formatMoney, formatPercent, type EventRule 
 import { countPendingPayouts, type Balance, type PayoutRequest } from './payouts';
 import { LinkField, PayoutHistory, RewardHistory } from './promoter-views';
 import { countPendingRewards, describeReward, type RewardRequest } from './rewards';
-import { unreadCount, type Notification } from './notifications';
+import { ANNOUNCEMENT_BODY_MAX, ANNOUNCEMENT_TITLE_MAX, unreadCount, type Announcement, type Notification } from './notifications';
 import { definitions, emailTypes, getReplyTo, getTemplate, isCustomized, type EmailType } from './email-templates';
 import type { EmailLogEntry } from './mail';
 import { tokensFor, type ApiToken } from './api-tokens';
@@ -241,9 +241,13 @@ details.alert-box > summary { cursor: pointer; font-weight: 600; padding: 4px 0 
 .bell { position: relative; display: inline-flex; color: var(--text); }
 .bell-count { position: absolute; top: -6px; right: -9px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: var(--danger); color: #fff; font: 700 11px/18px system-ui; text-align: center; }
 .notification-list { display: grid; gap: 8px; }
-a.notification { display: grid; gap: 2px; color: inherit; text-decoration: none; }
+a.notification, div.notification { display: grid; gap: 2px; color: inherit; text-decoration: none; }
 a.notification:hover { border-color: var(--accent); }
 a.notification.unread { border-left: 4px solid var(--accent); }
+.notification-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 16px 0 8px; }
+.notification-head h2 { margin: 0; }
+.audience { display: grid; gap: 10px; }
+.audience .check select { flex: 1; min-width: 0; }
 .push-box { display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; margin-bottom: 20px; }
 .push-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .push-devices { flex-basis: 100%; margin: 0; }
@@ -1000,6 +1004,7 @@ function Sidebar(props: { user: User }) {
             <a href="/admin/commissions">Commissions</a>
             <a href="/admin/media">Media drives</a>
             <a href="/admin/banners">Banners</a>
+            <a href="/admin/notifications">Send a notification</a>
             <a href="/admin/rules">Rules</a>
             <a href="/admin/invites">Invite links</a>
             <a href="/admin/pages">Promoter pages</a>
@@ -2403,6 +2408,7 @@ export function NotificationsPage(props: {
   ok?: string;
   error?: string;
 }) {
+  const unread = props.notifications.filter((n) => !n.read_at).length;
   return (
     <Layout title="Notifications" user={props.user}>
       <h1>Notifications</h1>
@@ -2432,12 +2438,25 @@ export function NotificationsPage(props: {
             : `Phone notifications are on for ${props.devices === 1 ? '1 device' : `${props.devices} devices`}.`}
         </p>
       </div>
+      {props.notifications.length > 0 && (
+        <div class="notification-head">
+          <h2>{unread > 0 ? `${unread} unread` : 'All read'}</h2>
+          {unread > 0 && (
+            <form class="inline" method="post" action="/notifications/read">
+              <button class="secondary" type="submit">
+                Mark all as read
+              </button>
+            </form>
+          )}
+        </div>
+      )}
       {props.notifications.length === 0 ? (
         <p class="muted">Nothing yet. Payouts, rewards and milestones will show up here.</p>
       ) : (
         <div class="notification-list">
           {props.notifications.map((n) => (
-            <a class={`card notification${n.read_at ? '' : ' unread'}`} href={n.link ?? '/'}>
+            // Through /notifications/<id>: marked as read on the way.
+            <a class={`card notification${n.read_at ? '' : ' unread'}`} href={`/notifications/${n.id}`}>
               <strong>{n.title}</strong>
               <span>{n.body}</span>
               <span class="muted">{timeLabel(n.created_at)}</span>
@@ -3853,6 +3872,95 @@ export function AdminMediaPage(props: {
           </div>
         );
       })}
+    </Layout>
+  );
+}
+
+/** Admins write to one promoter, a team (its lead and members), or every promoter: in the app and on their phones. */
+export function AdminNotifyPage(props: {
+  user: User;
+  promoters: User[];
+  leads: { lead: User; members: number }[];
+  sent: Announcement[];
+  values: Record<string, string>;
+  ok?: string;
+  error?: string;
+}) {
+  const v = props.values;
+  const to = v.to || 'everyone';
+  return (
+    <Layout title="Send a notification" user={props.user}>
+      <h1>Send a notification</h1>
+      <p class="muted">
+        It shows up in their notifications, and on their phone when they turned phone notifications on.
+      </p>
+      <Flash ok={props.ok} error={props.error} />
+      <form class="card stack-card" method="post" action="/admin/notifications">
+        <fieldset class="audience">
+          <legend>Send to</legend>
+          <label class="check">
+            <input type="radio" name="to" value="everyone" checked={to === 'everyone'} />
+            <span>
+              Every promoter <span class="muted">({props.promoters.length})</span>
+            </span>
+          </label>
+          <label class="check">
+            <input type="radio" name="to" value="team" checked={to === 'team'} disabled={props.leads.length === 0} />
+            <span>A team</span>
+            <select name="lead" aria-label="Which team" data-picks="team" disabled={props.leads.length === 0}>
+              {props.leads.length === 0 && <option value="">No team yet</option>}
+              {props.leads.map(({ lead, members }) => (
+                <option value={String(lead.id)} selected={v.lead === String(lead.id)}>
+                  {lead.name}’s team ({members + 1})
+                </option>
+              ))}
+            </select>
+          </label>
+          <label class="check">
+            <input type="radio" name="to" value="one" checked={to === 'one'} />
+            <span>One promoter</span>
+            <select name="user" aria-label="Which promoter" data-picks="one">
+              {props.promoters.map((p) => (
+                <option value={String(p.id)} selected={v.user === String(p.id)}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        </fieldset>
+        <label>
+          Title
+          <input name="title" maxlength={ANNOUNCEMENT_TITLE_MAX} required value={v.title ?? ''} placeholder="Doors open at 9 p.m. on Saturday" />
+        </label>
+        <label>
+          Message
+          <textarea name="body" maxlength={ANNOUNCEMENT_BODY_MAX} required rows={3} placeholder="Come early: the first 50 get in free.">
+            {v.body ?? ''}
+          </textarea>
+        </label>
+        <label>
+          Opens (optional: a page of this app, like /payouts)
+          <input name="link" maxlength={200} value={v.link ?? ''} placeholder="/payouts" />
+        </label>
+        <button type="submit">Send</button>
+      </form>
+      <h2>Sent</h2>
+      {props.sent.length === 0 ? (
+        <p class="muted">Nothing sent yet.</p>
+      ) : (
+        <div class="notification-list">
+          {props.sent.map((a) => (
+            <div class="card notification">
+              <strong>{a.title}</strong>
+              <span>{a.body}</span>
+              <span class="muted">
+                To {a.audience} ({a.recipients === 1 ? '1 promoter' : `${a.recipients} promoters`}) · {timeLabel(a.created_at)}
+                {a.sender ? ` · by ${a.sender}` : ''}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
     </Layout>
   );
 }

@@ -58,11 +58,17 @@ import { allowImageUpload, maxImageSide, maxUploadBytes, processImage, purgeUplo
 import { parseRange } from './chart';
 import { checkAllMilestones, checkMilestones } from './milestones';
 import {
+  ANNOUNCEMENT_BODY_MAX,
+  ANNOUNCEMENT_TITLE_MAX,
+  announcementLink,
   isPushEndpoint,
   isPushKeys,
   markAllRead,
   notificationsFor,
   notify,
+  openNotification,
+  recentAnnouncements,
+  sendAnnouncement,
   purgeOldNotifications,
   pushDeviceCount,
   pushPublicKey,
@@ -192,6 +198,7 @@ import {
   AdminCodesPage,
   AdminCommissionsPage,
   AdminBannersPage,
+  AdminNotifyPage,
   AdminMediaPage,
   InvitesPage,
   JoinPage,
@@ -936,7 +943,7 @@ app.post('/welcome/done', (c) => {
   return c.redirect('/');
 });
 
-// Opening the list marks everything as read.
+// Unread ones stay marked until opened, or until "Mark all as read".
 app.get('/notifications', (c) => {
   const user = c.get('user');
   const test = c.req.query('test');
@@ -952,9 +959,20 @@ app.get('/notifications', (c) => {
       error={failed ? testMessage(test) : undefined}
     />,
   );
-  // Reading them as an admin leaves them unread for the promoter.
-  if (!user.impersonator) markAllRead(user.id);
   return page;
+});
+
+// Opening one marks it as read, then goes where it points. Viewing as a promoter leaves it unread for them.
+app.get('/notifications/:id{[0-9]+}', (c) => {
+  const user = c.get('user');
+  const n = openNotification(user.id, Number(c.req.param('id')), !!user.impersonator);
+  if (!n) return c.redirect('/notifications');
+  return c.redirect(n.link && /^(\/(?![/\\])|https?:)/.test(n.link) ? n.link : '/notifications');
+});
+
+app.post('/notifications/read', (c) => {
+  markAllRead(c.get('user').id);
+  return c.redirect('/notifications');
 });
 
 function testMessage(key?: string): string | undefined {
@@ -2010,6 +2028,62 @@ app.post('/admin/rules/types', async (c) => {
   if (result !== 'ok') return c.redirect('/admin/rules?error=reward_type#types');
   audit(c, 'admin.reward_type_saved', { by: c.get('user').id, key });
   return c.redirect('/admin/rules?ok=reward_type_saved#types');
+});
+
+// --- Notifications sent by admins: to one promoter, a team, or every promoter -------------------------
+
+const promoters = () => listUsers().filter((u) => !u.is_admin);
+
+function renderNotify(c: Context, opts: { status?: 400; error?: string; ok?: string; values?: Record<string, string> } = {}) {
+  return c.html(
+    <AdminNotifyPage
+      user={c.get('user')}
+      promoters={promoters()}
+      leads={teamLeads().map((lead) => ({ lead, members: teamMembers(lead.id).length }))}
+      sent={recentAnnouncements()}
+      values={opts.values ?? {}}
+      ok={opts.ok}
+      error={opts.error}
+    />,
+    opts.status ?? 200,
+  );
+}
+
+app.get('/admin/notifications', (c) => {
+  const sent = Number(c.req.query('sent'));
+  return renderNotify(c, { ok: Number.isInteger(sent) && c.req.query('sent') ? `Sent to ${sent === 1 ? '1 promoter' : `${sent} promoters`}.` : undefined });
+});
+
+app.post('/admin/notifications', async (c) => {
+  const body = await c.req.parseBody();
+  const values = Object.fromEntries(['to', 'user', 'lead', 'title', 'body', 'link'].map((k) => [k, String(body[k] ?? '').trim()]));
+  const again = (error: string) => renderNotify(c, { status: 400, error, values });
+  if (!values.title || values.title.length > ANNOUNCEMENT_TITLE_MAX) return again(`Give it a title, up to ${ANNOUNCEMENT_TITLE_MAX} characters.`);
+  if (!values.body || values.body.length > ANNOUNCEMENT_BODY_MAX) return again(`Write the message, up to ${ANNOUNCEMENT_BODY_MAX} characters.`);
+  const link = announcementLink(values.link!);
+  if (link === undefined) return again('The link must be a page of this app, like /payouts.');
+  let audience: string;
+  let ids: number[];
+  if (values.to === 'everyone') {
+    audience = 'Every promoter';
+    ids = promoters().map((u) => u.id);
+  } else if (values.to === 'team') {
+    const lead = teamLeads().find((u) => u.id === Number(values.lead));
+    if (!lead) return again('Pick a team.');
+    audience = `${lead.name}’s team`;
+    ids = [lead.id, ...teamMembers(lead.id).filter((u) => !u.is_admin).map((u) => u.id)];
+  } else if (values.to === 'one') {
+    const promoter = promoters().find((u) => u.id === Number(values.user));
+    if (!promoter) return again('Pick a promoter.');
+    audience = promoter.name;
+    ids = [promoter.id];
+  } else {
+    return again('Pick who it goes to.');
+  }
+  if (ids.length === 0) return again('Nobody to send it to.');
+  const sent = sendAnnouncement(c.get('user').id, audience, ids, { title: values.title, body: values.body!, link });
+  audit(c, 'admin.notification_sent', { by: c.get('user').id, audience, recipients: sent, title: values.title });
+  return c.redirect(`/admin/notifications?sent=${sent}`);
 });
 
 // --- Banners for promoters ---------------------------------------------------------------------------

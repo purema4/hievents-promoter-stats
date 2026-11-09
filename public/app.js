@@ -634,3 +634,11 @@ if (notice && typeof notice.showModal === 'function') {
     notice.close();
   });
 }
+
+// Send a notification: picking a team or a promoter in a list also picks that choice.
+for (const select of document.querySelectorAll('select[data-picks]')) {
+  select.addEventListener('change', () => {
+    const radio = select.form?.querySelector(`input[type=radio][value="${select.dataset.picks}"]`);
+    if (radio && !radio.disabled) radio.checked = true;
+  });
+}

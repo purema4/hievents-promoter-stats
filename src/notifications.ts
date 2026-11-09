@@ -13,6 +13,17 @@ db.exec(`
     read_at    TEXT
   );
   CREATE INDEX IF NOT EXISTS notifications_user ON notifications (user_id, read_at);
+  -- What admins sent themselves (to one promoter, a team or everyone), for the list on the send page.
+  CREATE TABLE IF NOT EXISTS announcements (
+    id         INTEGER PRIMARY KEY,
+    sent_by    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    audience   TEXT NOT NULL, -- like "Everyone", "Maya Tremblay's team" or "Kai Morin"
+    title      TEXT NOT NULL,
+    body       TEXT NOT NULL,
+    link       TEXT,
+    recipients INTEGER NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
   CREATE TABLE IF NOT EXISTS push_subscriptions (
     endpoint   TEXT PRIMARY KEY,
     user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -143,9 +154,10 @@ export function notify(to: Recipient | Recipient[], message: { title: string; bo
   const list = Array.isArray(to) ? to : [to];
   const ids = new Set(list.flatMap((r) => (r === 'admins' ? listUsers().filter((u) => u.is_admin).map((u) => u.id) : [r])));
   for (const userId of ids) {
-    db.query('INSERT INTO notifications (user_id, title, body, link) VALUES (?, ?, ?, ?)').run(userId, message.title, message.body, message.link);
+    const { id } = db.query<{ id: number }, [number, string, string, string]>('INSERT INTO notifications (user_id, title, body, link) VALUES (?, ?, ?, ?) RETURNING id').get(userId, message.title, message.body, message.link)!;
     const unread = unreadCount(userId);
-    setTimeout(() => void sendPush(userId, { title: message.title, body: message.body, url: message.link, unread }), 0);
+    // Tapping it on the phone marks it as read too, then goes to its link.
+    setTimeout(() => void sendPush(userId, { title: message.title, body: message.body, url: `/notifications/${id}`, unread }), 0);
   }
 }
 
@@ -161,6 +173,41 @@ export function notificationsFor(userId: number): Notification[] {
 
 export function markAllRead(userId: number) {
   db.query("UPDATE notifications SET read_at = datetime('now') WHERE user_id = ? AND read_at IS NULL").run(userId);
+}
+
+/** One of their notifications, marked as read unless `peek` (an admin viewing as them). */
+export function openNotification(userId: number, id: number, peek = false): Notification | null {
+  const n = db.query<Notification, [number, number]>('SELECT * FROM notifications WHERE id = ? AND user_id = ?').get(id, userId);
+  if (n && !n.read_at && !peek) db.query("UPDATE notifications SET read_at = datetime('now') WHERE id = ?").run(id);
+  return n;
+}
+
+// --- Sent by admins -------------------------------------------------------------------------------
+
+export const ANNOUNCEMENT_TITLE_MAX = 80;
+export const ANNOUNCEMENT_BODY_MAX = 300;
+
+export type Announcement = { id: number; sent_by: number | null; sender: string | null; audience: string; title: string; body: string; link: string | null; recipients: number; created_at: string };
+
+/** A link inside the app ("/payouts"), or nothing; never another site. */
+export function announcementLink(raw: string): string | null | undefined {
+  const link = raw.trim();
+  if (!link) return null;
+  return /^\/(?![/\\])[^\s]{0,199}$/.test(link) ? link : undefined;
+}
+
+/** Sends a message from the team to these promoters, in the app and on their phones, and keeps a record. */
+export function sendAnnouncement(by: number, audience: string, userIds: number[], message: { title: string; body: string; link: string | null }): number {
+  const ids = [...new Set(userIds)];
+  if (ids.length > 0) notify(ids, { title: message.title, body: message.body, link: message.link ?? '/notifications' });
+  db.query('INSERT INTO announcements (sent_by, audience, title, body, link, recipients) VALUES (?, ?, ?, ?, ?, ?)').run(by, audience, message.title, message.body, message.link, ids.length);
+  return ids.length;
+}
+
+export function recentAnnouncements(): Announcement[] {
+  return db
+    .query<Announcement, []>('SELECT a.*, u.name AS sender FROM announcements a LEFT JOIN users u ON u.id = a.sent_by ORDER BY a.id DESC LIMIT 30')
+    .all();
 }
 
 export function purgeOldNotifications() {
