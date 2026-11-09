@@ -14,7 +14,7 @@ services:
   demo-ngrok:
     image: ngrok/ngrok:3
     restart: unless-stopped
-    command: ["http", "demo:3000", "--url=${NGROK_DOMAIN}", "--basic-auth=demo:${DEMO_NGROK_PASSWORD:?set DEMO_NGROK_PASSWORD in .env}"]
+    command: ["http", "demo:3000", "--url=${NGROK_DOMAIN}", "--inspect=false", "--basic-auth=demo:${DEMO_NGROK_PASSWORD:?set DEMO_NGROK_PASSWORD in .env}"]
     environment:
       NGROK_AUTHTOKEN: ${NGROK_AUTHTOKEN:?set NGROK_AUTHTOKEN in the Hi.Events dev .env}
     ports:

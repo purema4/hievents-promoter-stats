@@ -164,6 +164,21 @@ async function withBar(req: Request, res: Response): Promise<Response> {
   return new Response(html, { status: res.status, headers });
 }
 
+// Text is sent gzipped when the browser accepts it: through ngrok's free plan, bytes are what is slow.
+const COMPRESSIBLE = /^(text\/(?!event-stream)|application\/(javascript|json|manifest\+json|xml)|image\/svg\+xml)/;
+
+async function gzipped(req: Request, res: Response): Promise<Response> {
+  const type = res.headers.get('content-type') ?? '';
+  if (!res.body || res.headers.has('content-encoding') || !COMPRESSIBLE.test(type) || !/\bgzip\b/.test(req.headers.get('accept-encoding') ?? '')) return res;
+  const body = new Uint8Array(await res.arrayBuffer());
+  const headers = new Headers(res.headers);
+  headers.append('vary', 'Accept-Encoding');
+  if (body.length < 1024) return new Response(body, { status: res.status, statusText: res.statusText, headers });
+  headers.set('content-encoding', 'gzip');
+  headers.delete('content-length');
+  return new Response(Bun.gzipSync(body), { status: res.status, statusText: res.statusText, headers });
+}
+
 console.log(`Demo ready on ${config.appUrl}`);
 
 export default {
@@ -175,7 +190,7 @@ export default {
     // Through ngrok (an https APP_URL), every other address goes there too, except Docker's health check.
     const elsewhere = canonical.protocol === 'https:' && url.host !== canonical.host && url.pathname !== '/healthz';
     if (url.hostname === 'localhost' || elsewhere) return Response.redirect(`${canonical.origin}${url.pathname}${url.search}`, 307);
-    if (url.pathname.startsWith('/__demo/')) return demo.fetch(req, server);
-    return withBar(req, await app.fetch(req, server));
+    if (url.pathname.startsWith('/__demo/')) return gzipped(req, await demo.fetch(req, server));
+    return gzipped(req, await withBar(req, await app.fetch(req, server)));
   },
 };
