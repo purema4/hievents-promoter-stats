@@ -367,6 +367,15 @@ The data is rebuilt on every start, with dates relative to today, and the number
 
 None of it can reach production: everything is in `demo/`, which only `demo/Dockerfile` copies. The production `Dockerfile` copies `src` and `public`, nothing in `src` refers to the demo (`test/unit/demo-isolation.test.ts` checks both), and `demo/server.tsx` wraps the app rather than changing it. Anyone who reaches the demo can become admin, so its ports only listen on this machine, and `demo/guard.ts` refuses to start unless both database URLs point at the `demo-db` container. Do not publish those ports.
 
+### Showing the demo remotely, through ngrok
+
+```sh
+./demo-ngrok.sh up -d --build --wait    # start (stop any other ngrok tunnel first: the free plan allows one)
+./demo-ngrok.sh down                    # stop
+```
+
+The demo is then at your reserved ngrok address (`NGROK_DOMAIN` and `NGROK_AUTHTOKEN` from the Hi.Events dev `.env`, as for `dev-ngrok.sh`). Since anyone who reaches it can become admin, ngrok asks for a password before anything reaches the app: user `demo`, password `DEMO_NGROK_PASSWORD` from `.env`. While it runs, http://127.0.0.1:3100 redirects to the ngrok address, since forms only accept that one.
+
 ## File storage (S3 and CDN)
 
 Profile photos and the logo are kept in the `promoter-data` volume and served by the app, unless you set up a bucket:

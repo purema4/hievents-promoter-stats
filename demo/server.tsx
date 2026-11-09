@@ -172,7 +172,9 @@ export default {
   async fetch(req: Request, server: unknown) {
     const url = new URL(req.url);
     // Sessions and links follow APP_URL; a cookie for "localhost" would also collide with the dev stack's.
-    if (url.hostname === 'localhost') return Response.redirect(`${canonical.origin}${url.pathname}${url.search}`, 307);
+    // Through ngrok (an https APP_URL), every other address goes there too, except Docker's health check.
+    const elsewhere = canonical.protocol === 'https:' && url.host !== canonical.host && url.pathname !== '/healthz';
+    if (url.hostname === 'localhost' || elsewhere) return Response.redirect(`${canonical.origin}${url.pathname}${url.search}`, 307);
     if (url.pathname.startsWith('/__demo/')) return demo.fetch(req, server);
     return withBar(req, await app.fetch(req, server));
   },
