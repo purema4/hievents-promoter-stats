@@ -416,10 +416,10 @@ The code lives in the public repository `purema4/hievents-promoter-stats`. GitHu
 
 ### The image
 
-Every commit on `main` that passes CI is published twice:
+Every commit on `main` that passes CI publishes two images, each twice:
 
-- `ghcr.io/purema4/hievents-promoter-stats:<full commit sha>`, which never changes. Use it to pin a version or roll back.
-- `ghcr.io/purema4/hievents-promoter-stats:latest`
+- the app: `ghcr.io/purema4/hievents-promoter-stats:<full commit sha>`, which never changes (use it to pin a version or roll back), and `:latest`;
+- the rules engine it needs: `ghcr.io/purema4/hievents-promoter-stats-rules:<full commit sha>` and `:latest`. Run both from the same commit.
 
 The package is private (GHCR's default, even for a public repository). To pull it on a server, create a classic personal access token with only the `read:packages` scope, then:
 
@@ -436,7 +436,31 @@ docker run -d --name promoter-stats --restart unless-stopped \
   ghcr.io/purema4/hievents-promoter-stats:latest
 ```
 
-With Compose, replace `build: .` in `docker-compose.yml` with `image: ghcr.io/purema4/hievents-promoter-stats:latest` and run `docker compose pull && docker compose up -d`. To go back to an earlier version, use its `:<sha>` tag instead of `:latest`.
+The app reaches the rules engine at `RULES_ENGINE_URL` (default `http://rules-engine:8080`). Without it, numbers stay at the last ones computed, payouts cannot be approved, and the admin pages say so. In production, run it next to the app with Compose, on a network of their own that nothing else joins:
+
+```yaml
+services:
+  rules-engine:
+    image: ghcr.io/purema4/hievents-promoter-stats-rules:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 256m
+    networks: [rules]
+
+  promoter-stats:
+    image: ghcr.io/purema4/hievents-promoter-stats:${IMAGE_TAG:-latest}
+    # …as before, plus:
+    networks: [rules]      # next to the networks it already has
+    depends_on: [rules-engine]
+
+networks:
+  rules:
+    internal: true         # no way in or out: only the app reaches the engine
+```
+
+Then `docker compose pull && docker compose up -d`. To go back to an earlier version, set `IMAGE_TAG` to its commit sha: both images follow.
 
 ### Settings to make by hand
 
