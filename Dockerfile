@@ -1,4 +1,4 @@
-FROM oven/bun:1.3.4-alpine
+FROM oven/bun:1.4.4-alpine
 
 # Pick up Alpine security fixes released after the base image was built. CI passes the day, so this layer
 # is not reused from its build cache for more than a day (a cached upgrade misses newer fixes).
