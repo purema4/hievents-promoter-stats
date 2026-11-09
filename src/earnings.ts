@@ -248,6 +248,7 @@ export async function earningsFor(promoter: User, rows: CodeStats[], opts: { nex
   }
   // Team leads: their team rule, on top, on every event their team sells (and their own).
   const team = new Map<string, number>();
+  const teamByEvent = new Map<number, { currency: string; cents: number; start: Date | null }>();
   const teamRule = isTeamLead(promoter) ? teamRuleFor(promoter.id) : null;
   if (teamRule && teamRule.lines.length > 0) {
     const memberRows = await statsForCodes(teamCodes(promoter.id));
@@ -268,8 +269,11 @@ export async function earningsFor(promoter: User, rows: CodeStats[], opts: { nex
       const currency = currencyOf.get(e.id) ?? 'CAD';
       for (const [name, value] of Object.entries(r?.outputs ?? {})) {
         if (!(value >= 0)) continue;
-        if (name === 'commission' || name === 'bonus') team.set(currency, (team.get(currency) ?? 0) + Math.round(value * 100));
-        else {
+        if (name === 'commission' || name === 'bonus') {
+          const cents = Math.round(value * 100);
+          team.set(currency, (team.get(currency) ?? 0) + cents);
+          if (cents > 0) teamByEvent.set(e.id, { currency, cents: (teamByEvent.get(e.id)?.cents ?? 0) + cents, start: e.start });
+        } else {
           // Rewards from the team rule land on the team lead's own events only.
           const own = byEvent.get(e.id);
           if (!own) continue;
@@ -280,5 +284,5 @@ export async function earningsFor(promoter: User, rows: CodeStats[], opts: { nex
     }
   }
   const versionIds = [...new Set([...allRules, ...(teamRule ? [teamRule] : [])].flatMap((r) => r.versionIds))].sort((a, b) => a - b);
-  return { events: byEvent, stale, versionIds, team };
+  return { events: byEvent, stale, versionIds, team, teamByEvent };
 }

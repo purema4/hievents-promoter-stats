@@ -51,6 +51,8 @@ export type Rate = {
   versionIds: number[];
   /** Team leads: what their team rule gave on their team's sales (commission and bonus), cents per currency. */
   team?: Map<string, number>;
+  /** The same, event by event (cents, commission and bonus), with when the event starts. */
+  teamByEvent?: Map<number, { currency: string; cents: number; start: Date | null }>;
 };
 
 const percentOn = (fullPrice: string | number, percent: number) => Math.round(Number(fullPrice) * percent);

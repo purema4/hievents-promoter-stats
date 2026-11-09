@@ -72,7 +72,8 @@ export function setTeamCommission(leadId: number, percent: number | null) {
   db.query('UPDATE users SET team_commission_percent = ? WHERE id = ?').run(percent, leadId);
 }
 
-export type TeamCommission = { currency: string; sales: number; commission: number }; // cents
+// cents; `rule` is the part from the team lead's team rule (included in `commission`).
+export type TeamCommission = { currency: string; sales: number; commission: number; rule?: number };
 
 /**
  * What a team lead earned on their promoters' sales, all time or for a period: every promoter who was

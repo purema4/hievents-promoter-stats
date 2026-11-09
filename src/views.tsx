@@ -3407,7 +3407,7 @@ export function AdminDashboardPage(props: { user: User; board: Leaderboard; team
                     <td class="num">{formatMoney(t.commission, cur)}</td>
                     <td class="num">
                       {formatMoney(t.teamCommission, cur)}
-                      <div class="muted">{formatPercent(teamCommissionPercentFor(t.lead))}</div>
+                      <div class="muted">{teamCommissionPercentFor(t.lead) > 0 ? formatPercent(teamCommissionPercentFor(t.lead)) : 'team rule'}</div>
                     </td>
                   </tr>
                 ))}
@@ -3422,6 +3422,12 @@ export function AdminDashboardPage(props: { user: User; board: Leaderboard; team
       <PromoterActivity promoters={props.promoters} />
     </Layout>
   );
+}
+
+/** "Team commission (10% of $1,516.00)", "(team rule)" or "(10% of $1,516.00 + team rule)". */
+function teamLabel(percent: number, sales: number, rule: number, cur: string): string {
+  const parts = [percent > 0 ? `${formatPercent(percent)} of ${formatMoney(sales, cur)}` : '', rule > 0 ? 'team rule' : ''].filter(Boolean);
+  return parts.length ? `Team commission (${parts.join(' + ')})` : 'Team commission';
 }
 
 // A team's sales, team lead included. Three views: the team lead's on /team (with their team
@@ -3485,7 +3491,7 @@ export function TeamPage(props: {
           <div class="card stat highlight">
             <div class="value">{formatMoney(team.commission, cur)}</div>
             <div class="label">
-              Team commission ({formatPercent(percent)} of {formatMoney(team.sales, cur)})
+              {teamLabel(percent, team.sales, (team as TeamCommission).rule ?? 0, cur)}
             </div>
           </div>
         )}

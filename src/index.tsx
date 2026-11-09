@@ -149,7 +149,6 @@ import {
   leaveTeams,
   setTeamCommission,
   setTeamLead,
-  teamCommission,
   teamLeadOf,
   teamLeads,
   teamMember,
@@ -157,7 +156,7 @@ import {
 } from './teams';
 import QRCode from 'qrcode';
 import { publicAsset, publicText, serviceWorker } from './static';
-import { announcePayoutRequest, announceRewardOrder, announceRewardRequest, commissionEvents, emailLoginLink, finishPayout, finishReward, promoterData } from './actions';
+import { announcePayoutRequest, announceRewardOrder, announceRewardRequest, commissionEvents, emailLoginLink, finishPayout, finishReward, promoterData, teamTotals } from './actions';
 import { iconUrl } from './icons';
 import { isTokenPath, mountApi, purgeApiLimits, takeOAuthReturn } from './api';
 import { createKey, KEY_DAYS, MAX_KEYS, type KeyDays, purgeApiTokens, revokeAllTokens, revokeToken, tokensFor } from './api-tokens';
@@ -2287,7 +2286,7 @@ async function renderTeam(c: Context<Env>, lead: User, basePath: string, memberH
   // Promoters looking at their own team see no commission, so cannot sort by it either.
   const sort: Sort = sortParam === 'sales' || (sortParam === 'commission' && memberHref) ? sortParam : 'tickets';
   const members = teamMembers(lead.id);
-  const [board, team] = await Promise.all([leaderboard(range, sort, [lead, ...members]), teamCommission(lead, range)]);
+  const [board, team] = await Promise.all([leaderboard(range, sort, [lead, ...members]), teamTotals(lead, range)]);
   return c.html(
     <TeamPage
       user={c.get('user')}
@@ -2405,7 +2404,7 @@ app.get('/admin/dashboard', async (c) => {
       const members = teamMembers(lead.id);
       const ids = new Set([lead.id, ...members.map((m) => m.id)]);
       const entries = board.entries.filter((e) => ids.has(e.user.id));
-      const team = (await teamCommission(lead, range)).find((t) => t.currency === board.currency);
+      const team = (await teamTotals(lead, range)).find((t) => t.currency === board.currency);
       return {
         lead,
         members: members.length,

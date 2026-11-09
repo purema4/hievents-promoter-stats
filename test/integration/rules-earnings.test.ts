@@ -182,6 +182,9 @@ describeIntegration('earnings from rules', () => {
     expect(location(await admin.post(`/admin/rules/edit?scope=team&user=${luna.id}`, { text: rule }))).toContain('ok=rule_saved');
     const earned = async () => [...stats(await luna.client.page('/'))].find(([label]) => label.startsWith('Commission earned'))![0];
     expect(await earned()).toContain('incl. $2.50 team commission');
+    // My team shows it too, as coming from the team rule.
+    expect(stats(await luna.client.page('/team?range=all')).get('Team commission (team rule)')).toBe('$2.50');
+    expect(stats(await admin.page(`/admin/teams/${luna.id}?range=all`)).get('Team commission (team rule)')).toBe('$2.50');
     // Maya gets nothing on the event: Luna gets nothing from her there either.
     setRule('promoter_event', 1, 'commission = 0');
     db.query("UPDATE rule_versions SET user_id = ? WHERE id = (SELECT max(id) FROM rule_versions)").run(maya.id);

@@ -14,7 +14,8 @@ import { notify } from './notifications';
 import { balances, settlePayout, type PayoutRequest, withTeamRule } from './payouts';
 import { summarizeEvents } from './promoter-views';
 import { describeReward, isDeposit, rewardsFor, settleReward, type RewardRequest } from './rewards';
-import { hadTeam, teamCommission } from './teams';
+import { hadTeam, teamCommission, type TeamCommission } from './teams';
+import { rangeBounds, type Range } from './chart';
 
 /*
  * What the pages and the API (api.ts) both do: the data behind a promoter's pages, and the actions
@@ -32,6 +33,24 @@ export async function emailLoginLink(
   const link = `${config.appUrl}/login/verify?token=${token}`;
   const expiry = kind === 'invite' ? `${config.inviteLinkDays} days` : `${config.loginLinkMinutes} minutes`;
   return sendEmail(kind, [user], { link, code, expiry }, undefined, { attempts });
+}
+
+/**
+ * A team lead's team commission for a period, as on My team: the share of the Teams page on their
+ * promoters' sales, plus what their team rule gives on the events that start in the period.
+ */
+export async function teamTotals(lead: User, range: Range = 'all'): Promise<TeamCommission[]> {
+  const [share, rate] = await Promise.all([teamCommission(lead, range), statsForCodes(codesFor(lead.id)).then((rows) => earningsFor(lead, rows))]);
+  const from = range === 'all' ? '' : rangeBounds(range, []).from;
+  const out = new Map(share.map((t) => [t.currency, { ...t, rule: 0 }]));
+  for (const e of rate.teamByEvent?.values() ?? []) {
+    if (from && (!e.start || e.start.toISOString().slice(0, 10) < from)) continue;
+    const t = out.get(e.currency) ?? { currency: e.currency, sales: 0, commission: 0, rule: 0 };
+    t.commission += e.cents;
+    t.rule += e.cents;
+    out.set(e.currency, t);
+  }
+  return [...out.values()];
 }
 
 // Everything a promoter's pages need; admins load the same data to see exactly what a promoter sees.
