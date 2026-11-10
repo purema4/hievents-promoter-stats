@@ -17,7 +17,7 @@ A small standalone site where promoters sign in and see how many tickets were so
 | Orders | Completed orders that used the code. |
 | Ticket sales at full price | Each item's price before the promo code's discount (`order_items.price_before_discount`, or `price` when no discount applied) × quantity, without taxes and fees. Partial refunds are taken off proportionally, the way Hi.Events adjusts its own stats. A $10 ticket bought with a 10% code counts as $10. |
 | Paid by customers | The order total after promo codes and discounts (`total_before_additions`), minus refunds the same way. Shown on event pages for reference. |
-| Commission | What the promoter's rule for the event gives (see [Rules](#rules)), rounded to the cent once per event. Out of the box that is full-price sales × `COMMISSION_PERCENT` (default 10), or the promoter's own usual rate: another percentage or an amount per ticket, set when adding or editing them. On **Promoters → Commissions**, admins can still set, per promoter and event, another percentage or an amount per ticket sold; it is saved as that promoter's rule for the event. Sales entered by hand count in the rule of the event they are entered for (`outside_tickets`, `outside_sales`); without an event, they earn the commission the promoter's own rule gives, added right away. |
+| Commission | What the promoter's rule for the event gives (see [Rules](#rules)), rounded to the cent once per event. Out of the box that is full-price sales × `COMMISSION_PERCENT` (default 10), or the promoter's own usual rate: another percentage or an amount per ticket, set when adding or editing them. On **Pay & rewards → Commissions**, admins can still set, per promoter and event, another percentage or an amount per ticket sold; it is saved as that promoter's rule for the event. Sales entered by hand count in the rule of the event they are entered for (`outside_tickets`, `outside_sales`); without an event, they earn the commission the promoter's own rule gives, added right away. |
 | Bonus | An amount a rule gives on top of the commission, shown and counted apart from it. |
 | Tickets sold per day | Completed orders by the day they were placed, in `APP_TIMEZONE` (default `America/Toronto`). Periods longer than 120 days switch to weekly bars. |
 
@@ -93,7 +93,7 @@ With `KUTT_URL` and `KUTT_API_KEY` set, promoters share short links from a [Kutt
 
 ## Invite links
 
-On **Promoters → Invite links**, admins make links to share (a group chat, a flyer QR, a DM): whoever opens one enters their first and last name and email, and gets the usual welcome email with a sign-in link, so the address is theirs before they can sign in. They then go through the welcome steps like any new promoter. Admins are notified of every sign-up, to give them their promo codes; the promoter's admin page says which link they joined with.
+On **People → Invite links**, admins make links to share (a group chat, a flyer QR, a DM): whoever opens one enters their first and last name and email, and gets the usual welcome email with a sign-in link, so the address is theirs before they can sign in. They then go through the welcome steps like any new promoter. Admins are notified of every sign-up, to give them their promo codes; the promoter's admin page says which link they joined with.
 
 - A link has a name (only for you), can put new promoters straight on a team, works for 1, 7 or 30 days or without an end date, and can be limited to a number of sign-ups. It can be turned off and on again; a full or expired link stops working.
 - **Team leads** make their own links from **My team → Invite promoters to your team**: their links always put new promoters on their team, and they are notified when someone joins. They see and manage only their own links; admins see every link and who made it. A team lead's links stop working if they stop being a team lead.
@@ -102,7 +102,7 @@ On **Promoters → Invite links**, admins make links to share (a group chat, a f
 
 ## Rules
 
-Commission, bonuses and rewards come from **rules** that admins write on **Promoters → Rules**, one per event if they want, in a big text box. Each line is `name = expression`; lines starting with `#` are notes. Ash's deal, for example (2 VIP from the first ticket, a GA list spot every 5 tickets, $5 a ticket):
+Commission, bonuses and rewards come from **rules** that admins write on **Pay & rewards → Rules**, one per event if they want, in a big text box. Each line is `name = expression`; lines starting with `#` are notes. Ash's deal, for example (2 VIP from the first ticket, a GA list spot every 5 tickets, $5 a ticket):
 
 ```
 commission  = tickets_sold * 5.00
@@ -133,11 +133,11 @@ The rules run in **the rules engine** (`rules-engine/`, Go and Google's cel-go),
 
 ## Commission per event
 
-**Promoters → Commissions** lists every event that is not over (drafts included) with the promoters who have one of its codes. For each promoter and event, choose **Usual rate** (their own %), **% of sales** (another percentage) or **per ticket** (a flat amount for each ticket sold). Like the usual rate, a change applies to all their sales for that event, earlier ones too, and stays when the event is over. Promoters see the amounts everywhere, and the rate only on an event's page, as their deal for that event (in words, from its rule); a flat amount replaces the percentage on that event, it is not added to it. Their balance, payouts, charts and the admin dashboard all use it. A team lead's team commission stays a percentage of their promoters' sales.
+**Pay & rewards → Commissions** lists every event that is not over (drafts included) with the promoters who have one of its codes. For each promoter and event, choose **Usual rate** (their own %), **% of sales** (another percentage) or **per ticket** (a flat amount for each ticket sold). Like the usual rate, a change applies to all their sales for that event, earlier ones too, and stays when the event is over. Promoters see the amounts everywhere, and the rate only on an event's page, as their deal for that event (in words, from its rule); a flat amount replaces the percentage on that event, it is not added to it. Their balance, payouts, charts and the admin dashboard all use it. A team lead's team commission stays a percentage of their promoters' sales.
 
-**Promoters → Media drives** lists the drafts and events that are not over with promoter codes, soonest first (like Commissions). Paste a link to a public folder (Google Drive, Dropbox…, `https://` only) with the event's photos, videos and flyers: the promoters with a code on the event get a **Media drive** button on their dashboard's event card and on the event page. Save an empty link to remove it.
+**Events → Media drives** lists the drafts and events that are not over with promoter codes, soonest first (like Commissions). Paste a link to a public folder (Google Drive, Dropbox…, `https://` only) with the event's photos, videos and flyers: the promoters with a code on the event get a **Media drive** button on their dashboard's event card and on the event page. Save an empty link to remove it.
 
-**Promoters → Banners** holds notices for promoters, in plain text, up to 500 characters. **All promoters** shows at the top of every promoter page, right under the menu. Each draft or event that is not over can have its own, shown on its dashboard card and event page to the promoters with a code on it, until the event is over. Admins see both when they open a promoter's dashboard. Save an empty banner to remove it.
+**Events → Banners** holds notices for promoters, in plain text, up to 500 characters. **All promoters** shows at the top of every promoter page, right under the menu. Each draft or event that is not over can have its own, shown on its dashboard card and event page to the promoters with a code on it, until the event is over. Admins see both when they open a promoter's dashboard. Save an empty banner to remove it.
 
 ## Changes by hand
 
@@ -159,6 +159,8 @@ Admins land on **Dashboard**, even an admin with promo codes of their own (their
 ## Menu
 
 The app keeps a standard width (1280 px, centred) even on very wide screens. Pages are grouped in a sidebar: always visible on a computer, a slide-in panel behind the ☰ button on a phone (it also works without scripts). The avatar at the top right opens Notifications, Account, Security and Sign out.
+
+Admin pages are grouped by task: **Today** (Dashboard, Requests), **People** (Promoters, Teams, Invite links, Send a notification), **Events** (Promo codes, Media drives, Banners), **Pay & rewards** (Commissions, Levels & rewards, Rules), **Sharing** (Promoter pages, Event links) and **Settings** (Branding, Emails). Commissions, Levels & rewards and Rules each say where the other two are, since all three change what promoters earn.
 
 ## Security for promoters
 
@@ -204,7 +206,7 @@ Until they give a city, their dashboard shows **Add your city**, and **All promo
 
 ## Promo codes
 
-**Promoters → Promo codes** lists the promo codes in Hi.Events with their event, orders and who each is assigned to, 25 per page. Search by code, event or promoter name, and filter by upcoming, past or all events and by assigned or not (upcoming events by default, soonest first). **All promoters** links to it, with the number of codes on upcoming events assigned to nobody.
+**Events → Promo codes** lists the promo codes in Hi.Events with their event, orders and who each is assigned to, 25 per page. Search by code, event or promoter name, and filter by upcoming, past or all events and by assigned or not (upcoming events by default, soonest first). **All promoters** links to it, with the number of codes on upcoming events assigned to nobody.
 
 ## Notifications
 

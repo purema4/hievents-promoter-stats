@@ -1,7 +1,7 @@
 import type { PromoCodeListing } from './hievents';
 
 /*
- * Promoters → Promo codes: every promo code in Hi.Events, searched, filtered and paged on the server
+ * Events → Promo codes: every promo code in Hi.Events, searched, filtered and paged on the server
  * (plain links and a GET form, so it works without scripts under the strict CSP).
  */
 export const codesPerPage = 25;

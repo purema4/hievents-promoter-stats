@@ -1,7 +1,7 @@
 import { db } from './local-db';
 
 /*
- * Notices admins set on Promoters → Banners: one for all promoters, at the top of their pages, and
+ * Notices admins set on Events → Banners: one for all promoters, at the top of their pages, and
  * one per event, on its dashboard card and event page. Plain text, shown only while there is any.
  */
 db.exec(`

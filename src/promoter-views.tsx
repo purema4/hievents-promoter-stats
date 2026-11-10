@@ -356,7 +356,7 @@ function CodesCard(props: { codes: string[]; rows: CodeStats[]; upcoming: EventS
   );
 }
 
-// The event's media drive (photos, videos, flyers), set by admins on Promoters → Media drives.
+// The event's media drive (photos, videos, flyers), set by admins on Events → Media drives.
 function MediaButton(props: { url: string }) {
   return (
     <a class="button secondary small" href={props.url} target="_blank" rel="noopener noreferrer">

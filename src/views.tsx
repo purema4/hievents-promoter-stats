@@ -470,7 +470,7 @@ body.impersonating .sidebar { padding-bottom: calc(96px + env(safe-area-inset-bo
 .invite-state { font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 999px; background: var(--bg); color: var(--muted); }
 .invite-state.invite-open { color: var(--ok); }
 .invite-closed strong { color: var(--muted); }
-/* Promoters → Commissions */
+/* Pay & rewards → Commissions */
 .rate-card { margin-top: 16px; scroll-margin-top: 72px; }
 .rate-card > p.muted { margin: 2px 0 8px; }
 .rate-rows { display: grid; }
@@ -517,12 +517,12 @@ body.impersonating .sidebar { padding-bottom: calc(96px + env(safe-area-inset-bo
   .map-places { grid-template-columns: 1fr; }
 }
 .commission-field { display: grid; gap: 4px; font-size: 13px; color: var(--muted); }
-/* Promoters → Promo codes */
+/* Events → Promo codes */
 .filter-bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 0 0 12px; }
 .filter-bar input[type='search'] { flex: 1 1 240px; width: auto; }
 .filter-bar select { width: auto; }
 .pager { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 12px; }
-/* Promoters → Media drives */
+/* Events → Media drives */
 .media-form { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 0; }
 .media-form input { flex: 1 1 280px; width: auto; }
 .team-rate label { display: grid; gap: 6px; }
@@ -585,7 +585,7 @@ a.lp-event:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px
 .lp-person-link { font-size: 14px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @media (prefers-reduced-motion: reduce) { .lp-event, .lp-person { transition: none; } a.lp-event:hover, a.lp-event:active, .lp-person:hover { transform: none; } }
 ${chartCss}
-/* Promoters → Rules */
+/* Pay & rewards → Rules */
 .rule-editor { display: grid; gap: 20px; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); align-items: start; }
 @media (max-width: 899px) { .rule-editor { grid-template-columns: 1fr; } }
 .rule-editor form { display: grid; gap: 10px; margin: 0; }
@@ -993,27 +993,34 @@ function Sidebar(props: { user: User }) {
       </a>
       {u.is_admin ? (
         <>
-          <NavGroup title="Overview">
+          {/* Grouped by task: what needs me today, who, which event, how people are paid, setup. */}
+          <NavGroup title="Today">
             <a href="/admin/dashboard">Dashboard</a>
             <a href="/admin/payouts">Requests {count(countPendingPayouts() + countPendingRewards())}</a>
           </NavGroup>
-          <NavGroup title="Promoters">
-            <a href="/admin">All promoters</a>
-            <a href="/admin/codes">Promo codes</a>
+          <NavGroup title="People">
+            <a href="/admin">Promoters</a>
             <a href="/admin/teams">Teams</a>
-            <a href="/admin/commissions">Commissions</a>
+            <a href="/admin/invites">Invite links</a>
+            <a href="/admin/notifications">Send a notification</a>
+          </NavGroup>
+          <NavGroup title="Events">
+            <a href="/admin/codes">Promo codes</a>
             <a href="/admin/media">Media drives</a>
             <a href="/admin/banners">Banners</a>
-            <a href="/admin/notifications">Send a notification</a>
-            <a href="/admin/rules">Rules</a>
-            <a href="/admin/invites">Invite links</a>
+          </NavGroup>
+          <NavGroup title="Pay &amp; rewards">
+            <a href="/admin/commissions">Commissions</a>
+            <a href="/admin/rewards">Levels &amp; rewards</a>
+            <a href="/admin/rules">Rules (advanced)</a>
+          </NavGroup>
+          <NavGroup title="Sharing">
             <a href="/admin/pages">Promoter pages</a>
+            <a href="/admin/links">Event links</a>
           </NavGroup>
           <NavGroup title="Settings">
             <a href="/admin/branding">Branding</a>
             <a href="/admin/emails">Emails</a>
-            <a href="/admin/links">Event links</a>
-            <a href="/admin/rewards">Levels &amp; rewards</a>
           </NavGroup>
         </>
       ) : (
@@ -1451,7 +1458,7 @@ export function AdminPage(props: {
   );
 }
 
-// Promoters → Promo codes: every code in Hi.Events, searched, filtered and paged on the server.
+// Events → Promo codes: every code in Hi.Events, searched, filtered and paged on the server.
 export function AdminCodesPage(props: { user: User; filter: CodeFilter; result: CodePage }) {
   const f = props.filter;
   const r = props.result;
@@ -2967,6 +2974,10 @@ export function AdminRewardsPage(props: { user: User; rules: RewardRules; saved:
         Promoters climb levels and earn free tickets and merch as they sell. Changes apply to everyone right away, counted
         from all their sales so far; rewards already requested stay requested.
       </p>
+      <p class="muted">
+        Commission is set on <a href="/admin/commissions">Commissions</a>; deals with VIP or guest list on{' '}
+        <a href="/admin/rules">Rules (advanced)</a>.
+      </p>
       <Flash ok={props.ok} error={props.error} />
 
       <div class="card stack-card rules-now">
@@ -3601,7 +3612,7 @@ function TeamCommissionForm(props: { lead: User; from: 'teams' | 'promoter' }) {
   );
 }
 
-// Invite links: on Promoters → Invite links for admins, and on My team → Invite for team leads.
+// Invite links: on People → Invite links for admins, and on My team → Invite for team leads.
 export function InvitesPage(props: {
   user: User;
   invites: InviteLink[];
@@ -3755,7 +3766,7 @@ export function JoinPage(props: { invite: InviteLink | null; team?: string | nul
   );
 }
 
-// Promoters → Commissions: every event that is not over, with the promoters who have one of its codes
+// Pay & rewards → Commissions: every event that is not over, with the promoters who have one of its codes
 // and how each one is paid for it.
 export function AdminCommissionsPage(props: {
   user: User;
@@ -3771,6 +3782,10 @@ export function AdminCommissionsPage(props: {
         Choose how each promoter is paid for each event: their usual percentage, another percentage, or a flat amount per
         ticket sold. Only events that are not over are listed. A change applies to all their sales for the event,
         earlier ones too, and promoters see it on their dashboard.
+      </p>
+      <p class="muted">
+        This is the simple way to set pay. For VIP, guest list or bonus deals, use{' '}
+        <a href="/admin/rules">Rules (advanced)</a>; a promoter&rsquo;s usual rate is on their page.
       </p>
       <Flash error={props.error} ok={props.ok} />
       {props.events.length === 0 && <p class="muted">No upcoming events with promoter codes.</p>}
@@ -3826,7 +3841,7 @@ export function AdminCommissionsPage(props: {
   );
 }
 
-// Promoters → Media drives: a public folder per event (photos, videos, flyers) for the promoters on it.
+// Events → Media drives: a public folder per event (photos, videos, flyers) for the promoters on it.
 export function AdminMediaPage(props: {
   user: User;
   events: { id: number; title: string; start: Date | null; timezone: string | null; promoters: User[] }[];

@@ -168,7 +168,7 @@ export type PromoCodeListing = {
 };
 
 // Every promo code in Hi.Events, newest events first, so the admin can see what exists and what is
-// unassigned (Promoters → Promo codes searches, filters and pages through them).
+// unassigned (Events → Promo codes searches, filters and pages through them).
 export async function allPromoCodes(): Promise<PromoCodeListing[]> {
   return sql<PromoCodeListing[]>`
     SELECT pc.code, e.title AS event_title,
@@ -217,7 +217,7 @@ async function canReadStatus(): Promise<boolean> {
 /** The upcoming events a promoter's public page lists: not ended, not deleted, and live when that is known. No sales figures. */
 export type EventCode = { event_id: number; title: string; start: Date | null; timezone: string | null; currency: string; code: string };
 
-/** Every promo code (lower-cased) on events that are not over, drafts included, for Promoters → Commissions and Media drives. */
+/** Every promo code (lower-cased) on events that are not over, drafts included, for Pay & rewards → Commissions and Media drives. */
 export async function currentEventCodes(): Promise<EventCode[]> {
   return sql<EventCode[]>`
     SELECT DISTINCT

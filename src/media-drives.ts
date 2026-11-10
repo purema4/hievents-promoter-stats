@@ -1,7 +1,7 @@
 import { db } from './local-db';
 
 /*
- * A media drive per event (photos, videos, flyers): a public folder link an admin sets on Promoters →
+ * A media drive per event (photos, videos, flyers): a public folder link an admin sets on Events →
  * Media drives. Promoters with a code on the event get a button to it on their dashboard and the event page.
  */
 db.exec(`

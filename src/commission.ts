@@ -3,7 +3,7 @@ import { db, usualRuleFor, type User } from './local-db';
 import type { EventRule, LegacyRate } from './money';
 
 /*
- * Commission set by admins for one promoter on one event (on Promoters → Commissions): another
+ * Commission set by admins for one promoter on one event (on Pay & rewards → Commissions): another
  * percentage, or a flat amount per ticket sold. Everywhere else the promoter's usual rate applies.
  * Like the usual rate, a change applies to all the event's sales, earlier ones too.
  */

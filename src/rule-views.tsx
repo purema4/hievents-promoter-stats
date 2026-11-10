@@ -5,7 +5,7 @@ import type { RuleProblem } from './rules-engine';
 import type { RewardType, RuleScope, RuleTemplate, RuleVersion } from './rules';
 import { Flash, formatDate, Layout } from './views';
 
-/* Promoters → Rules: the default rule, templates, reward types, and each event's and promoter's rule. */
+/* Pay & rewards → Rules: the default rule, templates, reward types, and each event's and promoter's rule. */
 
 export type RuleTargetInfo = {
   scope: RuleScope;
@@ -327,6 +327,10 @@ export function AdminRulesPage(props: {
       <p class="muted">
         Rules work out each promoter’s commission, bonus and rewards on each event, from their sales. The most specific
         line wins: a promoter on an event, then the event, then the promoter, then the default rule.
+      </p>
+      <p class="muted">
+        Only paying a percentage or an amount per ticket? <a href="/admin/commissions">Commissions</a> does it without
+        writing a rule.
       </p>
       <Flash error={props.error} ok={props.ok} />
       {props.canAsk && (

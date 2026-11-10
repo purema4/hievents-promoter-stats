@@ -1825,7 +1825,7 @@ app.post('/admin/media', async (c) => {
   return c.redirect(`/admin/media?ok=${url ? 'media_saved' : 'media_removed'}${hash}`);
 });
 
-// --- Rules (Promoters → Rules) -----------------------------------------------------------------------
+// --- Rules (Pay & rewards → Rules) -----------------------------------------------------------------------
 
 /** Which rule a request is about, checked: the promoter and the event (one that is not over) must exist. */
 async function ruleTargetOf(get: (key: string) => string | undefined): Promise<RuleTargetInfo | null> {
