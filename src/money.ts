@@ -16,6 +16,19 @@ export function toCents(amount: string | number): number {
   return Math.round(Number(amount) * 100);
 }
 
+/**
+ * An amount typed in a form, in cents; NaN when it is not one. Accepts the ways people write money here:
+ * 25, 25.50, 25,50, 310$, 310 $, $310, 1 234,50 $, 1,234.50, CAD 40.
+ */
+export function parseAmountCents(input: string): number {
+  // Spaces (including the non-breaking ones French formatting uses), the dollar sign and the currency go.
+  // Only at either end: 25$50 is not an amount.
+  let raw = input.replace(/[\s\u00a0\u202f]/g, '').replace(/^(\$|CAD\$?)|(\$|CAD)$/gi, '');
+  // With both separators, the comma groups thousands; alone, it is the decimal point.
+  raw = raw.includes('.') ? raw.replace(/,(?=\d{3}(\D|$))/g, '') : raw.replace(',', '.');
+  return /^[0-9]+(\.[0-9]{1,2})?$/.test(raw) ? Math.round(Number(raw) * 100) : NaN;
+}
+
 // Rounded once per (code, event) row; every total is a sum of these, so the numbers always agree.
 export function commissionCents(fullPrice: string, percent: number): number {
   return Math.round(Number(fullPrice) * percent);

@@ -298,6 +298,7 @@ a.button.secondary { background: var(--bg); color: var(--text); border: 1px soli
 .payout-callout-amount { font-size: 34px; font-weight: 800; letter-spacing: -0.02em; line-height: 1.1; }
 .payout-callout-actions { display: flex; gap: 10px; flex-wrap: wrap; }
 .payout-request { scroll-margin-top: 80px; }
+#rewards { scroll-margin-top: 72px; } /* below the sticky header */
 a.button { display: inline-block; font-weight: 600; background: var(--accent); color: var(--accent-text); border-radius: 8px; padding: 9px 16px; text-decoration: none; }
 button.link { background: none; color: var(--accent); padding: 0; font-weight: 400; }
 button.danger { background: var(--danger); }

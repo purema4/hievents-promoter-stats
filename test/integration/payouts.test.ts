@@ -140,6 +140,15 @@ describeIntegration('payouts, rewards and changes by hand', () => {
       expect(balanceRow(html, 'Requested, not paid yet')).toBe('−$100.00');
     });
 
+    test('amounts written the Quebec way are read too', async () => {
+      const p = await newPromoter(server, admin);
+      // $28.50 available.
+      const res = await request(p.client, '20,50 $');
+      expect(location(res)).toBe('/payouts?ok=requested');
+      expect(balanceRow(await p.client.page('/payouts'), 'Requested, not paid yet')).toBe('−$20.50');
+      expect(flashError(await (await request(p.client, '25$50')).text())).toBeTruthy();
+    });
+
     test('two submits at once create one request', async () => {
       const p = await newPromoter(server, admin);
       const results = await Promise.all([request(p.client, '10'), request(p.client, '10'), request(p.client, '5')]);

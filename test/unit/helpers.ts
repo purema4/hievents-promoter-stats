@@ -18,6 +18,7 @@ export function event(id: number, tickets: number, daysFromNow: number, title = 
     dates: 1,
     timezone: 'America/Toronto',
     hasCover: false,
+    draft: false,
     currency: 'CAD',
     codes: ['djmax'],
     rows: [],

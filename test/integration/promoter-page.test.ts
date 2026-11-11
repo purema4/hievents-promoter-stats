@@ -53,6 +53,20 @@ describeIntegration("promoters' public pages", () => {
     for (const word of ['commission', 'tickets sold', '$', 'Payout']) expect(text(html)).not.toContain(word);
   });
 
+  test('the dashboard shows a draft as not on sale yet, with no link or code to share', async () => {
+    const html = await promoter.client.page('/');
+    const card = html.split('<strong>Secret Afterparty</strong>')[1]!.split('</a></div>')[0]!;
+    expect(text(card)).toContain('Not on sale yet');
+    expect(card).not.toContain('data-copy-text');
+    expect(card).not.toContain('NOVA');
+    // Nor under the promo code; the published event keeps its link.
+    expect(text(html.split('class="card codes-card"')[1]!.split('</div></div>')[0]!)).not.toContain('Secret Afterparty');
+    expect(html).toContain(`data-copy-text="${SITE}/event/1/warehouse-night?promo_code=NOVA`);
+    const event = await promoter.client.page('/events/5');
+    expect(text(event)).toContain('This event is not on sale yet.');
+    expect(event).not.toContain('/event/5/');
+  });
+
   test('/p lists every page with its link, but not hidden ones', async () => {
     const res = await visitor.get('/p');
     expect(res.status).toBe(200);

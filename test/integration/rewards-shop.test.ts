@@ -61,6 +61,11 @@ describeIntegration('rewards shop', () => {
       'merch.details': 'Hoodie, size M',
     });
     expect(location(res)).toBe('/payouts?ok=reward_ordered#rewards');
+    // The confirmation shows in the rewards shop, where that link lands, not at the top of the page.
+    const done = await maya.client.page('/payouts?ok=reward_ordered');
+    const confirmation = 'Sent to the team. You will hear back here and by email.';
+    expect(text(done.split('id="rewards"')[1]!.split('class="shop"')[0]!)).toContain(confirmation);
+    expect(text(done.split('id="rewards"')[0]!)).not.toContain(confirmation);
     const rows = db
       .query<{ kind: string; reward_type: string | null; event_title: string | null; source_event_title: string | null; quantity: number; details: string }, []>(
         'SELECT kind, reward_type, event_title, source_event_title, quantity, details FROM reward_requests ORDER BY id',

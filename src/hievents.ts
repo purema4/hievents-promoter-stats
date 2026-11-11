@@ -34,6 +34,8 @@ export type CodeStats = {
   event_dates: number;
   event_timezone: string | null;
   has_cover: boolean;
+  /** Not published yet in Hi.Events (DRAFT): no link to share. False when the status cannot be read. */
+  draft: boolean;
   currency: string;
   tickets_sold: number;
   tickets_pending: number;
@@ -103,6 +105,7 @@ const codeOrderCtes = (codes: string[], eventId?: number) => sql`
  */
 export async function statsForCodes(codes: string[]): Promise<CodeStats[]> {
   if (codes.length === 0) return [];
+  const draft = (await canReadStatus()) ? sql`e.status = 'DRAFT'` : sql`false`;
   return sql<CodeStats[]>`
     WITH ${codeOrderCtes(codes)}
     SELECT
@@ -116,6 +119,7 @@ export async function statsForCodes(codes: string[]): Promise<CodeStats[]> {
       coalesce(occ.dates, 0) AS event_dates,
       e.timezone AS event_timezone,
       ${config.imageBaseUrl ? sql`${coverPath()} IS NOT NULL` : sql`false`} AS has_cover,
+      ${draft} AS draft,
       e.currency,
       coalesce(sum(t.n) FILTER (WHERE o.status = 'COMPLETED'), 0)::int AS tickets_sold,
       coalesce(sum(t.n) FILTER (WHERE o.status = 'AWAITING_OFFLINE_PAYMENT'), 0)::int AS tickets_pending,

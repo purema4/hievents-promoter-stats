@@ -335,7 +335,8 @@ export const ops: Op[] = [
     run: async ({ user }, input: { promoter_id?: number }) => {
       const p = promoterFor(user, input.promoter_id);
       const data = await promoterData(p);
-      const upcoming = summarizeEvents(data.rows, data.percent).filter((e) => !isOver(e.end));
+      // Drafts have no link to share yet.
+      const upcoming = summarizeEvents(data.rows, data.percent).filter((e) => !isOver(e.end) && !e.draft);
       const links = upcoming.flatMap((e) => e.codes.map((code) => ({ event: { id: e.id, title: e.title }, code, start: e.start })));
       await prepareShortLinks(p, links, { page: !p.page_hidden_at });
       return {

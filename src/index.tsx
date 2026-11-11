@@ -80,7 +80,7 @@ import { blankPng, eventCover } from './covers';
 import { allPromoCodes, dailyForCodes, sql } from './hievents';
 import { recentEmails, sendEmail, purgeEmailLog } from './mail';
 import { emailTypes, getTemplate, renderEmail, resetTemplate, sampleVars, saveReplyTo, saveTemplate, type EmailType } from './email-templates';
-import { formatMoney, usualCommissionOn, type EventRule } from './money';
+import { formatMoney, parseAmountCents, usualCommissionOn, type EventRule } from './money';
 import {
   findPayout,
   listPayouts,
@@ -817,7 +817,7 @@ async function renderDashboard(c: Context<Env>, promoter: User, basePath: string
   // Also checked on a timer; checking here makes a new milestone show up the moment they look.
   if (basePath === '') checkMilestones(promoter, data.rewards);
   // Upcoming event cards carry a link with the first code; the promoter's own view also shows their page.
-  const upcoming = summarizeEvents(data.rows, data.percent).filter((e) => !e.end || e.end.getTime() >= Date.now());
+  const upcoming = summarizeEvents(data.rows, data.percent).filter((e) => (!e.end || e.end.getTime() >= Date.now()) && !e.draft);
   const withPage = basePath === '' && !promoter.page_hidden_at;
   await prepareShortLinks(promoter, upcoming.map((e) => ({ event: { id: e.id, title: e.title }, code: e.codes[0]! })), { page: withPage });
   return c.html(
@@ -844,7 +844,7 @@ async function renderEvent(c: Context<Env>, promoter: User, basePath: string) {
   // Only events that have one of this promoter's codes exist for them.
   if (!Number.isInteger(eventId) || !data.rows.some((r) => r.event_id === eventId)) return c.notFound();
   const event = summarizeEvents(data.rows, data.percent).find((e) => e.id === eventId)!;
-  await prepareShortLinks(promoter, event.codes.map((code) => ({ event: { id: event.id, title: event.title }, code })));
+  if (!event.draft) await prepareShortLinks(promoter, event.codes.map((code) => ({ event: { id: event.id, title: event.title }, code })));
   // Their deal on this event in words (never the rule itself), in the browser's language.
   const lang = langOf(c.req.header('accept-language'));
   const rule = ruleFor(promoter.id, eventId);
@@ -1078,6 +1078,9 @@ function rolloverTarget(data: { ticketEvents: { id: number; title: string }[] },
 async function renderPayouts(c: Context<Env>, error?: string) {
   const user = c.get('user');
   const data = await promoterData(user);
+  // A reward request lands on #rewards, so its confirmation shows there rather than at the top, out of sight.
+  const ok = c.req.query('ok');
+  const inShop = ok === 'reward_ordered' || ok === 'reward_requested';
   return c.html(
     <PayoutsPage
       user={user}
@@ -1087,7 +1090,8 @@ async function renderPayouts(c: Context<Env>, error?: string) {
       ticketEvents={data.ticketEvents}
       rewardRequests={rewardRequestsFor(user.id)}
       adjustments={adjustmentsFor(user.id)}
-      ok={flash(c.req.query('ok'))}
+      ok={inShop ? undefined : flash(ok)}
+      rewardOk={inShop ? flash(ok) : undefined}
       error={error}
     />,
     error ? 400 : 200,
@@ -1102,8 +1106,7 @@ app.post('/payouts', async (c) => {
   const data = await promoterData(user);
   const balance = data.balances.find((b) => b.currency === String(body.currency ?? ''));
   if (!balance) return renderPayouts(c, messages.too_much);
-  const raw = String(body.amount ?? '').trim().replace(',', '.');
-  const amountCents = /^[0-9]+(\.[0-9]{1,2})?$/.test(raw) ? Math.round(Number(raw) * 100) : NaN;
+  const amountCents = parseAmountCents(String(body.amount ?? ''));
   const result = requestPayout(user, balance, {
     amountCents,
     method: String(body.method ?? ''),

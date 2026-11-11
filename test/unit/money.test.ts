@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import type { CodeStats } from '../../src/hievents';
-import { commissionCents, describeRate, formatMoney, formatPercent, splitCents, splitCommission, toCents, totalsByCurrency, usualCommissionOn, type EventEarning, type LegacyRate, type Rate } from '../../src/money';
+import { commissionCents, parseAmountCents, describeRate, formatMoney, formatPercent, splitCents, splitCommission, toCents, totalsByCurrency, usualCommissionOn, type EventEarning, type LegacyRate, type Rate } from '../../src/money';
 
 function row(overrides: Partial<CodeStats>): CodeStats {
   return {
@@ -13,6 +13,7 @@ function row(overrides: Partial<CodeStats>): CodeStats {
     event_dates: 1,
     event_timezone: 'America/Toronto',
     has_cover: false,
+    draft: false,
     currency: 'CAD',
     tickets_sold: 0,
     tickets_pending: 0,
@@ -154,5 +155,20 @@ describe('usual rate: a percentage or a flat amount per ticket', () => {
     expect(describeRate(flat)).toBe('$2.00 per ticket');
     expect(describeRate({ usual: { kind: 'percent', value: 10 }, events: new Map() })).toBe('10%');
     expect(describeRate({ ...flat, events: new Map([[1, { kind: 'percent', value: 5 }]]) })).toBe('$2.00 per ticket, other rates on some events');
+  });
+});
+
+describe('parseAmountCents', () => {
+  test('reads amounts the way people write them in Quebec and elsewhere', () => {
+    for (const [typed, cents] of [
+      ['25', 2500], ['25.50', 2550], ['25,50', 2550], ['25.5', 2550],
+      ['310$', 31000], ['310 $', 31000], ['310 $', 31000], ['$310', 31000], ['$ 310.00', 31000],
+      ['1 234,50 $', 123450], ['1 234,50 $', 123450], ['1,234.50', 123450], ['CAD 40', 4000], ['40 cad', 4000],
+      [' 12 ', 1200],
+    ] as const) expect([typed, parseAmountCents(typed)]).toEqual([typed, cents]);
+  });
+
+  test('refuses what is not an amount', () => {
+    for (const typed of ['', '$', 'abc', '25.505', '-10', '1,234', '25$50', '3 cents', '1e3']) expect([typed, parseAmountCents(typed)]).toEqual([typed, NaN]);
   });
 });

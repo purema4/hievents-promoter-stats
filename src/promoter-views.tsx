@@ -20,6 +20,7 @@ export type EventSummary = {
   dates: number;
   timezone: string | null;
   hasCover: boolean;
+  draft: boolean; // not on sale yet: no link or code to share
   currency: string;
   codes: string[];
   rows: CodeStats[];
@@ -44,6 +45,7 @@ export function summarizeEvents(rows: CodeStats[], rate: Rate | number): EventSu
       dates: r.event_dates,
       timezone: r.event_timezone,
       hasCover: r.has_cover,
+      draft: r.draft,
       currency: r.currency,
       codes: [],
       rows: [],
@@ -256,7 +258,8 @@ function LevelCard(props: { rewards: Rewards; rewardsHref?: string }) {
   const rules = rewardRules();
   const { level, next, progress } = levelFor(totalSold);
   const freeTickets = props.rewards.tickets.reduce((sum, t) => sum + t.available, 0);
-  const onlyPlain = props.rewards.tickets.every((t) => t.type.key === 'free_tickets');
+  // Named by what is actually ready: other types with none available don't change the words.
+  const onlyPlain = props.rewards.tickets.every((t) => t.available === 0 || t.type.key === 'free_tickets');
   return (
     <div class="card level-card">
       <div class="level-head">
@@ -268,7 +271,7 @@ function LevelCard(props: { rewards: Rewards; rewardsHref?: string }) {
       <ul class="unlocks">
         {(trackOn(rules.tickets) || freeTickets > 0) && (
           <li class={freeTickets > 0 ? 'ready' : ''}>
-            {freeTickets > 0 ? `${plural(freeTickets, onlyPlain ? 'free ticket' : 'reward')} ready to request` : `Free tickets for each event: ${lowerFirst(describeTrack(rules.tickets, 'ticket'))}`}
+            {freeTickets > 0 ? `${plural(freeTickets, onlyPlain ? 'free ticket' : 'event reward')} ready to request` : `Free tickets for each event: ${lowerFirst(describeTrack(rules.tickets, 'ticket'))}`}
           </li>
         )}
         {(trackOn(rules.merch) || merch.available > 0) && (
@@ -386,7 +389,8 @@ function EventCard(props: {
             <strong>{e.title}</strong>
             <span class="muted">{eventDate(e)}</span>
             <span>
-              {!props.copyCodes && e.codes.map((c) => <span class="code">{c}</span>)}
+              {!props.copyCodes && !e.draft && e.codes.map((c) => <span class="code">{c}</span>)}
+              {e.draft && <span class="chip warn">Not on sale yet</span>}
               {!!props.ready && <span class="chip">{props.ready} ready</span>}
             </span>
           </span>
@@ -491,8 +495,8 @@ export function DashboardPage(props: {
                   event={e}
                   href={eventHref(e)}
                   ready={readyOn(props.rewards, e.id)}
-                  link={shareLink(props.promoter, { id: e.id, title: e.title }, e.codes[0]!)}
-                  copyCodes
+                  link={e.draft ? null : shareLink(props.promoter, { id: e.id, title: e.title }, e.codes[0]!)}
+                  copyCodes={!e.draft}
                   media={props.media.get(e.id)}
                   banner={props.banners.get(e.id)}
                   daily={props.daily.filter((d) => d.event_id === e.id)}
@@ -513,7 +517,7 @@ export function DashboardPage(props: {
           />
           <LevelCard rewards={props.rewards} rewardsHref={self ? '/payouts#rewards' : undefined} />
           {self && props.pageLink && <PageCard link={props.pageLink} />}
-          {props.codes.length > 0 && <CodesCard codes={props.codes} rows={props.rows} upcoming={upcoming} />}
+          {props.codes.length > 0 && <CodesCard codes={props.codes} rows={props.rows} upcoming={upcoming.filter((e) => !e.draft)} />}
 
           {past.length > 0 && (
             <>
@@ -622,7 +626,9 @@ export function EventPage(props: {
 
       <div class="card links-card">
         <h2 class="first">{e.codes.length > 1 ? 'Your links and codes' : 'Your link and code'}</h2>
-        {eventLink({ id: e.id, title: e.title }, e.codes[0]!, props.promoter.alias) ? (
+        {e.draft ? (
+          <p class="muted">This event is not on sale yet. Your link and code will show here once tickets are on sale.</p>
+        ) : eventLink({ id: e.id, title: e.title }, e.codes[0]!, props.promoter.alias) ? (
           <>
             <p class="muted">Share it: the promo code is applied automatically and the sale counts for you.</p>
             {e.codes.map((code) => {
@@ -897,18 +903,21 @@ function ShopRow(props: {
  * how many are available and "+" to add one to the cart; the bank and merch come the same way. The cart
  * holds the rest: how many, the names for a guest list, and this event or the bank.
  */
-function RewardsShop(props: { rewards: Rewards; ticketEvents: TicketEvent[]; promoter: string }) {
+function RewardsShop(props: { rewards: Rewards; ticketEvents: TicketEvent[]; promoter: string; ok?: string }) {
   const { tickets, merch, bank } = props.rewards;
   const rules = rewardRules();
   const showMerch = trackOn(rules.merch) || merch.earned > 0;
   if (tickets.length === 0 && bank.length === 0 && !showMerch) return null;
   // Events in date order, each with its rewards.
   const events = new Map<number, { event: TicketReward['event']; rows: TicketReward[] }>();
-  for (const t of tickets) events.set(t.event.id, { event: t.event, rows: [...(events.get(t.event.id)?.rows ?? []), t] });
+  // An event not on sale yet only shows once it has something to ask for.
+  const shown = tickets.filter((t) => !t.event.draft || tickets.some((o) => o.event.id === t.event.id && o.available > 0));
+  for (const t of shown) events.set(t.event.id, { event: t.event, rows: [...(events.get(t.event.id)?.rows ?? []), t] });
   const byDate = [...events.values()].sort((a, b) => (a.event.start?.getTime() ?? Infinity) - (b.event.start?.getTime() ?? Infinity));
   return (
     <section id="rewards">
       <h2>Rewards shop</h2>
+      <Flash ok={props.ok} />
       <p class="muted">
         What your sales earned, event by event. Press + to add one to your cart, then review and send it: the team confirms
         each item. Rewards for an event are lost once it is over: ask for them, or put them in your bank before then.
@@ -1030,6 +1039,7 @@ export function PayoutsPage(props: {
   adjustments: Adjustment[];
   error?: string;
   ok?: string;
+  rewardOk?: string; // shown in the rewards shop, where a reward request lands
 }) {
   return (
     <Layout title="Payouts & rewards" user={props.user}>
@@ -1135,7 +1145,7 @@ export function PayoutsPage(props: {
         );
       })}
 
-      <RewardsShop rewards={props.rewards} ticketEvents={props.ticketEvents} promoter={props.user.name} />
+      <RewardsShop rewards={props.rewards} ticketEvents={props.ticketEvents} promoter={props.user.name} ok={props.rewardOk} />
 
       {props.adjustments.length > 0 && (
         <>
