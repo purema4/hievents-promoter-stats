@@ -204,6 +204,7 @@ import {
   AdminMediaPage,
   InvitesPage,
   JoinPage,
+  Layout,
   TeamPage,
   ReadOnlyPage,
   AdminRewardsPage,
@@ -2864,6 +2865,30 @@ app.onError((err, c) => {
   // A malformed form body is the client's mistake: answer 400 instead of logging a server error.
   if ((err as { code?: string }).code === 'ERR_FORMDATA_PARSE_ERROR') return c.text('Bad request', 400);
   console.error(err);
+  // A page someone opened (the ticketing database down, say): a real page in their language, with a way
+  // to try again and a way home, not a line of plain text.
+  if (c.req.method === 'GET' && (c.req.header('accept') ?? '').includes('text/html')) {
+    return c.html(
+      <Layout title={t('Something went wrong', 'Un problème est survenu')}>
+        <div class="login card empty-state">
+          <h1>{t('Something went wrong', 'Un problème est survenu')}</h1>
+          <p class="muted">
+            {t(
+              'The numbers could not be loaded just now. Nothing was lost: try again in a moment.',
+              'Les chiffres n’ont pas pu être chargés pour l’instant. Rien n’est perdu : réessaie dans un moment.',
+            )}
+          </p>
+          <p>
+            <a class="button" href={c.req.path}>
+              {t('Try again', 'Réessayer')}
+            </a>{' '}
+            <a href="/">{t('Back to the dashboard', 'Retour au tableau de bord')}</a>
+          </p>
+        </div>
+      </Layout>,
+      500,
+    );
+  }
   return c.text('Something went wrong. Please try again in a moment.', 500);
 });
 

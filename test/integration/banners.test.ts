@@ -33,7 +33,7 @@ describeIntegration('banners', () => {
     expect(location(await general('Payouts go out Friday.'))).toBe('/admin/banners?ok=banner_saved#general');
     for (const path of ['/', '/events/1', '/payouts', '/account']) {
       const html = await maya.client.page(path);
-      expect(html.slice(html.indexOf('<main>'), html.indexOf('<main>') + 60)).toContain('class="banner"');
+      expect(html.slice(html.indexOf('<main id="main"'), html.indexOf('<main id="main"') + 60)).toContain('class="banner"');
       expect(text(html)).toContain('Payouts go out Friday.');
     }
     expect(text(await admin.page('/admin/dashboard'))).not.toContain('Payouts go out Friday.');

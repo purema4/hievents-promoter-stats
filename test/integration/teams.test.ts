@@ -83,7 +83,7 @@ describeIntegration('teams', () => {
     expect(text(member)).toContain(`My team / ${ana.name}`);
     expect(stats(member).get('Tickets sold, 6 orders · 1 awaiting payment')).toBe('10');
     // Nothing to act on for them.
-    const main = member.slice(member.indexOf('<main>'));
+    const main = member.slice(member.indexOf('<main id="main"'));
     expect(main).not.toContain('href="/payouts');
     expect(main).not.toContain('payout-callout');
     expect((await lead.client.get(`/team/${ana.id}/events/1`)).status).toBe(200);
@@ -131,7 +131,7 @@ describeIntegration('teams', () => {
     expect(text(html)).not.toContain('No codes yet');
     expect(text(html)).not.toContain('Last sale');
     // No one's commission, team commission or dashboard.
-    const main = html.slice(html.indexOf('<main>'));
+    const main = html.slice(html.indexOf('<main id="main"'));
     for (const word of ['Commission', 'commission', 'Owed']) expect(main).not.toContain(word);
     expect(main).not.toContain(`href="/team/`);
     expect(main).not.toContain('href="/admin');

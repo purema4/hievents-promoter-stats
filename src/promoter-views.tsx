@@ -11,7 +11,7 @@ import { Avatar, Banner, Flash, formatDate, Layout, LevelBadge } from './views';
 import { avatarOf } from './avatars';
 import { eventLink } from './links';
 import { linkClicks, shareLink } from './short-links';
-import { lang, plural, t } from './i18n';
+import { lang, locale, plural, t } from './i18n';
 
 export type EventSummary = {
   id: number;
@@ -529,13 +529,24 @@ export function DashboardPage(props: {
         <Avatar user={props.promoter} />
         <h1>{self ? t(`Hi ${props.promoter.name}`, `Salut ${props.promoter.name}`) : t(`${props.promoter.name}'s dashboard`, `Tableau de bord de ${props.promoter.name}`)}</h1>
       </div>
-      <p class="muted">{t('Live from the ticketing system.', 'En direct de la billetterie.')}</p>
+      <p class="muted">
+        {t('Live from the ticketing system. Updated at', 'En direct de la billetterie. Mis à jour à')}{' '}
+        {new Intl.DateTimeFormat(locale(), { timeStyle: 'short', timeZone: config.timezone }).format(new Date())}
+      </p>
 
       {props.codes.length === 0 && props.balances.length === 0 && props.rewards.outsideSold === 0 ? (
         <>
           {self && <PhotoCallout promoter={props.promoter} />}
           {self && <CityCallout promoter={props.promoter} />}
-          <div class="card muted">{t('No promo codes are assigned to this account yet.', 'Aucun code promo n’est encore associé à ce compte.')}</div>
+          <div class="card empty-state">
+            <strong>{t('No promo code yet', 'Pas encore de code promo')}</strong>
+            <p class="muted">
+              {t(
+                'The team gives each promoter their own code. As soon as yours is added, your sales, commission and rewards show up here.',
+                'L’équipe donne à chaque promoteur son propre code. Dès que le tien est ajouté, tes ventes, ta commission et tes récompenses s’affichent ici.',
+              )}
+            </p>
+          </div>
         </>
       ) : (
         <>
@@ -568,9 +579,9 @@ export function DashboardPage(props: {
             totals={totals}
             balances={props.balances}
             outsideSold={props.rewards.outsideSold}
-            payoutsHref={self ? '/payouts' : undefined}
+            payoutsHref={self ? '/rewards/checkout' : undefined}
           />
-          <LevelCard rewards={props.rewards} rewardsHref={self ? '/payouts#rewards' : undefined} />
+          <LevelCard rewards={props.rewards} rewardsHref={self ? '/rewards/checkout' : undefined} />
           {self && props.pageLink && <PageCard link={props.pageLink} />}
           {props.codes.length > 0 && <CodesCard codes={props.codes} rows={props.rows} upcoming={upcoming.filter((e) => !e.draft)} />}
 

@@ -290,12 +290,16 @@ input[type=color] { width: 56px; height: 40px; padding: 2px; }
 .logo-preview { max-height: 60px; max-width: 220px; object-fit: contain; background: var(--bg); border-radius: 8px; padding: 6px; }
 header nav { display: flex; gap: 14px; align-items: center; font-size: 14px; }
 main { padding-top: 24px; padding-bottom: 48px; }
+.skip-link { position: absolute; left: 8px; top: -60px; z-index: 100; background: var(--accent); color: var(--accent-text); padding: 8px 14px; border-radius: 8px; font-weight: 600; text-decoration: none; }
+.skip-link:focus { top: 8px; }
+.empty-state { display: grid; gap: 6px; }
+.empty-state p { margin: 0; }
 h1 { font-size: 22px; margin: 0 0 4px; }
 h2 { font-size: 17px; margin: 32px 0 12px; }
 .muted { color: var(--muted); font-size: 13px; }
 .card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
 .grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); margin: 20px 0; }
-.stat .value { font-size: 30px; font-weight: 650; font-variant-numeric: tabular-nums; }
+.stat .value { font-size: clamp(20px, 5.6vw, 30px); font-weight: 650; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .stat .label { color: var(--muted); font-size: 13px; }
 .stat.highlight { border-color: var(--accent); }
 .stat.highlight .value { color: var(--accent); }
@@ -345,7 +349,7 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .inline { margin: 0; }
 .codes-line { margin-bottom: 12px; }
 h2.first, p.first { margin-top: 0; }
-.event-grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 330px), 1fr)); }
+.event-grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 330px), 1fr)); align-items: start; }
 .event-card { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 .event-card:hover { border-color: var(--accent); }
 a.event-card-main { display: grid; gap: 14px; color: inherit; text-decoration: none; }
@@ -841,6 +845,10 @@ export function Layout(props: {
         <script src={`/app.js?v=${jsVersion}`} defer></script>
       </head>
       <body class={props.user ? (props.user.impersonator ? 'with-nav impersonating' : 'with-nav') : undefined}>
+        {/* Keyboard users go straight to the page instead of through the whole menu. */}
+        <a class="skip-link" href="#main">
+          {t('Skip to content', 'Aller au contenu')}
+        </a>
         {props.user?.impersonator && <ImpersonationBanner user={props.user} />}
         {props.user && (
           <header class="topbar">
@@ -866,7 +874,7 @@ export function Layout(props: {
             <Sidebar user={props.user} />
             <a class="nav-overlay" href="#" aria-label={t('Close the menu', 'Fermer le menu')} tabindex={-1}></a>
             <div>
-              <main>
+              <main id="main" tabindex={-1}>
                 {notice && <Banner text={notice} label={t('Notice for all promoters', 'Avis à tous les promoteurs')} dismissible />}
                 {rulesDown && (
                   <Banner
@@ -889,7 +897,9 @@ export function Layout(props: {
           </div>
         ) : (
           <>
-            <main>{props.children}</main>
+            <main id="main" tabindex={-1}>
+              {props.children}
+            </main>
             {brand.footer && <footer class="site-footer muted">{brand.footer}</footer>}
           </>
         )}
