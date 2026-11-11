@@ -18,8 +18,8 @@ const VAR_WORDS: Record<string, { en: string; fr: string }> = {
   full_price_sales: { en: 'sales at full price', fr: 'ventes au plein prix' },
   paid_by_customers: { en: 'what customers paid', fr: 'ce que les clients ont payé' },
   codes_used: { en: 'codes used', fr: 'codes utilisés' },
-  outside_tickets: { en: 'tickets sold outside Hi.Events', fr: 'billets vendus hors Hi.Events' },
-  outside_sales: { en: 'sales outside Hi.Events', fr: 'ventes hors Hi.Events' },
+  outside_tickets: { en: 'tickets sold outside the ticketing site', fr: 'billets vendus hors billetterie' },
+  outside_sales: { en: 'sales outside the ticketing site', fr: 'ventes hors billetterie' },
   event_tickets_sold: { en: 'tickets sold for the whole event', fr: 'billets vendus pour tout l’événement' },
   event_promoters: { en: 'promoters selling the event', fr: 'promoteurs qui vendent l’événement' },
   days_before_event: { en: 'days before the event', fr: 'jours avant l’événement' },
@@ -101,7 +101,7 @@ function linearWords(l: { vars: string[]; factor: number }, ctx: Ctx): string | 
   if (tickets) {
     const each = value(l.factor, ctx);
     return outside
-      ? w(ctx, `${each} per ticket sold, outside Hi.Events too`, `${each} par billet vendu, hors Hi.Events compris`)
+      ? w(ctx, `${each} per ticket sold, sales outside the ticketing site included`, `${each} par billet vendu, ventes hors billetterie comprises`)
       : w(ctx, `${each} per ticket sold`, `${each} par billet vendu`);
   }
   if (l.vars.length === 1 && l.vars[0] === 'team_full_price_sales' && ctx.unit === 'money') {
@@ -111,7 +111,7 @@ function linearWords(l: { vars: string[]; factor: number }, ctx: Ctx): string | 
   if (sales && ctx.unit === 'money') {
     const percent = `${fmtNumber(Number((l.factor * 100).toFixed(4)), ctx.lang)}${ctx.lang === 'fr' ? ' %' : '%'}`;
     return outside
-      ? w(ctx, `${percent} of your sales at full price, outside Hi.Events too`, `${percent} de tes ventes au plein prix, hors Hi.Events compris`)
+      ? w(ctx, `${percent} of your sales at full price, sales outside the ticketing site included`, `${percent} de tes ventes au plein prix, ventes hors billetterie comprises`)
       : w(ctx, `${percent} of your sales at full price`, `${percent} de tes ventes au plein prix`);
   }
   if (l.vars.length === 1) {

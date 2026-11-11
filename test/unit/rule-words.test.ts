@@ -36,8 +36,8 @@ describe('rules in words', () => {
 
   test('a percentage of sales, as migrated from the old rates', () => {
     const tenPercent = c('_/_', c('_*_', c('_+_', v('full_price_sales'), v('outside_sales')), n(10)), n(100));
-    expect(describeLine('Commission', tenPercent, 'money', 'en')).toBe('Commission: 10% of your sales at full price, outside Hi.Events too.');
-    expect(describeLine('Commission', tenPercent, 'money', 'fr')).toBe('Commission : 10 % de tes ventes au plein prix, hors Hi.Events compris.');
+    expect(describeLine('Commission', tenPercent, 'money', 'en')).toBe('Commission: 10% of your sales at full price, sales outside the ticketing site included.');
+    expect(describeLine('Commission', tenPercent, 'money', 'fr')).toBe('Commission : 10 % de tes ventes au plein prix, ventes hors billetterie comprises.');
     expect(describeLine('Commission', c('_*_', v('full_price_sales'), n(0.125)), 'money', 'en')).toBe('Commission: 12.5% of your sales at full price.');
     expect(describeLine('Bonus', c('_*_', v('team_full_price_sales'), n(0.02)), 'money', 'en')).toBe('Bonus: 2% of your team’s sales at full price.');
     expect(describeLine('Bonus', c('_*_', v('team_full_price_sales'), n(0.02)), 'money', 'fr')).toBe('Bonus : 2 % des ventes au plein prix de ton équipe.');

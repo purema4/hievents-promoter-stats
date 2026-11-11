@@ -1,3 +1,4 @@
+import { locale, plural, t } from './i18n';
 import { config } from './config';
 import type { DailySales } from './hievents';
 import { formatMoney, splitCommission, type Rate } from './money';
@@ -39,12 +40,14 @@ ${Array.from({ length: 101 }, (_, i) => `.h-${i}{height:${i}%}.b-${i}{bottom:${i
 `;
 
 export type Range = '7' | '30' | '90' | 'all';
-export const ranges: { value: Range; label: string }[] = [
-  { value: '7', label: '7 days' },
-  { value: '30', label: '30 days' },
-  { value: '90', label: '90 days' },
-  { value: 'all', label: 'All time' },
+export const ranges: { value: Range; label: string; fr: string }[] = [
+  { value: '7', label: '7 days', fr: '7 jours' },
+  { value: '30', label: '30 days', fr: '30 jours' },
+  { value: '90', label: '90 days', fr: '90 jours' },
+  { value: 'all', label: 'All time', fr: 'Depuis le début' },
 ];
+
+const tickets = (n: number) => plural(n, ['ticket', 'billet'], ['tickets', 'billets']);
 
 export function parseRange(raw: string | undefined, fallback: Range): Range {
   return ranges.some((r) => r.value === raw) ? (raw as Range) : fallback;
@@ -87,7 +90,7 @@ function niceStep(raw: number): number {
 }
 
 function shortDate(day: string): string {
-  return new Intl.DateTimeFormat('en-CA', { month: 'short', day: 'numeric', timeZone: 'UTC' }).format(parseDay(day));
+  return new Intl.DateTimeFormat(locale(), { month: 'short', day: 'numeric', timeZone: 'UTC' }).format(parseDay(day));
 }
 
 function bucketLabel(b: Bucket): string {
@@ -110,10 +113,10 @@ export function rangeBounds(range: Range, daily: DailySales[], end = today()): {
 
 export function RangeLinks(props: { current: Range; basePath: string }) {
   return (
-    <nav class="ranges" aria-label="Period">
+    <nav class="ranges" aria-label={t('Period', 'Période')}>
       {ranges.map((r) => (
         <a href={`${props.basePath}?range=${r.value}`} aria-current={r.value === props.current ? 'true' : undefined}>
-          {r.label}
+          {t(r.label, r.fr)}
         </a>
       ))}
     </nav>
@@ -132,7 +135,10 @@ export function MiniChart(props: { daily: DailySales[] }) {
   const buckets = buildBuckets(props.daily, 0, from, to);
   const max = Math.max(0, ...buckets.map((b) => b.tickets));
   const total = recentTickets(props.daily, '30');
-  const caption = total === 0 ? 'No sales in the last 30 days' : `${total} ${total === 1 ? 'ticket' : 'tickets'} in the last 30 days`;
+  const caption =
+    total === 0
+      ? t('No sales in the last 30 days', 'Aucune vente dans les 30 derniers jours')
+      : t(`${tickets(total)} in the last 30 days`, `${tickets(total)} dans les 30 derniers jours`);
   return (
     <span class="mini-chart">
       <span class="mini-bars" role="img" aria-label={caption}>
@@ -172,24 +178,27 @@ export function SalesChart(props: {
       <div class="chart-head">
         <h2>{props.title}</h2>
         <span class="muted">
-          {total} {total === 1 ? 'ticket' : 'tickets'}
-          {weekly ? ', per week' : ''}
+          {tickets(total)}
+          {weekly ? t(', per week', ', par semaine') : ''}
         </span>
         <RangeLinks current={props.range} basePath={props.basePath} />
       </div>
       {total === 0 ? (
-        <div class="chart-empty">No tickets sold in this period.</div>
+        <div class="chart-empty">{t('No tickets sold in this period.', 'Aucun billet vendu pendant cette période.')}</div>
       ) : (
         <>
-          <div class="plot" role="img" aria-label={`${props.title}: ${total} tickets from ${shortDate(from)} to ${shortDate(to)}, peak of ${max}.`}>
+          <div class="plot" role="img" aria-label={t(
+              `${props.title}: ${total} tickets from ${shortDate(from)} to ${shortDate(to)}, peak of ${max}.`,
+              `${props.title} : ${tickets(total)} du ${shortDate(from)} au ${shortDate(to)}, sommet de ${max}.`,
+            )}>
             <div class="y-axis" aria-hidden="true">
-              {ticks.map((t) => (
-                <span class={`b-${pct(t)}`}>{t}</span>
+              {ticks.map((tick) => (
+                <span class={`b-${pct(tick)}`}>{tick}</span>
               ))}
             </div>
             <div class="bars" aria-hidden="true">
-              {ticks.map((t) => (
-                <div class={`gridline b-${pct(t)}`} />
+              {ticks.map((tick) => (
+                <div class={`gridline b-${pct(tick)}`} />
               ))}
               {buckets.map((b, i) => (
                 <div class="col">
@@ -197,9 +206,7 @@ export function SalesChart(props: {
                   {/* The peak gets a label only when no axis tick already names its value. */}
                   {i === peakIndex && !ticks.includes(max) && <span class={`peak b-${pct(b.tickets)}`}>{b.tickets}</span>}
                   <div class={`tip ${i < buckets.length / 4 ? 'left' : i > (buckets.length * 3) / 4 ? 'right' : ''}`}>
-                    <strong>
-                      {b.tickets} {b.tickets === 1 ? 'ticket' : 'tickets'}
-                    </strong>
+                    <strong>{tickets(b.tickets)}</strong>
                     {bucketLabel(b)}
                     {!props.ticketsOnly && ` · ${money(b.commission, props.currency)} commission`}
                   </div>
@@ -213,13 +220,13 @@ export function SalesChart(props: {
             </div>
           </div>
           <details class="table-view">
-            <summary>Show as a table</summary>
+            <summary>{t('Show as a table', 'Voir en tableau')}</summary>
             <div class="table-wrap">
               <table>
                 <thead>
                   <tr>
-                    <th>{weekly ? 'Week' : 'Day'}</th>
-                    <th class="num">Tickets</th>
+                    <th>{weekly ? t('Week', 'Semaine') : t('Day', 'Jour')}</th>
+                    <th class="num">{t('Tickets', 'Billets')}</th>
                     {!props.ticketsOnly && <th class="num">Commission</th>}
                   </tr>
                 </thead>

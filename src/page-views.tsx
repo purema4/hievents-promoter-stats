@@ -11,6 +11,7 @@ import { LinkField } from './promoter-views';
 import { shareLink } from './short-links';
 import type { DirectoryItem, DirectorySettings } from './directory';
 import { maxUploadBytes } from './images';
+import { lang, locale, plural, t } from './i18n';
 import { Avatar, cssVersion, Flash, Layout, PagesTabs } from './views';
 
 // --- The public page, /p/<alias> -----------------------------------------------------------------
@@ -19,9 +20,9 @@ function dateParts(date: Date | null, timezone: string | null): { month: string;
   if (!date) return null;
   const format = (options: Intl.DateTimeFormatOptions) => {
     try {
-      return new Intl.DateTimeFormat('en-CA', { ...options, timeZone: timezone ?? 'UTC' }).format(date);
+      return new Intl.DateTimeFormat(locale(), { ...options, timeZone: timezone ?? 'UTC' }).format(date);
     } catch {
-      return new Intl.DateTimeFormat('en-CA', { ...options, timeZone: 'UTC' }).format(date);
+      return new Intl.DateTimeFormat(locale(), { ...options, timeZone: 'UTC' }).format(date);
     }
   };
   return {
@@ -49,7 +50,7 @@ const instagramIcon = (
 function PublicLayout(props: { title: string; description: string; image?: string; imageSize?: { width: number; height: number }; url?: string; stylesheet?: string; children: Child }) {
   const brand = getBrand();
   return (
-    <html lang="en">
+    <html lang={lang()}>
       <head>
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
@@ -96,7 +97,7 @@ function PageEventCard(props: { owner: User; event: PageEvent; first: boolean })
   const ref = { id: e.event_id, title: e.title };
   const link = shareLink(props.owner, ref, e.code);
   const date = dateParts(e.start, e.timezone);
-  const more = e.dates > 1 ? ` · ${e.dates} dates` : '';
+  const more = e.dates > 1 ? ` · ${plural(e.dates, ['date', 'date'], ['dates', 'dates'])}` : '';
   const cover = (
     <span class={`lp-cover${e.has_cover ? '' : ' blank'}`}>
       {e.has_cover && <img src={`/p/${props.owner.alias}/cover/${e.event_id}`} alt="" loading={props.first ? undefined : 'lazy'} />}
@@ -106,25 +107,25 @@ function PageEventCard(props: { owner: User; event: PageEvent; first: boolean })
           <span class="lp-day">{date.day}</span>
         </span>
       )}
-      {props.first && <span class="lp-next">Next up</span>}
+      {props.first && <span class="lp-next">{t('Next up', 'Prochain')}</span>}
     </span>
   );
   const body = (
     <span class="lp-body">
       <span class="lp-title">{e.title}</span>
-      <span class="lp-when">{date ? `${date.when}${more}` : 'Date to be announced'}</span>
+      <span class="lp-when">{date ? `${date.when}${more}` : t('Date to be announced', 'Date à venir')}</span>
       {link ? (
         <span class="lp-cta">
-          <span>Get tickets</span>
+          <span>{t('Get tickets', 'Billets')}</span>
           <span class="lp-cta-code">
-            Code {e.code} applied
+            {t(`Code ${e.code} applied`, `Code ${e.code} appliqué`)}
             <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
               <path fill="currentColor" d="M13.2 5.3 19.9 12l-6.7 6.7-1.4-1.4 4.3-4.3H4v-2h12.1l-4.3-4.3 1.4-1.4Z" />
             </svg>
           </span>
         </span>
       ) : (
-        <span class="lp-cta muted-cta">Use the code {e.code} at checkout</span>
+        <span class="lp-cta muted-cta">{t(`Use the code ${e.code} at checkout`, `Utilise le code ${e.code} au paiement`)}</span>
       )}
     </span>
   );
@@ -147,15 +148,20 @@ export function PromoterPublicPage(props: { owner: User; events: PageEvent[]; sh
   const instagram = instagramHandle(owner);
   const featured = events.find((e) => e.has_cover);
   const base = `/p/${owner.alias}`;
+  const titles = events
+    .slice(0, 3)
+    .map((e) => e.title)
+    .join(', ');
   const description = events.length
-    ? `Tickets for ${events
-        .slice(0, 3)
-        .map((e) => e.title)
-        .join(', ')}${events.length > 3 ? ` and ${events.length - 3} more` : ''}, with ${owner.name}'s code.`
-    : `${owner.name}'s events.`;
+    ? t(
+        `Tickets for ${titles}${events.length > 3 ? ` and ${events.length - 3} more` : ''}, with ${owner.name}'s code.`,
+        `Billets pour ${titles}${events.length > 3 ? ` et ${events.length - 3} autres` : ''}, avec le code de ${owner.name}.`,
+      )
+    : t(`${owner.name}'s events.`, `Les événements de ${owner.name}.`);
+  const pageTitle = `${owner.name} · ${t('Upcoming events', 'Événements à venir')}`;
   return (
     <PublicLayout
-      title={`${owner.name} · Upcoming events`}
+      title={pageTitle}
       description={description}
       url={pageLink(owner) ?? undefined}
       image={featured ? `${config.appUrl}${base}/cover/${featured.event_id}` : avatar ? `${config.appUrl}${base}/avatar?v=${avatar.version}` : undefined}
@@ -164,7 +170,7 @@ export function PromoterPublicPage(props: { owner: User; events: PageEvent[]; sh
         {featured && <img src={`${base}/cover/${featured.event_id}`} alt="" />}
       </div>
       <div class="lp-wrap">
-        <button type="button" class="lp-share" data-share-page={props.shareUrl} data-share-title={`${owner.name} · Upcoming events`} aria-label="Share this page">
+        <button type="button" class="lp-share" data-share-page={props.shareUrl} data-share-title={pageTitle} aria-label={t('Share this page', 'Partager cette page')}>
           {shareIcon}
         </button>
         <div class="lp-head">
@@ -176,7 +182,7 @@ export function PromoterPublicPage(props: { owner: User; events: PageEvent[]; sh
             </span>
           )}
           <h1 class="lp-name">{owner.name}</h1>
-          <p class="lp-tagline">{events.length ? 'My upcoming events. Get your tickets with my code.' : 'Upcoming events'}</p>
+          <p class="lp-tagline">{events.length ? t('My upcoming events. Get your tickets with my code.', 'Mes événements à venir. Achète tes billets avec mon code.') : t('Upcoming events', 'Événements à venir')}</p>
           {instagram && (
             <a class="lp-pill" href={`https://www.instagram.com/${instagram}/`} rel="noopener">
               {instagramIcon}@{instagram}
@@ -184,17 +190,17 @@ export function PromoterPublicPage(props: { owner: User; events: PageEvent[]; sh
           )}
         </div>
         {events.length ? (
-          <section class="lp-events" aria-label="Upcoming events">
+          <section class="lp-events" aria-label={t('Upcoming events', 'Événements à venir')}>
             {events.map((e, i) => (
               <PageEventCard owner={owner} event={e} first={i === 0} />
             ))}
           </section>
         ) : (
-          <p class="lp-empty">No upcoming events right now. Check back soon.</p>
+          <p class="lp-empty">{t('No upcoming events right now. Check back soon.', 'Aucun événement à venir pour l’instant. Reviens bientôt.')}</p>
         )}
-        <button type="button" class="lp-share-wide" data-share-page={props.shareUrl} data-share-title={`${owner.name} · Upcoming events`}>
+        <button type="button" class="lp-share-wide" data-share-page={props.shareUrl} data-share-title={pageTitle}>
           {shareIcon}
-          <span>Share this page</span>
+          <span>{t('Share this page', 'Partager cette page')}</span>
         </button>
         <PageFooter />
       </div>
@@ -224,18 +230,18 @@ export type DirectoryEntry = { kind: 'promoter'; user: User; link: string } | { 
 /** "Ana, Ben, Cy and 4 more", for the link preview. */
 function namesLine(names: string[]): string {
   if (names.length <= 1) return names.join('');
-  if (names.length <= 4) return `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`;
-  return `${names.slice(0, 3).join(', ')} and ${names.length - 3} more`;
+  if (names.length <= 4) return `${names.slice(0, -1).join(', ')} ${t('and', 'et')} ${names.at(-1)}`;
+  return `${names.slice(0, 3).join(', ')} ${t(`and ${names.length - 3} more`, `et ${names.length - 3} autres`)}`;
 }
 
 export function PromoterDirectoryPage(props: { title: string; tagline: string; stylesheet: string; image: string; entries: DirectoryEntry[] }) {
   const brand = getBrand();
   const names = props.entries.flatMap((e) => (e.kind === 'promoter' ? [e.user.name] : []));
-  const description = [props.tagline, names.length ? `${names.length === 1 ? 'Promoter' : 'Promoters'}: ${namesLine(names)}.` : ''].filter(Boolean).join(' ');
+  const description = [props.tagline, names.length ? `${names.length === 1 ? t('Promoter', 'Promoteur') : t('Promoters', 'Promoteurs')}${t(':', ' :')} ${namesLine(names)}.` : ''].filter(Boolean).join(' ');
   return (
     <PublicLayout
       title={`${brand.name} · ${props.title}`}
-      description={description || `Every ${brand.name} promoter's page, with their upcoming events and codes.`}
+      description={description || t(`Every ${brand.name} promoter's page, with their upcoming events and codes.`, `La page de chaque promoteur ${brand.name}, avec ses événements à venir et ses codes.`)}
       url={`${config.appUrl}/p`}
       image={props.image}
       imageSize={{ width: 1200, height: 630 }}
@@ -288,7 +294,7 @@ export function PromoterDirectoryPage(props: { title: string; tagline: string; s
               })}
             </ul>
           ) : (
-            <p class="lp-empty">Nothing here right now. Check back soon.</p>
+            <p class="lp-empty">{t('Nothing here right now. Check back soon.', 'Rien ici pour l’instant. Reviens bientôt.')}</p>
           )}
           <PageFooter />
         </div>
@@ -299,12 +305,12 @@ export function PromoterDirectoryPage(props: { title: string; tagline: string; s
 
 export function PageMissing() {
   return (
-    <PublicLayout title="Page not found" description="This page does not exist.">
+    <PublicLayout title={t('Page not found', 'Page introuvable')} description={t('This page does not exist.', 'Cette page n’existe pas.')}>
       <div class="lp-backdrop plain" aria-hidden="true"></div>
       <div class="lp-wrap">
         <div class="lp-head lp-missing">
-          <h1 class="lp-name">This page does not exist</h1>
-          <p class="lp-tagline">The link may be old or mistyped. Ask the person who shared it for a new one.</p>
+          <h1 class="lp-name">{t('This page does not exist', 'Cette page n’existe pas')}</h1>
+          <p class="lp-tagline">{t('The link may be old or mistyped. Ask the person who shared it for a new one.', 'Le lien est peut-être vieux ou mal écrit. Demande-en un nouveau à la personne qui te l’a partagé.')}</p>
         </div>
         <PageFooter />
       </div>
@@ -328,26 +334,31 @@ export function MyPagePage(props: {
   const instagram = instagramHandle(user);
   const withoutLink = events.filter((e) => !eventLink({ id: e.event_id, title: e.title }, e.code, user.alias));
   return (
-    <Layout title="My page" user={user}>
-      <h1>My page</h1>
+    <Layout title={t('My page', 'Ma page')} user={user}>
+      <h1>{t('My page', 'Ma page')}</h1>
       <p class="muted">
-        One link with all your upcoming events, your promo code already in each one. Put it in your Instagram bio, your
-        stories or anywhere you share.
+        {t(
+          'One link with all your upcoming events, your promo code already in each one. Put it in your Instagram bio, your stories or anywhere you share.',
+          'Un seul lien avec tous tes événements à venir, ton code promo déjà dans chacun. Mets-le dans ta bio Instagram, tes stories ou partout où tu partages.',
+        )}
       </p>
       <Flash ok={props.ok} />
       {!full ? (
-        <div class="card muted">Your page needs an alias. Set one on your Account page.</div>
+        <div class="card muted">{t('Your page needs an alias. Set one on your Account page.', 'Ta page a besoin d’un alias. Choisis-en un sur ta page Compte.')}</div>
       ) : hidden ? (
         <div class="card stack-card">
-          <h2 class="first">Your page is hidden</h2>
+          <h2 class="first">{t('Your page is hidden', 'Ta page est cachée')}</h2>
           <p class="muted">
-            {hiddenByTeam(user) ? 'The team hid it. Ask them if you would like it back. ' : ''}Anyone opening your link sees "This
-            page does not exist". Your event links still work.
+            {hiddenByTeam(user) ? t('The team hid it. Ask them if you would like it back. ', 'L’équipe l’a cachée. Demande-leur si tu veux la ravoir. ') : ''}
+            {t(
+              'Anyone opening your link sees "This page does not exist". Your event links still work.',
+              'Quiconque ouvre ton lien voit « Cette page n’existe pas ». Tes liens d’événements fonctionnent encore.',
+            )}
           </p>
           {!hiddenByTeam(user) && (
             <form method="post" action="/page/visibility">
               <input type="hidden" name="hidden" value="0" />
-              <button type="submit">Show my page again</button>
+              <button type="submit">{t('Show my page again', 'Réafficher ma page')}</button>
             </form>
           )}
         </div>
@@ -355,63 +366,80 @@ export function MyPagePage(props: {
         <>
           <div class="card stack-card my-page">
             <div class="my-page-links">
-              <h2 class="first">Your links</h2>
+              <h2 class="first">{t('Your links', 'Tes liens')}</h2>
               {props.shortLink && (
                 <div class="page-link-row">
                   <span class="page-link-label">
-                    Short link
-                    {props.clicks !== null && <span class="muted"> · {props.clicks === 1 ? '1 click' : `${props.clicks} clicks`}</span>}
+                    {t('Short link', 'Lien court')}
+                    {props.clicks !== null && <span class="muted"> · {plural(props.clicks, ['click', 'clic'], ['clicks', 'clics'])}</span>}
                   </span>
-                  <LinkField link={props.shortLink} label="My page (short link)" />
+                  <LinkField link={props.shortLink} label={t('My page (short link)', 'Ma page (lien court)')} />
                 </div>
               )}
               <div class="page-link-row">
-                <span class="page-link-label">{props.shortLink ? 'Full link' : 'Link'}</span>
-                <LinkField link={full} label="My page" />
+                <span class="page-link-label">{props.shortLink ? t('Full link', 'Lien complet') : t('Link', 'Lien')}</span>
+                <LinkField link={full} label={t('My page', 'Ma page')} />
               </div>
-              {props.kutt && !props.shortLink && <p class="muted">Your short link is on its way. Reload in a moment.</p>}
+              {props.kutt && !props.shortLink && <p class="muted">{t('Your short link is on its way. Reload in a moment.', 'Ton lien court s’en vient. Recharge dans un instant.')}</p>}
               <div class="form-actions">
                 <a class="button" href={`/p/${user.alias}`} target="_blank" rel="noopener">
-                  Open my page
+                  {t('Open my page', 'Ouvrir ma page')}
                 </a>
                 <a class="button secondary" href="/page/qr.png" download={`${user.alias}-qr.png`}>
-                  Download QR code
+                  {t('Download QR code', 'Télécharger le code QR')}
                 </a>
               </div>
             </div>
             <figure class="my-page-qr">
-              <img src="/page/qr.png" alt={`QR code for ${props.shortLink ?? full}`} width="180" height="180" />
-              <figcaption class="muted">Scan to open your page. Print it or add it to a flyer.</figcaption>
+              <img src="/page/qr.png" alt={t(`QR code for ${props.shortLink ?? full}`, `Code QR pour ${props.shortLink ?? full}`)} width="180" height="180" />
+              <figcaption class="muted">{t('Scan to open your page. Print it or add it to a flyer.', 'Scanne-le pour ouvrir ta page. Imprime-le ou ajoute-le à un flyer.')}</figcaption>
             </figure>
           </div>
 
           <div class="card stack-card">
-            <h2 class="first">What's on it</h2>
+            <h2 class="first">{t("What's on it", 'Ce qu’on y voit')}</h2>
             <p class="muted">
-              {[`Your name (${user.name})`, avatarOf(user) ? 'your photo' : 'your initials', instagram ? `your Instagram (@${instagram})` : ''].filter(Boolean).join(', ')}. Change them on{' '}
-              <a href="/account">Account</a>. Your sales and commission are never shown.
+              {[
+                t(`Your name (${user.name})`, `Ton nom (${user.name})`),
+                avatarOf(user) ? t('your photo', 'ta photo') : t('your initials', 'tes initiales'),
+                instagram ? t(`your Instagram (@${instagram})`, `ton Instagram (@${instagram})`) : '',
+              ]
+                .filter(Boolean)
+                .join(', ')}
+              . {t('Change them on', 'Modifie-les dans')} <a href="/account">{t('Account', 'Compte')}</a>.{' '}
+              {t('Your sales and commission are never shown.', 'Tes ventes et ta commission ne sont jamais affichées.')}
             </p>
             {events.length ? (
               <ul class="page-event-list">
                 {events.map((e) => (
                   <li>
-                    <strong>{e.title}</strong> <span class="muted">with the code {e.code}</span>
+                    <strong>{e.title}</strong> <span class="muted">{t(`with the code ${e.code}`, `avec le code ${e.code}`)}</span>
                   </li>
                 ))}
               </ul>
             ) : (
-              <p class="muted">No upcoming events right now. They show up here as soon as one of your codes is on one.</p>
+              <p class="muted">
+                {t(
+                  'No upcoming events right now. They show up here as soon as one of your codes is on one.',
+                  'Aucun événement à venir pour l’instant. Ils apparaissent ici dès qu’un de tes codes est sur un événement.',
+                )}
+              </p>
             )}
             {withoutLink.length > 0 && (
-              <p class="muted">Event links are not set up yet, so your page tells people to use your code at checkout.</p>
+              <p class="muted">
+                {t(
+                  'Event links are not set up yet, so your page tells people to use your code at checkout.',
+                  'Les liens d’événements ne sont pas encore configurés : ta page dit donc aux gens d’utiliser ton code au paiement.',
+                )}
+              </p>
             )}
-            <p class="muted">Each event leaves your page once it is over.</p>
+            <p class="muted">{t('Each event leaves your page once it is over.', 'Chaque événement disparaît de ta page une fois terminé.')}</p>
           </div>
 
           <form method="post" action="/page/visibility" class="hide-page">
             <input type="hidden" name="hidden" value="1" />
             <button type="submit" class="link">
-              Hide my page
+              {t('Hide my page', 'Cacher ma page')}
             </button>
           </form>
         </>

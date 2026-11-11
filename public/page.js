@@ -1,5 +1,9 @@
 // Promoters' public pages: the share buttons. Opens the phone's share sheet where there is one,
 // otherwise copies the link. No service worker and nothing stored: visitors are not app users.
+
+// Wording in the page's language (the server sets <html lang>).
+const fr = document.documentElement.lang === 'fr';
+const t = (en, frText) => (fr ? frText : en);
 document.addEventListener('click', async (event) => {
   const button = event.target.closest('[data-share-page]');
   if (!button) return;
@@ -11,7 +15,7 @@ document.addEventListener('click', async (event) => {
   try {
     await navigator.clipboard.writeText(url);
   } catch {
-    window.prompt('Copy this link', url);
+    window.prompt(t('Copy this link', 'Copie ce lien'), url);
     return;
   }
   const label = button.querySelector('span');
@@ -21,7 +25,7 @@ document.addEventListener('click', async (event) => {
     return;
   }
   const before = label.textContent;
-  label.textContent = 'Link copied';
+  label.textContent = t('Link copied', 'Lien copié');
   button.classList.add('copied');
   setTimeout(() => {
     label.textContent = before;

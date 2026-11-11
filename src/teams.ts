@@ -4,6 +4,7 @@ import { outsideSales } from './adjustments';
 import { addColumn, codesFor, db, findUser, type User } from './local-db';
 import { toCents } from './money';
 import { notify } from './notifications';
+import { t } from './i18n';
 
 /*
  * Teams: an admin makes a promoter a team lead and puts other promoters on their team. A team lead
@@ -173,7 +174,13 @@ export function setTeamLead(user: User, lead: boolean): TeamResult {
       closeMemberships('lead_id', user.id);
     }
   })();
-  if (lead) notify(user.id, { title: 'You are a team lead', body: 'You can now follow the sales of your team under My team.', link: '/team' });
+  if (lead) {
+    notify(user.id, () => ({
+      title: t('You are a team lead', 'Tu es chef d’équipe'),
+      body: t('You can now follow the sales of your team under My team.', 'Tu peux maintenant suivre les ventes de ton équipe sous Mon équipe.'),
+      link: '/team',
+    }));
+  }
   return 'ok';
 }
 
@@ -208,10 +215,13 @@ export function assignTeam(user: User, leadId: number | null): TeamResult {
     db.query('INSERT INTO team_memberships (lead_id, member_id, from_day) VALUES (?, ?, ?)').run(lead.id, user.id, joinDay(user.id));
   })();
   // They are told who can see their sales.
-  notify(user.id, {
-    title: 'You joined a team',
-    body: `${lead.name} is your team lead and can now see your sales. Your team's total tickets and sales are under My team.`,
+  notify(user.id, () => ({
+    title: t('You joined a team', 'Tu fais partie d’une équipe'),
+    body: t(
+      `${lead.name} is your team lead and can now see your sales. Your team's total tickets and sales are under My team.`,
+      `${lead.name} est ton chef d’équipe et peut maintenant voir tes ventes. Le total des billets et des ventes de ton équipe est sous Mon équipe.`,
+    ),
     link: '/team',
-  });
+  }));
   return 'ok';
 }

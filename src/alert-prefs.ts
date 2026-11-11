@@ -1,7 +1,7 @@
 import { type EmailType } from './email-templates';
 import { db, listUsers, type User } from './local-db';
 import { sendEmail } from './mail';
-import { notify } from './notifications';
+import { notify, type NotificationMessage } from './notifications';
 
 /*
  * What each admin wants to hear about, and how: by email, as an app notification (the bell and
@@ -49,7 +49,7 @@ export function savePrefs(userId: number, prefs: Prefs) {
   })();
 }
 
-type Message = { title: string; body: string; link: string };
+type Message = NotificationMessage | (() => NotificationMessage);
 
 /** Sends one alert to one person, the way they chose. Never waits on email. */
 export function alertUser(user: User, key: AlertKey, message: Message, emailVars: Record<string, string>) {

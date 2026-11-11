@@ -63,7 +63,7 @@ describeIntegration('payouts, rewards and changes by hand', () => {
       const res = await admin.post(`/admin/promoters/${p.id}/adjust`, { kind: 'outside_sale', quantity: '15', sales: '300', label: 'Door sales' });
       expect(location(res)).toContain('ok=adjusted');
       const html = await p.client.page('/');
-      expect(stats(html).get('Tickets sold, 6 orders · incl. 15 outside Hi.Events · 1 awaiting payment')).toBe('25');
+      expect(stats(html).get('Tickets sold, 6 orders · incl. 15 outside the ticketing site · 1 awaiting payment')).toBe('25');
       expect(html).toContain('level-c-silver">Silver'); // 25 tickets
       expect(available(await p.client.page('/payouts'))).toBe('$58.50');
       const admin_ = await admin.page(`/admin/promoters/${p.id}`);
@@ -155,7 +155,7 @@ describeIntegration('payouts, rewards and changes by hand', () => {
       expect(results.map((r) => r.status).sort()).toEqual([302, 400, 400]);
       const html = await p.client.page('/payouts');
       expect(html.match(/class="status pending"/g)).toHaveLength(1);
-      expect(html).toContain('You have a request waiting.');
+      expect(html).toContain('Your payout request is waiting for approval.');
       // One open request per currency.
       const again = await request(p.client, '5');
       expect(flashError(await again.text())).toBe('You already have a request waiting for this currency.');

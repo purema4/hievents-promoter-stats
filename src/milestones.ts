@@ -3,6 +3,7 @@ import { codesFor, db, listUsers, type User } from './local-db';
 import { earningsFor } from './earnings';
 import { statsForCodes } from './hievents';
 import { notify } from './notifications';
+import { plural, t } from './i18n';
 import { alertAdmins } from './alert-prefs';
 import { config } from './config';
 import { summarizeEvents } from './promoter-views';
@@ -43,11 +44,14 @@ export function checkMilestones(promoter: User, rewards: Rewards) {
 
   const previousSold = seen.get('sold');
   if (!firstLook && previousSold !== undefined && levelFor(previousSold).level.name !== level.name && rewards.totalSold > previousSold) {
-    notify(promoter.id, {
-      title: `You reached ${level.name}`,
-      body: `${rewards.totalSold} tickets sold in total.${next ? ` Next: ${next.name} at ${next.at}.` : ' That is the top level.'}`,
+    notify(promoter.id, () => ({
+      title: t(`You reached ${level.name}`, `Tu as atteint ${level.name}`),
+      body: t(
+        `${rewards.totalSold} tickets sold in total.${next ? ` Next: ${next.name} at ${next.at}.` : ' That is the top level.'}`,
+        `${plural(rewards.totalSold, ['ticket sold', 'billet vendu'], ['tickets sold', 'billets vendus'])} au total.${next ? ` Prochain : ${next.name} à ${next.at}.` : ' C’est le plus haut niveau.'}`,
+      ),
       link: '/',
-    });
+    }));
     alertAdmins(
       'promoter_level',
       { title: `${promoter.name} reached ${level.name}`, body: `${rewards.totalSold} tickets sold with their codes.`, link: `/admin/promoters/${promoter.id}` },
@@ -64,11 +68,14 @@ export function checkMilestones(promoter: User, rewards: Rewards) {
   const previousMerch = seen.get('merch');
   if (!firstLook && previousMerch !== undefined && rewards.merch.earned > previousMerch) {
     const item = labelOf(rewardRules().merch, rewards.merch.earned);
-    notify(promoter.id, {
-      title: item ? `${item} unlocked` : 'Merch unlocked',
-      body: `You sold ${rewards.totalSold} tickets: ${item ? 'request it' : 'pick your merch'} on Payouts & rewards.`,
+    notify(promoter.id, () => ({
+      title: item ? t(`${item} unlocked`, `${item} débloqué`) : t('Merch unlocked', 'Marchandise débloquée'),
+      body: t(
+        `You sold ${rewards.totalSold} tickets: ${item ? 'request it' : 'pick your merch'} on Payouts & rewards.`,
+        `Tu as vendu ${plural(rewards.totalSold, ['ticket', 'billet'], ['tickets', 'billets'])} : ${item ? 'demande-le' : 'choisis ta marchandise'} dans Paiements et récompenses.`,
+      ),
       link: '/payouts#rewards',
-    });
+    }));
     alertAdmins(
       'promoter_merch',
       {
@@ -86,23 +93,35 @@ export function checkMilestones(promoter: User, rewards: Rewards) {
   }
   setState(promoter.id, 'merch', rewards.merch.earned);
 
-  for (const t of rewards.tickets) {
-    const plain = t.type.key === 'free_tickets';
-    const key = plain ? `free:${t.event.id}` : `reward:${t.type.key}:${t.event.id}`;
+  for (const reward of rewards.tickets) {
+    const plain = reward.type.key === 'free_tickets';
+    const key = plain ? `free:${reward.event.id}` : `reward:${reward.type.key}:${reward.event.id}`;
     const previous = seen.get(key);
     // A new event counts as "0 before", so the first reward for it is announced too.
-    if (!firstLook && t.earned > (previous ?? 0)) {
-      notify(promoter.id, {
-        title: plain ? `Free ticket earned for ${t.event.title}` : `${t.type.label_en} earned for ${t.event.title}`,
+    if (!firstLook && reward.earned > (previous ?? 0)) {
+      const { earned, event, type } = reward;
+      notify(promoter.id, () => ({
+        title: plain
+          ? t(`Free ticket earned for ${event.title}`, `Billet gratuit gagné pour ${event.title}`)
+          : t(`${type.label_en} earned for ${event.title}`, `Nouvelle récompense pour ${event.title} : ${type.label_fr}`),
         body: plain
-          ? t.earned === 1
-            ? 'Your sales for this event earned you a free ticket. Request it on Payouts & rewards.'
-            : `${t.earned} free tickets earned for this event so far. Request them on Payouts & rewards.`
-          : `${t.earned} ${t.type.label_en} earned for this event so far. Request them on Payouts & rewards.`,
+          ? earned === 1
+            ? t(
+                'Your sales for this event earned you a free ticket. Request it on Payouts & rewards.',
+                'Tes ventes pour cet événement t’ont fait gagner un billet gratuit. Demande-le dans Paiements et récompenses.',
+              )
+            : t(
+                `${earned} free tickets earned for this event so far. Request them on Payouts & rewards.`,
+                `${earned} billets gratuits gagnés pour cet événement jusqu’ici. Demande-les dans Paiements et récompenses.`,
+              )
+          : t(
+              `${earned} ${type.label_en} earned for this event so far. Request them on Payouts & rewards.`,
+              `Tu as gagné ${earned} ${type.label_fr} pour cet événement jusqu’ici. Demande-les dans Paiements et récompenses.`,
+            ),
         link: '/payouts#rewards',
-      });
+      }));
     }
-    setState(promoter.id, key, t.earned);
+    setState(promoter.id, key, reward.earned);
   }
 }
 

@@ -11,6 +11,7 @@ import { allEventBanners } from './banners';
 import { allMediaDrives } from './media-drives';
 import { formatMoney, totalsByCurrency } from './money';
 import { notify } from './notifications';
+import { plural, t, withLang, type Lang } from './i18n';
 import { balances, settlePayout, type PayoutRequest, withTeamRule } from './payouts';
 import { summarizeEvents } from './promoter-views';
 import { describeReward, isDeposit, rewardsFor, settleReward, type RewardRequest } from './rewards';
@@ -27,12 +28,19 @@ export async function emailLoginLink(
   kind: 'invite' | 'login',
   waiting?: { id: string; from: string },
   attempts = 3,
+  // The language of the browser that asked, when the person asked themselves (sign-in form, invite
+  // link); otherwise the one saved on their account, or English for someone who never visited.
+  language?: Lang,
 ): Promise<boolean> {
   const seconds = kind === 'invite' ? config.inviteLinkDays * 86400 : config.loginLinkMinutes * 60;
   const { token, code } = createLoginToken(user.id, seconds, waiting);
   const link = `${config.appUrl}/login/verify?token=${token}`;
-  const expiry = kind === 'invite' ? `${config.inviteLinkDays} days` : `${config.loginLinkMinutes} minutes`;
-  return sendEmail(kind, [user], { link, code, expiry }, undefined, { attempts });
+  // Worded in the person's language: theirs when saved, or the browser's asking for a sign-in link.
+  const expiry = () =>
+    kind === 'invite'
+      ? plural(config.inviteLinkDays, ['day', 'jour'], ['days', 'jours'])
+      : plural(config.loginLinkMinutes, ['minute', 'minute'], ['minutes', 'minutes']);
+  return sendEmail(kind, [language ? { ...user, lang: language } : user], () => ({ link, code, expiry: expiry() }), undefined, { attempts });
 }
 
 /**
@@ -93,7 +101,8 @@ export async function commissionEvents() {
 
 /** Tells the admins about a new payout request. */
 export function announcePayoutRequest(user: User, input: { amountCents: number; currency: string; method: string; details: string; note: string }) {
-  alertAdmins(
+  // Admins' alerts are in English, whatever the promoter's language.
+  withLang('en', () => alertAdmins(
     'payout_requested',
     {
       title: `${user.name} requested ${formatMoney(input.amountCents, input.currency)}`,
@@ -108,12 +117,12 @@ export function announcePayoutRequest(user: User, input: { amountCents: number; 
       note: input.note,
       link: `${config.appUrl}/admin/payouts`,
     },
-  );
+  ));
 }
 
 /** Tells the admins about a new reward request. */
 export function announceRewardRequest(user: User, request: RewardRequest) {
-  alertAdmins(
+  withLang('en', () => alertAdmins(
     'reward_requested',
     { title: `${user.name} requested a reward`, body: describeReward(request), link: '/admin/payouts' },
     {
@@ -122,23 +131,25 @@ export function announceRewardRequest(user: User, request: RewardRequest) {
       details: request.details ?? 'None',
       link: `${config.appUrl}/admin/payouts`,
     },
-  );
+  ));
 }
 
 /** Tells the admins about a cart from the rewards shop, in one alert. */
 export function announceRewardOrder(user: User, requests: RewardRequest[]) {
   if (requests.length === 1) return announceRewardRequest(user, requests[0]!);
-  const list = requests.map(describeReward).join('; ');
-  alertAdmins(
-    'reward_requested',
-    { title: `${user.name} requested ${requests.length} rewards`, body: list, link: '/admin/payouts' },
-    {
-      promoter: `${user.name} (${user.email})`,
-      reward: list,
-      details: requests.map((r) => r.details).filter(Boolean).join(' / ') || 'None',
-      link: `${config.appUrl}/admin/payouts`,
-    },
-  );
+  withLang('en', () => {
+    const list = requests.map(describeReward).join('; ');
+    alertAdmins(
+      'reward_requested',
+      { title: `${user.name} requested ${requests.length} rewards`, body: list, link: '/admin/payouts' },
+      {
+        promoter: `${user.name} (${user.email})`,
+        reward: list,
+        details: requests.map((r) => r.details).filter(Boolean).join(' / ') || 'None',
+        link: `${config.appUrl}/admin/payouts`,
+      },
+    );
+  });
 }
 
 /**
@@ -148,27 +159,32 @@ export function announceRewardOrder(user: User, requests: RewardRequest[]) {
 export function finishPayout(c: Context, admin: User, payout: PayoutRequest, status: 'paid' | 'rejected', adminNote: string, via?: string): boolean {
   if (!settlePayout(payout.id, admin.id, status, adminNote)) return false;
   audit(c, `payout.${status}`, { by: admin.id, payoutId: payout.id, userId: payout.user_id, ...(via ? { via } : {}) });
-  const amount = formatMoney(payout.amount_cents, payout.currency);
+  // Worded for the promoter, in their language (amounts too).
+  const amount = () => formatMoney(payout.amount_cents, payout.currency);
+  const note = adminNote.trim();
   if (payout.user_id) {
-    notify(payout.user_id, {
-      title: status === 'paid' ? `Payout sent: ${amount}` : `Payout request declined: ${amount}`,
+    notify(payout.user_id, () => ({
+      title: status === 'paid' ? t(`Payout sent: ${amount()}`, `Paiement envoyé : ${amount()}`) : t(`Payout request declined: ${amount()}`, `Demande de paiement refusée : ${amount()}`),
       body:
         status === 'paid'
-          ? `By ${payout.method}${payout.details ? ` to ${payout.details}` : ''}.${adminNote.trim() ? ` Reference: ${adminNote.trim()}` : ''}`
-          : `${adminNote.trim()} The amount is available to request again.`,
+          ? t(
+              `By ${payout.method}${payout.details ? ` to ${payout.details}` : ''}.${note ? ` Reference: ${note}` : ''}`,
+              `Par ${payout.method}${payout.details ? ` à ${payout.details}` : ''}.${note ? ` Référence : ${note}` : ''}`,
+            )
+          : t(`${note} The amount is available to request again.`, `${note} Tu peux redemander ce montant.`),
       link: '/payouts',
-    });
+    }));
   }
   const to = [{ name: payout.promoter_name, email: payout.promoter_email }];
   setTimeout(
     () =>
-      void sendEmail(status === 'paid' ? 'payout_paid' : 'payout_declined', to, {
-        amount,
+      void sendEmail(status === 'paid' ? 'payout_paid' : 'payout_declined', to, () => ({
+        amount: amount(),
         method: payout.method,
-        details: payout.details ? `to ${payout.details}` : '',
-        note: status === 'paid' ? (adminNote.trim() ? `Reference: ${adminNote.trim()}` : '') : adminNote.trim(),
+        details: payout.details ? t(`to ${payout.details}`, `à ${payout.details}`) : '',
+        note: status === 'paid' ? (note ? t(`Reference: ${note}`, `Référence : ${note}`) : '') : note,
         link: `${config.appUrl}/payouts`,
-      }),
+      })),
     0,
   );
   return true;
@@ -178,27 +194,28 @@ export function finishPayout(c: Context, admin: User, payout: PayoutRequest, sta
 export function finishReward(c: Context, admin: User, reward: RewardRequest, status: 'fulfilled' | 'rejected', adminNote: string, via?: string): boolean {
   if (!settleReward(reward.id, admin.id, status, adminNote)) return false;
   audit(c, `reward.${status}`, { by: admin.id, rewardId: reward.id, userId: reward.user_id, ...(via ? { via } : {}) });
-  const what = describeReward(reward);
+  // Worded for the promoter, in their language.
+  const note = adminNote.trim();
   if (reward.user_id) {
-    notify(reward.user_id, {
+    notify(reward.user_id, () => ({
       title: isDeposit(reward)
         ? status === 'fulfilled'
-          ? 'Rewards in your bank'
-          : 'Not put in your bank'
+          ? t('Rewards in your bank', 'Récompenses mises en banque')
+          : t('Not put in your bank', 'Pas mises en banque')
         : status === 'fulfilled'
-          ? 'Reward on its way'
-          : 'Reward request declined',
-      body: `${what}${adminNote.trim() ? `: ${adminNote.trim()}` : ''}`,
+          ? t('Reward on its way', 'Ta récompense s’en vient')
+          : t('Reward request declined', 'Demande de récompense refusée'),
+      body: `${describeReward(reward)}${note ? t(`: ${note}`, ` : ${note}`) : ''}`,
       link: '/payouts#rewards',
-    });
+    }));
   }
   setTimeout(
     () =>
-      void sendEmail(status === 'fulfilled' ? 'reward_given' : 'reward_declined', [{ name: reward.promoter_name, email: reward.promoter_email }], {
-        reward: what,
-        note: adminNote.trim(),
+      void sendEmail(status === 'fulfilled' ? 'reward_given' : 'reward_declined', [{ name: reward.promoter_name, email: reward.promoter_email }], () => ({
+        reward: describeReward(reward),
+        note,
         link: `${config.appUrl}/payouts#rewards`,
-      }),
+      })),
     0,
   );
   return true;

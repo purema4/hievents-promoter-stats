@@ -5,6 +5,7 @@ import { config } from './config';
 import { getConnInfo } from 'hono/bun';
 import { addColumn, db, findUser, findUserByEmail, type User } from './local-db';
 import { notify } from './notifications';
+import { t, withLang } from './i18n';
 import { alertUser } from './alert-prefs';
 import { isTeamLead } from './teams';
 
@@ -73,14 +74,18 @@ export function startSession(c: Context, userId: number) {
   if (!known.some((k) => k.device === device)) {
     db.query('INSERT INTO known_devices (user_id, device, first_seen) VALUES (?, ?, ?)').run(userId, device, now);
     if (known.length > 0) {
-      const message = {
-        title: 'New sign-in',
-        body: `Your account was signed in on ${device}. If that was not you, sign it out under Security.`,
+      // Admins' alerts stay in English; a promoter's is worded in their language.
+      const message = () => ({
+        title: t('New sign-in', 'Nouvelle connexion'),
+        body: t(
+          `Your account was signed in on ${device}. If that was not you, sign it out under Security.`,
+          `Quelqu’un s’est connecté à ton compte sur ${device}. Si ce n’était pas toi, déconnecte-le sous Sécurité.`,
+        ),
         link: '/account/security',
-      };
+      });
       const user = findUser(userId);
       // Admins choose how they hear about it; promoters always get the app notification.
-      if (user?.is_admin) alertUser(user, 'new_signin', message, { device, link: `${config.appUrl}/account/security` });
+      if (user?.is_admin) alertUser(user, 'new_signin', withLang('en', message), { device, link: `${config.appUrl}/account/security` });
       else notify(userId, message);
     }
   }

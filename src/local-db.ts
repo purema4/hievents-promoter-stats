@@ -72,6 +72,28 @@ export function markAppInstalled(id: number) {
   db.query('UPDATE users SET app_installed_at = coalesce(app_installed_at, ?) WHERE id = ?').run(Math.floor(Date.now() / 1000), id);
 }
 
+// The language of their browser on their last visit: emails, notifications and push go out in it.
+addColumn('users', 'lang', 'TEXT');
+
+export function saveLang(id: number, language: 'en' | 'fr') {
+  db.query('UPDATE users SET lang = ? WHERE id = ?').run(language, id);
+}
+
+// The language they picked in the menu, over their browser's; null follows the browser.
+addColumn('users', 'lang_pref', 'TEXT');
+
+export function setLangPref(id: number, language: 'en' | 'fr' | null) {
+  db.query('UPDATE users SET lang_pref = ? WHERE id = ?').run(language, id);
+  if (language) saveLang(id, language);
+}
+
+// The Advanced section of the menu (API & Claude), shown when they turn it on.
+addColumn('users', 'show_advanced', 'INTEGER');
+
+export function setShowAdvanced(id: number, on: boolean) {
+  db.query('UPDATE users SET show_advanced = ? WHERE id = ?').run(on ? 1 : 0, id);
+}
+
 // Profile details promoters fill in themselves, and their theme choice.
 for (const column of ['first_name', 'last_name', 'phone', 'city', 'instagram', 'theme', 'payout_method', 'payout_details']) {
   addColumn('users', column, 'TEXT');
@@ -105,6 +127,9 @@ export type User = {
   city?: string | null;
   instagram?: string | null;
   theme?: 'system' | 'light' | 'dark' | null;
+  lang?: 'en' | 'fr' | null;
+  lang_pref?: 'en' | 'fr' | null;
+  show_advanced?: number | null;
   avatar_type?: string | null;
   avatar_source?: 'upload' | 'admin' | 'instagram' | null;
   avatar_key?: string | null;

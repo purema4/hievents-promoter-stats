@@ -3,7 +3,8 @@ import { addColumn, db, type User } from './local-db';
 import type { EventSummary } from './promoter-views';
 import type { Rate } from './money';
 import { earnedOn, labelOf, nextOn, rewardRules, type Next } from './reward-rules';
-import { listRewardTypes, type RewardType } from './rules';
+import { listRewardTypes, rewardTypeOf, type RewardType } from './rules';
+import { t } from './i18n';
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS reward_requests (
@@ -368,10 +369,17 @@ export function settleReward(id: number, adminId: number, status: 'fulfilled' | 
 export const isRollover = (r: RewardRequest) =>
   r.kind === 'ticket' && r.event_id !== null && r.source_event_id !== null && r.source_event_id !== r.event_id;
 
+/** The request in a few words, in the current language (admin pages are in English). */
 export function describeReward(r: RewardRequest): string {
-  if (r.kind === 'merch') return 'Merch';
-  const tickets = r.reward_type ? `${r.quantity} ${r.reward_label ?? r.reward_type}` : `${r.quantity} free ${r.quantity === 1 ? 'ticket' : 'tickets'}`;
-  if (isDeposit(r)) return `${tickets} into the bank, from ${r.source_event_title}`;
-  if (r.from_bank) return `${tickets} for ${r.event_title}, from the bank`;
-  return isRollover(r) ? `${tickets} for ${r.event_title}, rolled over from ${r.source_event_title}` : `${tickets} for ${r.event_title}`;
+  if (r.kind === 'merch') return t('Merch', 'Marchandise');
+  // The label saved with the request is the English one; French comes from the type, while it exists.
+  const label = r.reward_type ? t(r.reward_label ?? r.reward_type, rewardTypeOf(r.reward_type)?.label_fr ?? r.reward_label ?? r.reward_type) : '';
+  const tickets = r.reward_type
+    ? `${r.quantity} ${label}`
+    : t(`${r.quantity} free ${r.quantity === 1 ? 'ticket' : 'tickets'}`, `${r.quantity} ${r.quantity < 2 ? 'billet gratuit' : 'billets gratuits'}`);
+  if (isDeposit(r)) return t(`${tickets} into the bank, from ${r.source_event_title}`, `${tickets} mis en banque, de ${r.source_event_title}`);
+  if (r.from_bank) return t(`${tickets} for ${r.event_title}, from the bank`, `${tickets} pour ${r.event_title}, de la banque`);
+  return isRollover(r)
+    ? t(`${tickets} for ${r.event_title}, rolled over from ${r.source_event_title}`, `${tickets} pour ${r.event_title}, reportés de ${r.source_event_title}`)
+    : t(`${tickets} for ${r.event_title}`, `${tickets} pour ${r.event_title}`);
 }

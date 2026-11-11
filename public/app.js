@@ -1,5 +1,9 @@
 // Served from the app itself: the CSP allows no inline scripts.
 
+// Wording in the page's language (the server sets <html lang>): t('Copied', 'Copié').
+const fr = document.documentElement.lang === 'fr';
+const t = (en, frText) => (fr ? frText : en);
+
 // Sign-in links land on a page with a form; real browsers continue straight away, mail scanners do not run this.
 const signIn = document.querySelector('form[data-auto-submit]');
 if (signIn) signIn.submit();
@@ -48,7 +52,7 @@ document.querySelectorAll('input[data-places]').forEach((input, i) => {
 });
 
 // Payout form: cash goes in round steps, so picking cash switches the amount to the most available in cash.
-const payout = document.querySelector('form[data-payout-form]');
+const payout = document.querySelector('[data-payout-form]');
 if (payout) {
   const method = payout.querySelector('select[name=method]');
   const amount = payout.querySelector('input[name=amount]');
@@ -73,13 +77,13 @@ if (pushBox && 'serviceWorker' in navigator && 'PushManager' in window) {
     const sub = await reg.pushManager.getSubscription();
     button.hidden = false;
     if (Notification.permission === 'denied') {
-      status.textContent = 'Notifications are blocked for this site in your browser settings.';
+      status.textContent = t('Notifications are blocked for this site in your browser settings.', 'Les notifications sont bloquées pour ce site dans les paramètres de ton navigateur.');
       button.hidden = true;
     } else if (sub) {
-      status.textContent = 'On for this device.';
-      button.textContent = 'Turn off';
+      status.textContent = t('On for this device.', 'Activées sur cet appareil.');
+      button.textContent = t('Turn off', 'Désactiver');
     } else {
-      button.textContent = 'Turn on';
+      button.textContent = t('Turn on', 'Activer');
     }
   };
   button.addEventListener('click', async () => {
@@ -95,7 +99,7 @@ if (pushBox && 'serviceWorker' in navigator && 'PushManager' in window) {
         await post('/push/subscribe', created.toJSON());
       }
     } catch (err) {
-      status.textContent = 'Could not change notifications on this device.';
+      status.textContent = t('Could not change notifications on this device.', 'Impossible de changer les notifications sur cet appareil.');
     }
     button.disabled = false;
     show();
@@ -183,7 +187,42 @@ if (sidebar) {
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && location.hash === '#sidebar') history.back();
   });
+  // Accordions: each group stays the way it was left; the one holding the current page is always open.
+  const store = (key, value) => {
+    try {
+      if (value === undefined) return localStorage.getItem(key);
+      localStorage.setItem(key, value);
+    } catch {
+      return null;
+    }
+  };
+  for (const group of sidebar.querySelectorAll('details[data-nav-group]')) {
+    const key = `nav:${group.dataset.navGroup}`;
+    if (!group.contains(best) && store(key) === 'closed') group.open = false;
+    group.addEventListener('toggle', () => store(key, group.open ? 'open' : 'closed'));
+  }
 }
+// Notices that can be closed stay closed on this device until their text changes.
+for (const banner of document.querySelectorAll('[data-banner-key]')) {
+  const key = banner.dataset.bannerKey;
+  const close = banner.querySelector('[data-banner-close]');
+  try {
+    if (localStorage.getItem(key)) {
+      banner.remove();
+      continue;
+    }
+  } catch {}
+  if (!close) continue;
+  close.hidden = false;
+  close.addEventListener('click', () => {
+    try {
+      localStorage.setItem(key, '1');
+    } catch {}
+    banner.remove();
+  });
+}
+// The Advanced toggle comes back to this page.
+for (const field of document.querySelectorAll('input[data-back-here]')) field.value = location.pathname + location.search;
 
 // Promoter links: copy to the clipboard, or share through the phone's share sheet where there is one.
 const copyText = async (text, button) => {
@@ -201,7 +240,7 @@ const copyText = async (text, button) => {
   // A second click while it says "Copied" keeps the original content to put back.
   if (button.classList.contains('copied')) return;
   const content = [...button.childNodes];
-  button.textContent = 'Copied';
+  button.textContent = t('Copied', 'Copié');
   button.classList.add('copied');
   setTimeout(() => {
     button.replaceChildren(...content);
@@ -418,7 +457,7 @@ if (ruleForm) {
 // in the rows do the job.
 const shop = document.querySelector('form[data-shop]');
 if (shop) {
-  const promoter = shop.dataset.promoter || 'you';
+  const promoter = shop.dataset.promoter || t('you', 'toi');
   const lines = shop.querySelector('[data-cart-lines]');
   const send = shop.querySelector('[data-cart-send]');
   const jump = shop.querySelector('[data-cart-jump]');
@@ -452,9 +491,11 @@ if (shop) {
   // "Sent to you (Maya Tremblay)", or for a guest list "On the guest list: Ana, Ben"
   const whoOf = (row) => {
     const field = row.querySelector('[data-guests-field]');
-    if (!field) return `Sent to you (${promoter})`;
+    if (!field) return t(`Sent to you (${promoter})`, `Envoyé à toi (${promoter})`);
     const guests = names(field.value);
-    return guests.length ? `On the guest list: ${guests.join(', ')}` : 'Add the names for the guest list';
+    return guests.length
+      ? t(`On the guest list: ${guests.join(', ')}`, `Sur la liste d’invités : ${guests.join(', ')}`)
+      : t('Add the names for the guest list', 'Ajoute les noms pour la liste d’invités');
   };
   const qtyOf = (row) => Number(row.querySelector('[data-qty]').value);
   const setQty = (row, n) => {
@@ -471,9 +512,9 @@ if (shop) {
     if (row.dataset.where) head.append(el('span', { class: 'muted', text: ` · ${row.dataset.where}` }));
     line.append(head);
 
-    const minus = el('button', { type: 'button', class: 'step', 'aria-label': `One less ${row.dataset.type}` }, icon(MINUS));
-    const plus = el('button', { type: 'button', class: 'step', 'aria-label': `One more ${row.dataset.type}` }, icon(PLUS));
-    const remove = el('button', { type: 'button', class: 'link', text: 'Remove' });
+    const minus = el('button', { type: 'button', class: 'step', 'aria-label': t(`One less ${row.dataset.type}`, `Un de moins : ${row.dataset.type}`) }, icon(MINUS));
+    const plus = el('button', { type: 'button', class: 'step', 'aria-label': t(`One more ${row.dataset.type}`, `Un de plus : ${row.dataset.type}`) }, icon(PLUS));
+    const remove = el('button', { type: 'button', class: 'link', text: t('Remove', 'Retirer') });
     minus.addEventListener('click', () => {
       setQty(row, n - 1);
       refresh();
@@ -494,22 +535,22 @@ if (shop) {
       const banking = use && use.value === 'bank';
       if (kind === 'bank') {
         const source = row.querySelector('[data-event-field]');
-        const pick = el('select', { 'aria-label': 'For which event' });
+        const pick = el('select', { 'aria-label': t('For which event', 'Pour quel événement') });
         for (const option of source.options) pick.append(el('option', { value: option.value, text: option.text }));
         pick.value = source.value;
         pick.addEventListener('change', () => {
           source.value = pick.value;
         });
-        line.append(el('label', { class: 'cart-field' }, 'For which event', pick));
+        line.append(el('label', { class: 'cart-field' }, t('For which event', 'Pour quel événement'), pick));
       } else {
-        const pick = el('select', { 'aria-label': 'Use them for' });
-        pick.append(el('option', { value: '', text: `${row.dataset.where}` }), el('option', { value: 'bank', text: 'My bank, for a later event' }));
+        const pick = el('select', { 'aria-label': t('Use them for', 'Les utiliser pour') });
+        pick.append(el('option', { value: '', text: `${row.dataset.where}` }), el('option', { value: 'bank', text: t('Save them for a later event', 'Les garder pour un prochain événement') }));
         pick.value = use.value;
         pick.addEventListener('change', () => {
           use.value = pick.value;
           refresh();
         });
-        line.append(el('label', { class: 'cart-field' }, 'Use them for', pick));
+        line.append(el('label', { class: 'cart-field' }, t('Use them for', 'Les utiliser pour'), pick));
       }
       if (!banking) {
         const guestsField = row.querySelector('[data-guests-field]');
@@ -520,19 +561,26 @@ if (shop) {
             guestsField.value = guests.value;
             who.textContent = whoOf(row);
           });
-          line.append(el('label', { class: 'cart-field' }, n > 1 ? `Names on the guest list (${n})` : 'Name on the guest list', guests));
+          line.append(
+            el(
+              'label',
+              { class: 'cart-field' },
+              n > 1 ? t(`Names on the guest list (${n})`, `Noms sur la liste d’invités (${n})`) : t('Name on the guest list', 'Nom sur la liste d’invités'),
+              guests,
+            ),
+          );
         }
         line.append(who);
       } else {
-        line.append(el('p', { class: 'who', text: `${n} into your bank, for a later event` }));
+        line.append(el('p', { class: 'who', text: t(`${n} saved for a later event`, `${n} mis de côté pour un prochain événement`) }));
       }
     } else if (kind === 'merch') {
       const field = row.querySelector('[data-merch-field]');
-      const details = el('input', { maxlength: '120', placeholder: 'T-shirt, size L', value: field.value, required: '' });
+      const details = el('input', { maxlength: '120', placeholder: t('T-shirt, size L', 'T-shirt, taille L'), value: field.value, required: '' });
       details.addEventListener('input', () => {
         field.value = details.value;
       });
-      line.append(el('label', { class: 'cart-field' }, 'Which item and size', details));
+      line.append(el('label', { class: 'cart-field' }, t('Which item and size', 'Quel article et quelle taille'), details));
     }
     return line;
   };
@@ -551,19 +599,23 @@ if (shop) {
       stepper.hidden = n === 0;
       stepper.querySelector('[data-count]').textContent = String(n);
       stepper.querySelector('[data-plus]').disabled = n >= max;
-      row.querySelector('[data-left]').textContent = String(max - n);
-      row.querySelector('[data-of]').hidden = n === 0;
+      const inCart = row.querySelector('[data-in-cart]');
+      inCart.hidden = n === 0;
+      inCart.textContent = ` · ${n} ${inCart.dataset.label}`;
       if (!n) continue;
       total += n;
       lines.append(lineFor(row));
     }
-    if (total === 0) lines.append(el('p', { class: 'muted', text: 'Press + next to a reward to add it here.' }));
+    if (total === 0) lines.append(el('p', { class: 'muted', text: t('Press + next to a reward to add it here.', 'Appuie sur + à côté d’une récompense pour l’ajouter ici.') }));
     send.disabled = total === 0;
-    send.textContent = total ? `Review my request (${total}) →` : 'Review my request →';
+    send.textContent = total
+      ? t(`Review my request (${total}) →`, `Revoir ma demande (${total}) →`)
+      : t('Review my request →', 'Revoir ma demande →');
     if (jump) {
-      const changed = jump.textContent !== `View cart (${total})`;
+      const label = t(`View cart (${total})`, `Voir le panier (${total})`);
+      const changed = jump.textContent !== label;
       jump.hidden = total === 0;
-      jump.textContent = `View cart (${total})`;
+      jump.textContent = label;
       // A little bounce each time the cart changes, so the bar is seen.
       if (changed && total > 0) {
         jump.classList.remove('pop');
@@ -622,17 +674,15 @@ if (shop) {
     });
   }
   refresh();
-}
-
-// Checkout: the team's note opens in a pop-up; "I understand" ticks the box needed to send.
-const notice = document.querySelector('dialog[data-notice-modal]');
-if (notice && typeof notice.showModal === 'function') {
-  notice.showModal();
-  notice.querySelector('[data-notice-ok]').addEventListener('click', () => {
-    const ack = document.querySelector('[data-ack]');
-    if (ack) ack.checked = true;
-    notice.close();
-  });
+  // "Request →" on an event page: that reward is already in the cart, open and ready to review.
+  const wanted = new URLSearchParams(location.search).get('add');
+  const preset = wanted && rows.find((row) => row.querySelector('[data-qty]').name === `qty.${wanted}`);
+  if (preset && qtyOf(preset) === 0) {
+    setQty(preset, 1);
+    refresh();
+    history.replaceState(null, '', location.pathname + location.hash);
+    openSheet();
+  }
 }
 
 // Send a notification: picking a team or a promoter in a list also picks that choice.

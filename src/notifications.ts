@@ -1,6 +1,7 @@
 import webpush from 'web-push';
 import { config } from './config';
-import { db, listUsers } from './local-db';
+import { db, findUser, listUsers } from './local-db';
+import { t, withLang } from './i18n';
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS notifications (
@@ -140,7 +141,11 @@ export type TestResult = { devices: number; delivered: number } | 'too_soon';
 export async function sendTestNotification(userId: number): Promise<TestResult> {
   if (Date.now() - (lastTest.get(userId) ?? 0) < 30_000) return 'too_soon';
   lastTest.set(userId, Date.now());
-  const message = { title: 'Test notification', body: 'Notifications work on this device.', link: '/notifications' };
+  const message = withLang(findUser(userId)?.lang, () => ({
+    title: t('Test notification', 'Notification de test'),
+    body: t('Notifications work on this device.', 'Les notifications fonctionnent sur cet appareil.'),
+    link: '/notifications',
+  }));
   db.query('INSERT INTO notifications (user_id, title, body, link) VALUES (?, ?, ?, ?)').run(userId, message.title, message.body, message.link);
   return sendPush(userId, { title: message.title, body: message.body, url: message.link, unread: unreadCount(userId) });
 }
@@ -148,12 +153,17 @@ export async function sendTestNotification(userId: number): Promise<TestResult> 
 // --- Notifications -----------------------------------------------------------------------------
 
 export type Recipient = number | 'admins';
+export type NotificationMessage = { title: string; body: string; link: string };
 
-/** Stores the notification for each recipient and pushes it to their devices, without waiting. */
-export function notify(to: Recipient | Recipient[], message: { title: string; body: string; link: string }) {
+/**
+ * Stores the notification for each recipient and pushes it to their devices, without waiting.
+ * A function is worded once per recipient, in their language: () => ({ title: t('…', '…'), … }).
+ */
+export function notify(to: Recipient | Recipient[], wording: NotificationMessage | (() => NotificationMessage)) {
   const list = Array.isArray(to) ? to : [to];
   const ids = new Set(list.flatMap((r) => (r === 'admins' ? listUsers().filter((u) => u.is_admin).map((u) => u.id) : [r])));
   for (const userId of ids) {
+    const message = typeof wording === 'function' ? withLang(findUser(userId)?.lang, wording) : wording;
     const { id } = db.query<{ id: number }, [number, string, string, string]>('INSERT INTO notifications (user_id, title, body, link) VALUES (?, ?, ?, ?) RETURNING id').get(userId, message.title, message.body, message.link)!;
     const unread = unreadCount(userId);
     // Tapping it on the phone marks it as read too, then goes to its link.

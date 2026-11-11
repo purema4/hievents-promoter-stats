@@ -107,13 +107,13 @@ describeIntegration('rewards shop', () => {
     expect(text(queue)).toContain('1 free ticket into the bank, from Warehouse Night');
     // Waiting for the team: shown, not usable yet.
     let page = await maya.client.page('/payouts');
-    expect(text(page)).toContain('1 more waiting for the team to bank');
+    expect(text(page)).toContain('1 more waiting for approval');
     expect(page).not.toContain('name="qty.bank.free_tickets"');
 
     const id = queue.match(/1 free ticket into the bank[\s\S]*?action="\/admin\/rewards\/(\d+)\/fulfil"/)![1]!;
     expect(location(await admin.post(`/admin/rewards/${id}/fulfil`, { admin_note: '' }))).toBe('/admin/payouts?ok=reward_fulfilled');
     page = await maya.client.page('/payouts');
-    expect(text(page.slice(page.indexOf('data-name="Free ticket · your bank"')).split('data-shop-item')[0]!)).toMatch(/1 available/);
+    expect(text(page.slice(page.indexOf('data-name="Free ticket · saved for later"')).split('data-shop-item')[0]!)).toMatch(/1 available/);
 
     // Too many out of the bank: refused, nothing saved.
     const before = requests();
@@ -127,7 +127,7 @@ describeIntegration('rewards shop', () => {
     db.query("INSERT INTO reward_requests (user_id, promoter_name, promoter_email, kind, event_id, source_event_id, source_event_title, quantity, reward_type, reward_label, status) VALUES (?, 'x', 'x', 'ticket', NULL, 1, 'Warehouse Night', 1, 'ga_list', 'GA list', 'fulfilled')").run(maya.id);
     expect((await order({ 'qty.bank.ga_list': '1', 'event.bank.ga_list': '4' })).status).toBe(400);
     const banked = await maya.client.page('/payouts');
-    expect(text(banked.slice(banked.indexOf('data-name="GA list · your bank"')).split('data-shop-item')[0]!)).toMatch(/1 available/);
+    expect(text(banked.slice(banked.indexOf('data-name="GA list · saved for later"')).split('data-shop-item')[0]!)).toMatch(/1 available/);
   });
 
   test('a bank request the team declines goes back to its event', async () => {
@@ -161,21 +161,25 @@ describeIntegration('rewards shop', () => {
     expect(res.status).toBe(200);
     const page = await res.text();
     const words = text(page);
-    expect(words).toContain('Check your request');
-    expect(words).toContain('2 × VIP ticket');
+    expect(words).toContain('Your request');
+    // How many can still be changed here, up to what is available.
+    expect(page).toContain('<select name="qty.1.vip_tickets"');
+    expect(page).toContain('<option value="2" selected="">2</option>');
+    expect(words).toContain('× VIP ticket');
     expect(words).toContain('Skip the line and get into the VIP area.');
     expect(words).toContain('Warehouse Night');
     expect(words).toContain(`Sent to you (${maya.name})`);
-    expect(page).toContain('<dialog class="notice-modal"');
+    // Shown once, with one box to tick: no pop-up repeating it.
+    expect(page).not.toContain('<dialog');
+    expect(words).toContain('I have read the note above');
     expect(words).toContain('Tickets are under your name at the door: bring ID.');
-    expect(page).toContain('<input type="hidden" name="qty.1.vip_tickets" value="2"/>');
     // Nothing sent yet.
     const before = requests();
     expect(requests()).toBe(before);
-    // Without "I understand": refused, nothing sent.
+    // Without the box ticked: refused, nothing sent.
     const unread = await order(cart);
     expect(unread.status).toBe(400);
-    expect(text(await unread.text())).toContain('tick “I understand” first');
+    expect(text(await unread.text())).toContain('tick the box first');
     expect(requests()).toBe(before);
     expect(location(await order({ ...cart, ack: '1' }))).toBe('/payouts?ok=reward_ordered#rewards');
     expect(requests()).toBe(before + 1);
@@ -201,6 +205,58 @@ describeIntegration('rewards shop', () => {
     expect(checkout).toContain('On the guest list: Ana Roy');
     expect(location(await order({ 'qty.1.ga_list': '1', 'guests.1.ga_list': 'Ana Roy' }))).toBe('/payouts?ok=reward_ordered#rewards');
     expect(db.query<{ details: string }, []>('SELECT details FROM reward_requests ORDER BY id DESC LIMIT 1').get()!.details).toBe('Guest list: Ana Roy');
+  });
+
+  test('one checkout for everything: the payout and the rewards, from an event page or the menu', async () => {
+    // LUNA sold 1 ticket on Warehouse Night: $2.50 of commission, a free ticket and 2 VIP there.
+    const luna = await newPromoter(server, admin, { name: `Luna ${uid()}`, codes: 'LUNA' });
+    const event = await luna.client.page('/events/1');
+    expect(text(event)).toContain('Ready to request');
+    expect(text(event)).toContain('your payout of $2.50');
+    expect(event).toContain('href="/rewards/checkout?event=1"');
+    // Every "request" button leads there.
+    const dashboard = await luna.client.page('/');
+    expect(dashboard).toContain('<a class="nav-cta" href="/rewards/checkout">');
+    expect(dashboard).toContain('<a class="button big" href="/rewards/checkout">');
+    expect(await luna.client.page('/payouts')).toContain('href="/rewards/checkout"');
+
+    const html = await luna.client.page('/rewards/checkout?event=1');
+    const words = text(html);
+    expect(words).toContain('Request my payout up to $2.50');
+    expect(html).toContain('<input type="checkbox" name="payout" value="1" checked=""/>');
+    expect(html).toContain('name="amount" inputmode="decimal" value="2.50"');
+    expect(html).toContain(`name="details" value="${luna.email}"`);
+    expect(html).toContain('<select name="qty.1.free_tickets"');
+    expect(html).toContain('<select name="qty.1.vip_tickets"');
+
+    // Without the payout ticked, and no rewards: nothing to send.
+    const none = await luna.client.post('/rewards/order', { currency: 'CAD', amount: '2.50', method: 'Interac e-Transfer', details: luna.email, 'qty.1.free_tickets': '0' });
+    expect(none.status).toBe(400);
+    // A wrong amount: back to checkout with the reason, nothing sent.
+    const tooMuch = await luna.client.post('/rewards/order', { payout: '1', currency: 'CAD', amount: '9', method: 'Interac e-Transfer', details: luna.email, 'qty.1.vip_tickets': '2' });
+    expect(tooMuch.status).toBe(400);
+    const again = text(await tooMuch.text());
+    expect(again).toContain('That is more than your available balance.');
+    expect(again).toContain('Your request');
+    expect(db.query<{ n: number }, [number]>('SELECT count(*) AS n FROM reward_requests WHERE user_id = ?').get(luna.id)!.n).toBe(0);
+
+    // The payout, one VIP of two, and the free ticket left out (0): all in one go.
+    const fields = { payout: '1', currency: 'CAD', amount: '2,50 $', method: 'Interac e-Transfer', details: luna.email, note: '', 'qty.1.free_tickets': '0', 'qty.1.vip_tickets': '1' };
+    expect(location(await luna.client.post('/rewards/order', fields))).toBe('/payouts?ok=all_requested');
+    expect(db.query<{ amount_cents: number }, [number]>('SELECT amount_cents FROM payout_requests WHERE user_id = ?').all(luna.id)).toEqual([{ amount_cents: 250 }]);
+    expect(db.query<{ n: number }, [number]>('SELECT sum(quantity) AS n FROM reward_requests WHERE user_id = ?').get(luna.id)!.n).toBe(1);
+    expect(text(await luna.client.page('/payouts?ok=all_requested'))).toContain('Sent to the team: your payout and your rewards.');
+
+    // Now only the rewards left; the payout waits for the team.
+    const after = text(await luna.client.page('/rewards/checkout'));
+    expect(after).toContain('Your payout of $2.50 is waiting for approval.');
+    // Sent again (a second tap): refused, nothing doubled.
+    expect((await luna.client.post('/rewards/order', fields)).status).toBe(400);
+    expect(db.query<{ n: number }, [number]>('SELECT count(*) AS n FROM payout_requests WHERE user_id = ?').get(luna.id)!.n).toBe(1);
+
+    // The payout alone.
+    const solo = await newPromoter(server, admin);
+    expect(location(await solo.client.post('/rewards/order', { payout: '1', currency: 'CAD', amount: '28.50', method: 'Interac e-Transfer', details: solo.email }))).toBe('/payouts?ok=requested');
   });
 
   test('checkout refuses a cart that would not go through', async () => {

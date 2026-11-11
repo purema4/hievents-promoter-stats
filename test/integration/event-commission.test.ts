@@ -71,7 +71,7 @@ describeIntegration('commission per event', () => {
     const deal = text(night.slice(night.indexOf('class="card deal-card"'), night.indexOf('class="card links-card"')));
     expect(deal).toMatch(/Commission: \$[0-9.]+ per ticket sold/);
     expect(deal).not.toContain('%');
-    expect(text(await maya.client.page('/events/2'))).toContain('Commission: 10% of your sales at full price, outside Hi.Events too.');
+    expect(text(await maya.client.page('/events/2'))).toContain('Commission: 10% of your sales at full price, sales outside the ticketing site included.');
   });
 
   test('another percentage on another event', async () => {

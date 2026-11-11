@@ -207,7 +207,7 @@ export async function dealInWords(userId: number, eventId: number, lang: Lang): 
   }
 }
 
-/** "You sold 12: $60.00, 2 VIP, 2 GA list." / "Tu as vendu 12 : 60,00 $, 2 VIP, 2 Liste GA." */
+/** "You sold 12: $60.00, 2 × VIP, 2 × GA list." / "Tu as vendu 12 : 60,00 $, 2 × VIP, 2 × Liste GA." */
 export function resultSentence(
   tickets: number,
   earning: { commission: number; bonus: number; rewards: Record<string, number> } | undefined,
@@ -223,11 +223,10 @@ export function resultSentence(
   for (const name of outputs) {
     if (name === 'commission' || name === 'bonus' || name === 'merch') continue;
     const n = earning?.rewards[name];
-    if (n !== undefined) parts.push(`${n} ${labelOf(name, lang)}`);
+    // The label is the reward's name, which cannot be put in the plural: "4 × Free ticket".
+    if (n !== undefined) parts.push(`${n} × ${labelOf(name, lang)}`);
   }
   const sold = lang === 'fr' ? `Tu as vendu ${tickets}` : `You sold ${tickets}`;
   return parts.length ? `${sold}${lang === 'fr' ? ' : ' : ': '}${parts.join(', ')}.` : `${sold}.`;
 }
 
-/** French when the browser asks for it first, English otherwise. */
-export const langOf = (acceptLanguage: string | undefined): Lang => (/^\s*fr\b/i.test(acceptLanguage ?? '') ? 'fr' : 'en');

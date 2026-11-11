@@ -1,8 +1,9 @@
+import { locale } from './i18n';
 import type { CodeStats } from './hievents';
 
 export function formatMoney(cents: number, currency: string): string {
   try {
-    return new Intl.NumberFormat('en-CA', { style: 'currency', currency }).format(cents / 100);
+    return new Intl.NumberFormat(locale(), { style: 'currency', currency }).format(cents / 100);
   } catch {
     return `${(cents / 100).toFixed(2)} ${currency}`;
   }

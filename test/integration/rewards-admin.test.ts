@@ -36,9 +36,10 @@ describeIntegration('levels and rewards set by admins', () => {
     const html = await promoter.client.page('/');
     const callout = html.slice(html.indexOf('class="card payout-callout ready"'), html.indexOf('class="grid"'));
     expect(text(callout)).toContain('Ready to request $28.50');
-    expect(callout).toContain('<a class="button big" href="/payouts#request">Request my payout</a>');
-    expect(text(callout)).toMatch(/Claim \d+ rewards?/);
-    expect(html).toContain('<a class="nav-cta" href="/payouts#request">');
+    // One button to checkout, with the payout and the rewards.
+    expect(text(callout)).toMatch(/Request my payout and \d+ rewards?/);
+    expect(callout).toContain('<a class="button big" href="/rewards/checkout">');
+    expect(html).toContain('<a class="nav-cta" href="/rewards/checkout">');
     expect(await promoter.client.page('/payouts')).toContain('id="request"');
 
     // Not on an admin's view of the dashboard, nor in an admin's menu.

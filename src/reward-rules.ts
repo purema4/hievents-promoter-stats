@@ -1,3 +1,4 @@
+import { lang } from './i18n';
 import { config } from './config';
 import { db } from './local-db';
 
@@ -176,11 +177,13 @@ const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? o
 
 function reward(count: number, label: string, unit: 'ticket' | 'merch'): string {
   if (label) return count === 1 ? label : `${count} × ${label}`;
+  if (lang() === 'fr') return unit === 'ticket' ? `${count} billet${count > 1 ? 's' : ''} gratuit${count > 1 ? 's' : ''}` : `${count} article${count > 1 ? 's' : ''} de merch`;
   return unit === 'ticket' ? plural(count, 'free ticket') : plural(count, 'merch item');
 }
 
 /** The rule for a track in one sentence, like "1 free ticket at 1 sale, then 1 free ticket every 5 more sales." */
 export function describeTrack(t: Track, unit: 'ticket' | 'merch'): string {
+  if (lang() === 'fr') return describeTrackFr(t, unit);
   if (!trackOn(t)) return unit === 'ticket' ? 'No free tickets for now.' : 'No merch for now.';
   const sale = unit === 'ticket' ? 'sale' : 'ticket sold';
   const sales = unit === 'ticket' ? 'sales' : 'tickets sold';
@@ -188,6 +191,19 @@ export function describeTrack(t: Track, unit: 'ticket' | 'merch'): string {
   if (t.every > 0) {
     const more = unit === 'ticket' ? 'more sales' : 'more tickets sold';
     parts.push(`${parts.length ? 'then ' : ''}${reward(t.count, t.label, unit)} every ${t.every === 1 ? (unit === 'ticket' ? 'sale' : 'ticket sold') : `${t.every} ${parts.length ? more : sales}`}`);
+  }
+  const sentence = parts.join(', ');
+  return `${sentence[0]!.toUpperCase()}${sentence.slice(1)}.`;
+}
+
+// « 1 billet gratuit à 1 vente, puis 1 billet gratuit à chaque tranche de 5 ventes de plus. »
+function describeTrackFr(t: Track, unit: 'ticket' | 'merch'): string {
+  if (!trackOn(t)) return unit === 'ticket' ? 'Pas de billets gratuits pour l’instant.' : 'Pas de merch pour l’instant.';
+  const sales = (n: number) => (unit === 'ticket' ? `${n} vente${n > 1 ? 's' : ''}` : `${n} billet${n > 1 ? 's' : ''} vendu${n > 1 ? 's' : ''}`);
+  const parts = t.milestones.map((m) => `${reward(m.count, m.label, unit)} à ${sales(m.at)}`);
+  if (t.every > 0) {
+    const each = t.every === 1 ? (unit === 'ticket' ? 'à chaque vente' : 'à chaque billet vendu') : `à chaque tranche de ${sales(t.every)}${parts.length ? ' de plus' : ''}`;
+    parts.push(`${parts.length ? 'puis ' : ''}${reward(t.count, t.label, unit)} ${each}`);
   }
   const sentence = parts.join(', ');
   return `${sentence[0]!.toUpperCase()}${sentence.slice(1)}.`;

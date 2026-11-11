@@ -37,7 +37,7 @@ describeIntegration('media drives', () => {
     expect(html).toContain('Secret Afterparty');
     expect(html).not.toContain('Summer Rooftop');
     // Nothing set yet: no button for promoters.
-    expect(await maya.client.page('/')).not.toContain('Media drive');
+    expect(await maya.client.page('/')).not.toContain('Photos &amp; flyers');
   });
 
   test('a drive on an upcoming event', async () => {
@@ -47,7 +47,7 @@ describeIntegration('media drives', () => {
     expect(dashboard).toContain(`href="${drive}"`);
     const event = await maya.client.page('/events/1');
     expect(event).toContain(`href="${drive}"`);
-    expect(text(event)).toContain('Media drive');
+    expect(text(event)).toContain('Photos and flyers');
     // Only on that event.
     expect(await maya.client.page('/events/2')).not.toContain(drive);
     // Every promoter on the event sees it.
@@ -59,7 +59,7 @@ describeIntegration('media drives', () => {
     expect(await nova.client.page('/events/5')).toContain(`href="${rooftop}"`);
     expect(await maya.client.page('/')).not.toContain(rooftop);
     expect(await err(await set(4, rooftop))).toBe('media_event');
-    expect(await maya.client.page('/events/4')).not.toContain('Media drive');
+    expect(await maya.client.page('/events/4')).not.toContain('Photos and flyers');
   });
 
   test('what is refused', async () => {
@@ -102,6 +102,6 @@ describeIntegration('media drives', () => {
   test('removed with an empty link', async () => {
     expect(location(await set(1, ''))).toBe('/admin/media?ok=media_removed#event-1');
     expect(await maya.client.page('/events/1')).not.toContain(drive);
-    expect(await luna.client.page('/')).not.toContain('Media drive');
+    expect(await luna.client.page('/')).not.toContain('Photos &amp; flyers');
   });
 });

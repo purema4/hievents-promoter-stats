@@ -1,3 +1,4 @@
+import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
 import { Hono, type Context } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { csrf } from 'hono/csrf';
@@ -79,15 +80,16 @@ import {
 import { blankPng, eventCover } from './covers';
 import { allPromoCodes, dailyForCodes, sql } from './hievents';
 import { recentEmails, sendEmail, purgeEmailLog } from './mail';
-import { emailTypes, getTemplate, renderEmail, resetTemplate, sampleVars, saveReplyTo, saveTemplate, type EmailType } from './email-templates';
+import { emailTypes, getTemplate, languagesOf, renderEmail, resetTemplate, sampleVars, saveReplyTo, saveTemplate, type EmailType } from './email-templates';
 import { formatMoney, parseAmountCents, usualCommissionOn, type EventRule } from './money';
 import {
+  cashAvailable,
   findPayout,
   listPayouts,
   payoutsFor,
   requestPayout,
 } from './payouts';
-import { CheckoutPage, DashboardPage, EventPage, PayoutsPage, summarizeEvents, type CartLine } from './promoter-views';
+import { CheckoutPage, DashboardPage, EventPage, PayoutsPage, summarizeEvents, type CartLine, type PayoutForm } from './promoter-views';
 import {
   findRewardRequest,
   listRewardRequests,
@@ -119,11 +121,12 @@ import {
 import { directoryPreview, previewVersion } from './directory-preview';
 import { hiddenByTeam, pageEvents, pageOwner, setPageHidden } from './promoter-page';
 import { allEventRules, setEventRule } from './commission';
-import { db as localDb } from './local-db';
+import { db as localDb, saveLang, setLangPref, setShowAdvanced } from './local-db';
+import { lang as currentLang, langFromHeader, t, withLang } from './i18n';
 import { currentRule, endRulesOf, ruleFor, FREE_TICKETS, generalRuleFor, listRewardTypes, listTemplates, migrateToRules, removeTemplate, rewardTypeOf, ruleHistory, ruleOutputs, saveRewardType, saveRuleVersion, saveTemplate as saveRuleTemplate, type RuleScope, setRuleLine, setUsualRule, trackExpression } from './rules';
 import { checkRule, evaluateRules, RULE_MAX_LENGTH, RulesEngineUnavailable, rulesEngineUp } from './rules-engine';
 import { ruleWriterEnabled, writeRule } from './rule-writer';
-import { checkDraft, dealInWords, labelOf, langOf, resultSentence, ruleInWords, type RuleCheck } from './rule-admin';
+import { checkDraft, dealInWords, labelOf, resultSentence, ruleInWords, type RuleCheck } from './rule-admin';
 import { AdminRuleEditPage, AdminRulesPage, ruleEditHref, type RuleTargetInfo } from './rule-views';
 import { emptyInputs } from './rule-variables';
 import { allEventBanners, checkoutNotice, generalBanner, setCheckoutNotice, parseBanner, setEventBanner, setGeneralBanner } from './banners';
@@ -220,26 +223,27 @@ const MIN_PASSWORD = 10;
 const LINK_RESPONSE_MS = 300;
 
 // Flash messages travel as short keys in the query string so links cannot inject arbitrary text.
-const messages: Record<string, string> = {
+// Promoter-facing ones are [English, French]; admin-only ones stay in English.
+const messages: Record<string, string | [en: string, fr: string]> = {
   created: 'Promoter created.',
   invited: 'Promoter created and a sign-in link was emailed to them.',
   link_sent: 'Sign-in link emailed.',
   mail_failed: 'Saved, but the email could not be sent. Check the SMTP settings and the container log.',
   commission: 'Commission must be a percentage from 0 to 100, or an amount per ticket like 2 or 2.50.',
-  saved: 'Saved.',
-  password: 'Password updated.',
+  saved: ['Saved.', 'Enregistré.'],
+  password: ['Password updated.', 'Mot de passe mis à jour.'],
   deleted: 'Promoter deleted.',
-  short: `Passwords need at least ${MIN_PASSWORD} characters.`,
+  short: [`Passwords need at least ${MIN_PASSWORD} characters.`, `Le mot de passe doit avoir au moins ${MIN_PASSWORD} caractères.`],
   exists: 'Another account already uses that email.',
-  wrong: 'Current password is incorrect.',
+  wrong: ['Current password is incorrect.', 'Le mot de passe actuel est incorrect.'],
   last_admin: 'You cannot remove the last admin.',
   missing: 'Name and email are required.',
-  requested: 'Payout requested. The team has been notified and you will get an email once it is paid.',
-  invalid_amount: 'Enter an amount like 25 or 25.50.',
-  too_much: 'That is more than your available balance.',
-  already_pending: 'You already have a request waiting for this currency.',
-  missing_method: 'Choose how we should pay you.',
-  cash_step: `Cash is paid in steps of $${config.cashStepCents / 100}: choose $${config.cashStepCents / 100}, $${(config.cashStepCents * 2) / 100} and so on.`,
+  requested: ['Payout requested. The team has been notified and you will get an email once it is paid.', 'Paiement demandé. L’équipe a été avisée et tu recevras un courriel une fois qu’il sera payé.'],
+  invalid_amount: ['Enter an amount like 25 or 25.50.', 'Entre un montant comme 25 ou 25,50.'],
+  too_much: ['That is more than your available balance.', 'C’est plus que ton solde disponible.'],
+  already_pending: ['You already have a request waiting for this currency.', 'Tu as déjà une demande en attente pour cette devise.'],
+  missing_method: ['Choose how we should pay you.', 'Choisis comment on doit te payer.'],
+  cash_step: [`Cash is paid in steps of $${config.cashStepCents / 100}: choose $${config.cashStepCents / 100}, $${(config.cashStepCents * 2) / 100} and so on.`, `L’argent comptant est payé par tranches de ${config.cashStepCents / 100} $ : choisis ${config.cashStepCents / 100} $, ${(config.cashStepCents * 2) / 100} $ et ainsi de suite.`],
   payout_paid: 'Marked as paid. The promoter has been emailed.',
   payout_rejected: 'Request declined. The promoter has been emailed and the amount is available to them again.',
   payout_gone: 'That request was already handled.',
@@ -249,13 +253,13 @@ const messages: Record<string, string> = {
   undone: 'Change undone.',
   adjust_reason: 'Give a reason: the promoter sees it.',
   adjust_amount: 'Enter an amount like 50 or -12.50, and whole numbers for tickets and merch (not 0).',
-  code_wrong: 'That code did not work. Use the newest 6-digit code from your authenticator app.',
-  device_out: 'That device is signed out.',
-  others_out: 'All your other devices are signed out.',
-  '2fa_off': 'Two-step verification is off.',
+  code_wrong: ['That code did not work. Use the newest 6-digit code from your authenticator app.', 'Ce code n’a pas fonctionné. Utilise le code à 6 chiffres le plus récent de ton app d’authentification.'],
+  device_out: ['That device is signed out.', 'Cet appareil est déconnecté.'],
+  others_out: ['All your other devices are signed out.', 'Tous tes autres appareils sont déconnectés.'],
+  '2fa_off': ['Two-step verification is off.', 'La vérification en deux étapes est désactivée.'],
   '2fa_reset': 'Two-step verification was reset. They can sign in with just the link and turn it on again.',
-  alias_invalid: 'The alias needs 2 to 30 letters, numbers, - or _, starting with a letter or number.',
-  alias_taken: 'Another promoter already uses that alias.',
+  alias_invalid: ['The alias needs 2 to 30 letters, numbers, - or _, starting with a letter or number.', 'L’alias doit avoir de 2 à 30 lettres, chiffres, - ou _, et commencer par une lettre ou un chiffre.'],
+  alias_taken: ['Another promoter already uses that alias.', 'Un autre promoteur utilise déjà cet alias.'],
   bad_url: 'Enter the full address, starting with https://',
   rewards_saved: 'Levels and rewards saved. Promoters see them right away.',
   rewards_reset: 'Back to the default levels and rewards.',
@@ -265,23 +269,23 @@ const messages: Record<string, string> = {
   reset: 'Back to the default wording.',
   test_sent: 'Saved, and a test was sent to your email address.',
   test_failed: 'Saved, but the test could not be sent. The list of recent emails shows why.',
-  photo_size: `The photo must be ${Math.round(maxUploadBytes / 1024 / 1024)} MB or less.`,
-  photo_type: 'The photo must be a PNG, JPEG or WebP image.',
-  photo_missing: 'Choose a photo, or skip this step for now.',
+  photo_size: [`The photo must be ${Math.round(maxUploadBytes / 1024 / 1024)} MB or less.`, `La photo doit faire ${Math.round(maxUploadBytes / 1024 / 1024)} Mo ou moins.`],
+  photo_type: ['The photo must be a PNG, JPEG or WebP image.', 'La photo doit être une image PNG, JPEG ou WebP.'],
+  photo_missing: ['Choose a photo, or skip this step for now.', 'Choisis une photo, ou saute cette étape pour l’instant.'],
   logo_size: `The logo must be ${Math.round(maxUploadBytes / 1024 / 1024)} MB or less.`,
   logo_type: 'The logo must be a PNG, JPEG or WebP image.',
   logo_pixels: `The logo must be at most ${maxImageSide} pixels on each side.`,
-  photo_pixels: `The photo must be at most ${maxImageSide} pixels on each side (50 megapixels in all).`,
-  photo_rate: 'Too many photos uploaded in the last hour. Try again later.',
+  photo_pixels: [`The photo must be at most ${maxImageSide} pixels on each side (50 megapixels in all).`, `La photo doit faire au plus ${maxImageSide} pixels de chaque côté (50 mégapixels en tout).`],
+  photo_rate: ['Too many photos uploaded in the last hour. Try again later.', 'Trop de photos téléversées dans la dernière heure. Réessaie plus tard.'],
   photo_set: 'Photo saved. They were told the team changed it.',
   photo_removed: 'Photo removed. Their Instagram photo or initials show instead.',
-  reward_requested: 'Reward requested. The team has been notified.',
-  not_available: 'That reward is not available any more.',
-  missing_details: 'Tell us which item and size you would like.',
+  reward_requested: ['Reward requested. The team has been notified.', 'Récompense demandée. L’équipe a été avisée.'],
+  not_available: ['That reward is not available any more.', 'Cette récompense n’est plus disponible.'],
+  missing_details: ['Tell us which item and size you would like.', 'Dis-nous quel article et quelle taille tu veux.'],
   reward_fulfilled: 'Marked as given. The promoter has been emailed.',
   reward_rejected: 'Reward request declined. The promoter has been emailed and can request it again.',
-  page_hidden: 'Your page is hidden.',
-  page_shown: 'Your page is back.',
+  page_hidden: ['Your page is hidden.', 'Ta page est masquée.'],
+  page_shown: ['Your page is back.', 'Ta page est de retour.'],
   page_saved: 'Saved. The page shows or hides right away.',
   index_saved: 'Saved. Visitors see it within a minute.',
   index_added: 'Added at the end of the list. Drag it where you want it.',
@@ -307,12 +311,12 @@ const messages: Record<string, string> = {
   team_self: 'A promoter cannot be on their own team.',
   team_pick: 'Choose a promoter.',
   impersonate_admin: 'Admins cannot be viewed as.',
-  invite_created: 'Invite link created. Copy it below and share it.',
-  invite_off: 'Invite link turned off. It no longer works.',
-  invite_on: 'Invite link turned back on.',
-  invite_label: 'Give the link a name.',
-  invite_days: 'Pick how long the link works.',
-  invite_max: 'Sign-ups must be a whole number from 1 to 1000, or empty.',
+  invite_created: ['Invite link created. Copy it below and share it.', 'Lien d’invitation créé. Copie-le ci-dessous et partage-le.'],
+  invite_off: ['Invite link turned off. It no longer works.', 'Lien d’invitation désactivé. Il ne fonctionne plus.'],
+  invite_on: ['Invite link turned back on.', 'Lien d’invitation réactivé.'],
+  invite_label: ['Give the link a name.', 'Donne un nom au lien.'],
+  invite_days: ['Pick how long the link works.', 'Choisis combien de temps le lien fonctionne.'],
+  invite_max: ['Sign-ups must be a whole number from 1 to 1000, or empty.', 'Le nombre d’inscriptions doit être un nombre entier de 1 à 1000, ou vide.'],
   rate_saved: 'Commission saved. It applies to all their sales for this event, earlier ones too.',
   rate_event: 'Pick one of the promoters on an event that is not over.',
   rate_percent: 'The percentage must be a number between 0 and 100.',
@@ -323,19 +327,27 @@ const messages: Record<string, string> = {
   media_event: 'Pick one of the events listed: drafts and events that are not over.',
   adjust_event: 'Pick one of their upcoming events.',
   banner_saved: 'Banner saved. Promoters see it now.',
-  reward_ordered: 'Sent to the team. You will hear back here and by email.',
+  reward_ordered: ['Sent to the team. You will hear back here and by email.', 'Envoyé à l’équipe. Tu auras une réponse ici et par courriel.'],
+  all_requested: [
+    'Sent to the team: your payout and your rewards. You will hear back here and by email.',
+    'Envoyé à l’équipe : ton paiement et tes récompenses. Tu auras une réponse ici et par courriel.',
+  ],
   rule_saved: 'Rule saved. It applies right away, to all sales, earlier ones too.',
   rule_removed: 'Rule removed. The broader rules apply again.',
   reward_type: 'A key is lowercase letters, digits and _ (like vip_tickets), not commission, bonus or merch, and needs a label.',
   reward_type_saved: 'Reward type saved. Rules can give it now.',
   rules_down: 'The rules engine is not available, so the numbers may be out of date. Approve payouts once it is back.',
   banner_removed: 'Banner removed.',
-  api_removed: 'Removed. It stops working right away.',
+  api_removed: ['Removed. It stops working right away.', 'Supprimé. Ça cesse de fonctionner tout de suite.'],
   api_removed_all: 'Their API keys and connected apps are removed and stop working right away.',
-  api_too_many: `You can have up to ${MAX_KEYS} keys. Remove one to make another.`,
+  api_too_many: [`You can have up to ${MAX_KEYS} keys. Remove one to make another.`, `Tu peux avoir jusqu’à ${MAX_KEYS} clés. Supprimes-en une pour en créer une autre.`],
 };
 // Own keys only: ?ok=constructor must not pick up something from Object.prototype.
-const flash = (key?: string) => (key && Object.hasOwn(messages, key) ? messages[key] : undefined);
+function flash(key?: string): string | undefined {
+  if (!key || !Object.hasOwn(messages, key)) return undefined;
+  const m = messages[key]!;
+  return typeof m === 'string' ? m : t(m[0], m[1]);
+}
 
 // A promoter's usual commission from their form: the default, a percentage, or a flat amount per ticket.
 function parseUsualCommission(body: Record<string, unknown>): UsualCommission | 'invalid' {
@@ -357,6 +369,18 @@ function parseCommission(raw: unknown): number | null | 'invalid' {
 }
 
 const app = new Hono<Env>();
+
+// Every request runs in the language the person chose (menu → Language), or else their browser's;
+// a signed-in person's is kept for what is sent to them later.
+const LANG_COOKIE = 'lang';
+app.use(async (c, next) => {
+  const chosen = currentUser(c)?.lang_pref ?? (getCookie(c, LANG_COOKIE) as string | undefined);
+  const language = chosen === 'fr' || chosen === 'en' ? chosen : langFromHeader(c.req.header('accept-language'));
+  // Admin pages are only in English for now: their numbers and dates stay English too.
+  await withLang(c.req.path === '/admin' || c.req.path.startsWith('/admin/') ? 'en' : language, next);
+  const user = c.get('user') as User | undefined;
+  if (user && !user.impersonator && user.lang !== language) saveLang(user.id, language);
+});
 
 // Browser features the app never uses are turned off (clipboard and share stay on for event links).
 const permissionsPolicy = { camera: false, microphone: false, geolocation: false, payment: false, usb: false };
@@ -491,7 +515,7 @@ app.get('/badge-96.png', (c) => publicAsset(c, 'badge-96.png'));
 app.get('/sw.js', (c) => serviceWorker(c));
 app.get('/offline', (c) =>
   c.html(
-    <LoginPage error="You are offline. Your numbers will show again as soon as you are back online." offline />,
+    <LoginPage error={t('You are offline. Your numbers will show again as soon as you are back online.', 'Tu es hors ligne. Tes chiffres vont réapparaître dès que tu seras de retour en ligne.')} offline />,
   ),
 );
 
@@ -600,17 +624,19 @@ app.post('/join/:token', async (c) => {
     email: String(body.email ?? '').trim().slice(0, 254),
   };
   const again = (error: string, status: 400 | 429) => c.html(<JoinPage invite={invite} team={lead?.name} values={values} error={error} />, status);
-  if (!values.first_name || !values.last_name) return again('Enter your first and last name.', 400);
-  if (!emailPattern.test(values.email)) return again('That is not a valid email address.', 400);
-  if (!allowSignup(invite.id)) return again('Too many people joined with this link in the last hour. Try again later.', 429);
+  if (!values.first_name || !values.last_name) return again(t('Enter your first and last name.', 'Entre ton prénom et ton nom.'), 400);
+  if (!emailPattern.test(values.email)) return again(t('That is not a valid email address.', 'Ce n’est pas une adresse courriel valide.'), 400);
+  if (!allowSignup(invite.id)) return again(t('Too many people joined with this link in the last hour. Try again later.', 'Trop de personnes se sont inscrites avec ce lien dans la dernière heure. Réessaie plus tard.'), 429);
 
   const started = Date.now();
   const waiting = { id: startWaiting(c), from: summarizeDevice(c.req.header('user-agent')) };
+  // Their emails are in the language of the browser that asked.
+  const language = currentLang();
   const existing = findUserByEmail(values.email);
   if (existing) {
     // Already a promoter: a sign-in link, and the same answer as a new sign-up, so the page does not tell
     // who has an account.
-    if (allowLinkRequest(values.email)) setTimeout(() => void emailLoginLink(existing, 'login', waiting), 0);
+    if (allowLinkRequest(values.email)) setTimeout(() => void emailLoginLink(existing, 'login', waiting, 3, language), 0);
     audit(c, 'invite.existing_account', { inviteId: invite.id, userId: existing.id });
   } else {
     if (!useInvite(invite.id)) return c.html(<JoinPage invite={{ ...invite, disabled_at: 1 }} />, 410);
@@ -635,8 +661,14 @@ app.post('/join/:token', async (c) => {
       link: `/admin/promoters/${id}`,
     };
     notify('admins', message);
-    if (lead) notify(lead.id, { title: 'New promoter on your team', body: `${name} joined your team with your invite link "${invite.label}".`, link: '/team' });
-    setTimeout(() => void emailLoginLink(findUser(id)!, 'invite', waiting), 0);
+    if (lead) {
+      notify(lead.id, () => ({
+        title: t('New promoter on your team', 'Nouveau promoteur dans ton équipe'),
+        body: t(`${name} joined your team with your invite link "${invite.label}".`, `${name} s’est joint à ton équipe avec ton lien d’invitation « ${invite.label} ».`),
+        link: '/team',
+      }));
+    }
+    setTimeout(() => void emailLoginLink(findUser(id)!, 'invite', waiting, 3, language), 0);
   }
   await Bun.sleep(Math.max(0, LINK_RESPONSE_MS - (Date.now() - started)));
   return c.html(<LoginPage sent email={values.email} />);
@@ -650,11 +682,11 @@ app.post('/login', async (c) => {
   const result = await verifyLogin(email, String(body.password ?? ''));
   if (result === 'locked') {
     audit(c, 'login.locked', { email });
-    return c.html(<LoginPage withPassword email={email} error="Too many attempts. Try again in 15 minutes." />, 429);
+    return c.html(<LoginPage withPassword email={email} error={t('Too many attempts. Try again in 15 minutes.', 'Trop de tentatives. Réessaie dans 15 minutes.')} />, 429);
   }
   if (!result) {
     audit(c, 'login.failed', { email });
-    return c.html(<LoginPage withPassword email={email} error="Wrong email or password." />, 401);
+    return c.html(<LoginPage withPassword email={email} error={t('Wrong email or password.', 'Courriel ou mot de passe incorrect.')} />, 401);
   }
   audit(c, 'login.password', { userId: result.id });
   return c.redirect(signIn(c, result.id) ? '/' : '/login/2fa');
@@ -689,11 +721,12 @@ app.post('/login/link', async (c) => {
   const started = Date.now();
   // Every answer gets a wait cookie, for known and unknown emails alike.
   const waiting = { id: startWaiting(c), from: summarizeDevice(c.req.header('user-agent')) };
+  const language = currentLang();
   if (user) {
     const allowed = allowLinkRequest(email);
     audit(c, allowed ? 'link.requested' : 'link.rate_limited', { userId: user.id });
     // Sent after the response, so waiting on SMTP cannot make known emails answer slower.
-    if (allowed) setTimeout(() => void emailLoginLink(user, 'login', waiting), 0);
+    if (allowed) setTimeout(() => void emailLoginLink(user, 'login', waiting, 3, language), 0);
   }
   // Pad every answer to the same duration so timing does not reveal which emails have accounts.
   await Bun.sleep(Math.max(0, LINK_RESPONSE_MS - (Date.now() - started)));
@@ -710,7 +743,7 @@ app.post('/login/verify', async (c) => {
   const link = consumeLoginToken(String((await c.req.parseBody()).token ?? ''), c);
   if (!link) {
     audit(c, 'link.invalid');
-    return c.html(<LoginPage error="This link has expired or was already used. Enter your email to get a new one." />, 400);
+    return c.html(<LoginPage error={t('This link has expired or was already used. Enter your email to get a new one.', 'Ce lien est expiré ou a déjà été utilisé. Entre ton courriel pour en recevoir un nouveau.')} />, 400);
   }
   audit(c, 'login.link', { userId: link.userId });
   if (!signIn(c, link.userId, link.waitingElsewhere?.rowId)) return c.redirect('/login/2fa');
@@ -747,7 +780,7 @@ app.post('/login/code', async (c) => {
   const userId = consumeLoginCode(email, String(body.code ?? '').trim());
   if (!userId) {
     audit(c, 'code.invalid', { email });
-    return c.html(<LoginPage sent email={email} error="That code is wrong or has expired." />, 400);
+    return c.html(<LoginPage sent email={email} error={t('That code is wrong or has expired.', 'Ce code est incorrect ou expiré.')} />, 400);
   }
   audit(c, 'login.code', { userId });
   return c.redirect(signIn(c, userId) ? '/' : '/login/2fa');
@@ -767,19 +800,23 @@ app.post('/login/2fa', async (c) => {
   if (!result) {
     audit(c, 'login.2fa_failed', { userId: user.id });
     if (!failPendingSignIn(pending)) {
-      return c.html(<LoginPage error="Too many wrong codes. Sign in again from the start." />, 429);
+      return c.html(<LoginPage error={t('Too many wrong codes. Sign in again from the start.', 'Trop de codes incorrects. Reconnecte-toi depuis le début.')} />, 429);
     }
-    return c.html(<TwoFactorPage error="That code did not work. Check the time on your phone and try the newest code." />, 400);
+    return c.html(<TwoFactorPage error={t('That code did not work. Check the time on your phone and try the newest code.', 'Ce code n’a pas fonctionné. Vérifie l’heure de ton téléphone et essaie le code le plus récent.')} />, 400);
   }
   finishPendingSignIn(c, pending);
   startSession(c, user.id);
   audit(c, `login.2fa_${result}`, { userId: user.id });
   if (result === 'recovery') {
-    notify(user.id, {
-      title: 'A recovery code was used',
-      body: `${recoveryCodesLeft(user.id)} recovery codes left. Make new ones under Security if you are running low.`,
+    const left = recoveryCodesLeft(user.id);
+    notify(user.id, () => ({
+      title: t('A recovery code was used', 'Un code de récupération a été utilisé'),
+      body: t(
+        `${left} recovery codes left. Make new ones under Security if you are running low.`,
+        `${left} ${left < 2 ? 'code de récupération restant' : 'codes de récupération restants'}. Crées-en de nouveaux sous Sécurité s’il t’en reste peu.`,
+      ),
       link: '/account/security',
-    });
+    }));
   }
   const approval = pending.approveRow ? approvalFor(pending.approveRow) : null;
   if (approval) return c.html(<ApproveDevicePage request={approval} />);
@@ -846,7 +883,7 @@ async function renderEvent(c: Context<Env>, promoter: User, basePath: string) {
   const event = summarizeEvents(data.rows, data.percent).find((e) => e.id === eventId)!;
   if (!event.draft) await prepareShortLinks(promoter, event.codes.map((code) => ({ event: { id: event.id, title: event.title }, code })));
   // Their deal on this event in words (never the rule itself), in the browser's language.
-  const lang = langOf(c.req.header('accept-language'));
+  const lang = currentLang();
   const rule = ruleFor(promoter.id, eventId);
   const deal = {
     lang,
@@ -868,6 +905,7 @@ async function renderEvent(c: Context<Env>, promoter: User, basePath: string) {
       media={data.media.get(eventId) ?? null}
       banner={data.banners.get(eventId) ?? null}
       range={parseRange(c.req.query('range'), 'all')}
+      payout={basePath === '' ? payoutSummary(promoter, data) : undefined}
     />,
   );
 }
@@ -976,15 +1014,21 @@ app.post('/notifications/read', (c) => {
 
 function testMessage(key?: string): string | undefined {
   if (!key) return undefined;
-  if (key === 'none') return 'Sent to the list below, but no device has phone notifications turned on yet. Tap Turn on first.';
-  if (key === 'failed') return 'The push service did not accept it. Turn notifications off and on again on that device.';
-  if (key === 'soon') return 'Wait a few seconds before sending another test.';
-  if (key === 'settings') return 'Saved. Your alerts follow these settings from now on.';
+  if (key === 'none') return t('Sent to the list below, but no device has phone notifications turned on yet. Tap Turn on first.', 'Envoyée dans la liste ci-dessous, mais aucun appareil n’a encore les notifications activées. Touche d’abord Activer.');
+  if (key === 'failed') return t('The push service did not accept it. Turn notifications off and on again on that device.', 'Le service de notifications ne l’a pas acceptée. Désactive puis réactive les notifications sur cet appareil.');
+  if (key === 'soon') return t('Wait a few seconds before sending another test.', 'Attends quelques secondes avant d’envoyer un autre test.');
+  if (key === 'settings') return t('Saved. Your alerts follow these settings from now on.', 'Enregistré. Tes alertes suivent ces réglages à partir de maintenant.');
   const [delivered, devices] = key.split('-').map(Number);
   if (!Number.isInteger(delivered) || !Number.isInteger(devices)) return undefined;
   return delivered === devices
-    ? `Sent to ${devices === 1 ? 'your device' : `all ${devices} of your devices`}. It should appear in a few seconds.`
-    : `Sent to ${delivered} of your ${devices} devices; the others did not accept it.`;
+    ? t(
+        `Sent to ${devices === 1 ? 'your device' : `all ${devices} of your devices`}. It should appear in a few seconds.`,
+        `Envoyée ${devices === 1 ? 'à ton appareil' : `à tes ${devices} appareils`}. Elle devrait apparaître dans quelques secondes.`,
+      )
+    : t(
+        `Sent to ${delivered} of your ${devices} devices; the others did not accept it.`,
+        `Envoyée à ${delivered} de tes ${devices} appareils; les autres ne l’ont pas acceptée.`,
+      );
 }
 
 app.post('/notifications/settings', async (c) => {
@@ -1105,7 +1149,7 @@ app.post('/payouts', async (c) => {
   const body = await c.req.parseBody();
   const data = await promoterData(user);
   const balance = data.balances.find((b) => b.currency === String(body.currency ?? ''));
-  if (!balance) return renderPayouts(c, messages.too_much);
+  if (!balance) return renderPayouts(c, flash('too_much'));
   const amountCents = parseAmountCents(String(body.amount ?? ''));
   const result = requestPayout(user, balance, {
     amountCents,
@@ -1114,7 +1158,7 @@ app.post('/payouts', async (c) => {
     note: String(body.note ?? '').slice(0, 500),
     ruleVersions: data.percent.versionIds,
   });
-  if (result !== 'ok') return renderPayouts(c, messages[result]);
+  if (result !== 'ok') return renderPayouts(c, flash(result));
   audit(c, 'payout.requested', { userId: user.id, amountCents, currency: balance.currency });
   announcePayoutRequest(user, {
     amountCents,
@@ -1140,15 +1184,21 @@ function ticketsFor(user: User, guestList: boolean, guests: string): string {
   return (guestList ? `Guest list: ${guestNames(guests)}` : user.name).slice(0, 120);
 }
 function whoFor(user: User, guestList: boolean, guests: string): string {
-  return guestList ? `On the guest list: ${guestNames(guests)}` : `Sent to you (${user.name})`;
+  return guestList ? t(`On the guest list: ${guestNames(guests)}`, `Sur la liste d’invités : ${guestNames(guests)}`) : t(`Sent to you (${user.name})`, `Envoyé à toi (${user.name})`);
 }
 
 // Shop fields carried from the shop to checkout and on to the order.
 const CART_FIELD = /^(qty|guests|for|event)\.[a-z0-9_.]+$|^merch\.details$/;
-const NAMES_NEEDED = 'Add the names for the guest list.';
+const namesNeeded = () => t('Add the names for the guest list.', 'Ajoute les noms pour la liste d’invités.');
 
 /** The cart sent from the shop: the requests to make, and each line in plain words for checkout. */
-function cartFrom(body: Record<string, unknown>, data: Awaited<ReturnType<typeof promoterData>>, user: User): { items: RewardInput[]; lines: CartLine[]; fields: [string, string][]; error?: string } {
+function cartFrom(
+  body: Record<string, unknown>,
+  data: Awaited<ReturnType<typeof promoterData>>,
+  user: User,
+  // At checkout a payout alone is a request too: no rewards is not an error.
+  options: { allowEmpty?: boolean } = {},
+): { items: RewardInput[]; lines: CartLine[]; fields: [string, string][]; error?: string } {
   const field = (name: string) => String(body[name] ?? '').trim();
   const items: RewardInput[] = [];
   const lines: CartLine[] = [];
@@ -1159,7 +1209,7 @@ function cartFrom(body: Record<string, unknown>, data: Awaited<ReturnType<typeof
     // "Use them for": this event, or the bank (the team accepts it; then it keeps until asked for).
     const toBank = field(`for.${key}`) === 'bank';
     const guestList = !!t.type.guest_list && !toBank;
-    if (guestList && !guestNames(field(`guests.${key}`))) return { items, lines, fields: [], error: NAMES_NEEDED };
+    if (guestList && !guestNames(field(`guests.${key}`))) return { items, lines, fields: [], error: namesNeeded() };
     items.push({
       kind: 'ticket',
       eventId: t.event.id,
@@ -1169,7 +1219,7 @@ function cartFrom(body: Record<string, unknown>, data: Awaited<ReturnType<typeof
       details: ticketsFor(user, guestList, field(`guests.${key}`)),
       ruleVersions: data.percent.events.get(t.event.id)?.versionIds,
     });
-    lines.push({ quantity, type: t.type, event: t.event, toBank, who: toBank ? '' : whoFor(user, guestList, field(`guests.${key}`)) });
+    lines.push({ field: key, max: t.available, quantity, type: t.type, event: t.event, toBank, who: toBank ? '' : whoFor(user, guestList, field(`guests.${key}`)) });
   }
   // Out of the bank, for an upcoming event of their choice; the type stays.
   for (const b of data.rewards.bank) {
@@ -1177,25 +1227,99 @@ function cartFrom(body: Record<string, unknown>, data: Awaited<ReturnType<typeof
     const quantity = Number(field(`qty.${key}`) || 0);
     if (!quantity) continue;
     const event = data.ticketEvents.find((e) => e.id === Number(field(`event.${key}`)));
-    if (!event) return { items, lines, fields: [], error: 'Pick the event to use your banked rewards for.' };
+    if (!event) return { items, lines, fields: [], error: t('Pick the event to use your banked rewards for.', 'Choisis l’événement pour lequel utiliser tes récompenses en banque.') };
     const guestList = !!b.type.guest_list;
-    if (guestList && !guestNames(field(`guests.${key}`))) return { items, lines, fields: [], error: NAMES_NEEDED };
+    if (guestList && !guestNames(field(`guests.${key}`))) return { items, lines, fields: [], error: namesNeeded() };
     items.push({ kind: 'ticket', rewardType: b.type.key, fromBank: event, quantity, details: ticketsFor(user, guestList, field(`guests.${key}`)) });
-    lines.push({ quantity, type: b.type, event, fromBank: true, who: whoFor(user, guestList, field(`guests.${key}`)) });
+    lines.push({ field: key, max: b.balance, quantity, type: b.type, event, fromBank: true, who: whoFor(user, guestList, field(`guests.${key}`)) });
   }
   const merch = Number(field('qty.merch') || 0);
   if (merch) {
     items.push({ kind: 'merch', quantity: merch, details: field('merch.details').slice(0, 120) });
-    lines.push({ quantity: merch, merch: field('merch.details').slice(0, 120) });
+    lines.push({ field: 'merch', max: data.rewards.merch.available, quantity: merch, merch: field('merch.details').slice(0, 120) });
   }
   const fields = Object.entries(body)
     .filter(([k, v]) => CART_FIELD.test(k) && typeof v === 'string')
     .map(([k, v]) => [k, String(v).slice(0, 200)] as [string, string]);
-  if (items.length === 0) return { items, lines, fields, error: 'Your cart is empty: pick how many of a reward you want first.' };
+  if (items.length === 0 && !options.allowEmpty) return { items, lines, fields, error: t('Your cart is empty: pick how many of a reward you want first.', 'Ton panier est vide : choisis d’abord combien tu veux d’une récompense.') };
   return { items, lines, fields };
 }
 
-// Checkout: the cart in plain words, and the team's notice to accept, before anything is sent.
+/*
+ * One way to ask for anything: every "request" button (the menu, the dashboard, an event page, the
+ * shop's cart) leads to this checkout. It holds the payout (ticked when there is money to ask for) and
+ * the rewards, each with how many; one Send makes all of it.
+ */
+type PromoterData = Awaited<ReturnType<typeof promoterData>>;
+
+/** The payout part of checkout, filled in from what was typed or else the way they were paid last time. None when nothing can be asked. */
+function payoutForm(user: User, data: PromoterData, body?: Record<string, unknown>): PayoutForm | null {
+  const balance = data.balances.find((b) => b.available > 0 && b.pending === 0);
+  if (!balance) return null;
+  const saved = user.payout_method && config.payoutMethods.includes(user.payout_method) ? user.payout_method : config.payoutMethods[0]!;
+  const method = body && config.payoutMethods.includes(String(body.method)) ? String(body.method) : saved;
+  const amount = body?.amount !== undefined ? String(body.amount) : ((method === config.cashMethod ? cashAvailable(balance) : balance.available) / 100).toFixed(2);
+  return {
+    currency: balance.currency,
+    available: balance.available,
+    cashAvailable: cashAvailable(balance),
+    method,
+    amount,
+    details: body?.details !== undefined ? String(body.details) : user.payout_details || user.email,
+    note: body?.note !== undefined ? String(body.note) : '',
+  };
+}
+
+/** What the event page's "Ready to request" card says about money. */
+function payoutSummary(user: User, data: PromoterData) {
+  const p = payoutForm(user, data);
+  return p ? { amountCents: p.available, currency: p.currency } : undefined;
+}
+
+/** A payout already waiting for the team, in words; '' when none is. */
+const payoutWaiting = (data: PromoterData) =>
+  data.balances
+    .filter((b) => b.pending > 0)
+    .map((b) => formatMoney(b.pending, b.currency))
+    .join(' + ');
+
+function renderCheckout(
+  c: Context<Env>,
+  data: PromoterData,
+  cart: ReturnType<typeof cartFrom>,
+  options: { body?: Record<string, unknown>; includePayout: boolean; error?: string; left?: boolean },
+) {
+  const user = c.get('user');
+  return c.html(
+    <CheckoutPage
+      user={user}
+      lines={cart.lines}
+      fields={cart.fields.filter(([name]) => !name.startsWith('qty.'))}
+      payout={payoutForm(user, data, options.body) ?? undefined}
+      includePayout={options.includePayout}
+      waiting={payoutWaiting(data)}
+      left={options.left}
+      notice={checkoutNotice()}
+      error={options.error}
+    />,
+    options.error ? 400 : 200,
+  );
+}
+
+// Everything ready to ask for, or one event's with ?event=: rewards with all of their count, and the payout.
+// Guest list spots (names), merch (which item) and saved rewards (which event) are picked in the shop.
+app.get('/rewards/checkout', async (c) => {
+  const user = c.get('user');
+  const data = await promoterData(user);
+  const eventId = c.req.query('event') ? Number(c.req.query('event')) : null;
+  const ready = data.rewards.tickets.filter((r) => r.available > 0 && (eventId === null || r.event.id === eventId));
+  const body = Object.fromEntries(ready.filter((r) => !r.type.guest_list).map((r) => [`qty.${r.event.id}.${r.type.key}`, String(r.available)]));
+  const cart = cartFrom(body, data, user, { allowEmpty: true });
+  const left = ready.some((r) => r.type.guest_list) || (eventId === null && (data.rewards.merch.available > 0 || data.rewards.bank.some((b) => b.balance > 0)));
+  return renderCheckout(c, data, cart, { includePayout: true, left });
+});
+
+// From the shop's cart: what was picked, and the payout too.
 app.post('/rewards/checkout', async (c) => {
   const user = c.get('user');
   const body = await c.req.parseBody();
@@ -1203,30 +1327,45 @@ app.post('/rewards/checkout', async (c) => {
   const cart = cartFrom(body, data, user);
   if (cart.error) return renderPayouts(c, cart.error);
   const result = checkRewards(user, data.rewards, cart.items);
-  if (result !== 'ok') return renderPayouts(c, messages[result]);
-  return c.html(<CheckoutPage user={user} lines={cart.lines} fields={cart.fields} notice={checkoutNotice()} />);
+  if (result !== 'ok') return renderPayouts(c, flash(result));
+  return renderCheckout(c, data, cart, { includePayout: true });
 });
 
-// The rewards shop (Payouts & rewards): the whole cart in one request; every item or none.
+// Send: the payout (when ticked) and every reward with a count, in one go; nothing is sent if any part is refused.
 app.post('/rewards/order', async (c) => {
   const user = c.get('user');
   const body = await c.req.parseBody();
   const data = await promoterData(user);
-  const cart = cartFrom(body, data, user);
+  const withPayout = body.payout === '1';
+  const cart = cartFrom(body, data, user, { allowEmpty: withPayout });
   if (cart.error) return renderPayouts(c, cart.error);
-  // The team's notice must have been accepted at checkout.
-  const notice = checkoutNotice();
-  if (notice && body.ack !== '1') {
-    return c.html(<CheckoutPage user={user} lines={cart.lines} fields={cart.fields} notice={notice} error="Read the note from the team and tick “I understand” first." />, 400);
+  const again = (error: string) => renderCheckout(c, data, cart, { body, includePayout: withPayout, error });
+  // The team's notice must have been accepted when rewards are asked for.
+  if (cart.items.length && checkoutNotice() && body.ack !== '1') return again(t('Read the note from the team and tick the box first.', 'Lis la note de l’équipe et coche la case d’abord.'));
+  if (cart.items.length) {
+    const check = checkRewards(user, data.rewards, cart.items);
+    if (check !== 'ok') return renderPayouts(c, flash(check));
   }
-  const before = rewardRequestsFor(user.id).length;
-  const { result } = requestRewards(user, data.rewards, cart.items);
-  if (result !== 'ok') return renderPayouts(c, messages[result]);
-  // Newest first in the list: the cart's own, back in the order they were picked.
-  const all = rewardRequestsFor(user.id);
-  const requests = all.slice(0, all.length - before).reverse();
-  audit(c, 'reward.ordered', { userId: user.id, rewardIds: requests.map((r) => r.id) });
-  announceRewardOrder(user, requests);
+  if (withPayout) {
+    const balance = data.balances.find((b) => b.currency === String(body.currency ?? ''));
+    if (!balance) return again(flash('too_much')!);
+    const payout = { amountCents: parseAmountCents(String(body.amount ?? '')), method: String(body.method ?? ''), details: String(body.details ?? '').slice(0, 200), note: String(body.note ?? '').slice(0, 500) };
+    const result = requestPayout(user, balance, { ...payout, ruleVersions: data.percent.versionIds });
+    if (result !== 'ok') return again(flash(result)!);
+    audit(c, 'payout.requested', { userId: user.id, amountCents: payout.amountCents, currency: balance.currency });
+    announcePayoutRequest(user, { ...payout, currency: balance.currency });
+  }
+  if (cart.items.length) {
+    const before = rewardRequestsFor(user.id).length;
+    const { result } = requestRewards(user, data.rewards, cart.items);
+    if (result !== 'ok') return renderPayouts(c, flash(result));
+    // Newest first in the list: the cart's own, back in the order they were picked.
+    const all = rewardRequestsFor(user.id);
+    const requests = all.slice(0, all.length - before).reverse();
+    audit(c, 'reward.ordered', { userId: user.id, rewardIds: requests.map((r) => r.id) });
+    announceRewardOrder(user, requests);
+  }
+  if (withPayout) return c.redirect(cart.items.length ? '/payouts?ok=all_requested' : '/payouts?ok=requested');
   return c.redirect('/payouts?ok=reward_ordered#rewards');
 });
 
@@ -1236,7 +1375,7 @@ app.post('/rewards/:kind{ticket|merch}', async (c) => {
   const kind = c.req.param('kind') as 'ticket' | 'merch';
   const data = await promoterData(user);
   // An event to roll them over to that is not open to it any more: refused, not used on the first one.
-  if (kind === 'ticket' && rolloverTarget(data, body.use_for) === null) return renderPayouts(c, messages.not_available);
+  if (kind === 'ticket' && rolloverTarget(data, body.use_for) === null) return renderPayouts(c, flash('not_available'));
   const result = requestReward(user, data.rewards, {
     kind,
     eventId: kind === 'ticket' ? Number(body.event_id) : undefined,
@@ -1246,7 +1385,7 @@ app.post('/rewards/:kind{ticket|merch}', async (c) => {
     quantity: kind === 'ticket' ? Number(body.quantity ?? 1) : 1,
     details: String(body.details ?? '').slice(0, 120),
   });
-  if (result !== 'ok') return renderPayouts(c, messages[result]);
+  if (result !== 'ok') return renderPayouts(c, flash(result));
   const request = rewardRequestsFor(user.id)[0];
   audit(c, 'reward.requested', { userId: user.id, kind, rewardId: request.id });
   announceRewardRequest(user, request);
@@ -1258,6 +1397,28 @@ app.get('/account', (c) =>
 );
 
 // Sent by the installed app the first time it opens, or by "I already installed it".
+// The menu's language choice: on the account when signed in, and in a cookie for the pages before
+// signing in. "auto" goes back to the browser's language.
+app.post('/lang', async (c) => {
+  const body = await c.req.parseBody();
+  const choice = body.lang === 'fr' || body.lang === 'en' ? body.lang : null;
+  const user = currentUser(c);
+  if (user && !user.impersonator) setLangPref(user.id, choice);
+  if (choice) setCookie(c, LANG_COOKIE, choice, { path: '/', sameSite: 'Lax', secure: config.cookieSecure, maxAge: 365 * 86400 });
+  else deleteCookie(c, LANG_COOKIE, { path: '/', secure: config.cookieSecure });
+  const back = String(body.back ?? '/');
+  return c.redirect(/^\/(?![/\\])[^\s]{0,300}$/.test(back) ? back : '/', 303);
+});
+
+// The menu's Advanced toggle; back to the page it was pressed on.
+app.post('/account/advanced', async (c) => {
+  const body = await c.req.parseBody();
+  setShowAdvanced(c.get('user').id, body.on === '1');
+  // Only a path on this site: never somewhere else.
+  const back = String(body.back ?? '/');
+  return c.redirect(/^\/(?![/\\])[^\s]{0,300}$/.test(back) ? back : '/', 303);
+});
+
 app.post('/account/app-installed', (c) => {
   markAppInstalled(c.get('user').id);
   markSessionApp(c.get('sessionId'));
@@ -1303,7 +1464,7 @@ app.post('/account/api/keys', async (c) => {
   const days = body.days === 'never' ? null : Number(body.days ?? 90);
   if (!KEY_DAYS.includes(days as KeyDays)) return c.text('Bad request', 400);
   const made = createKey(user.id, name, body.can_write === '1', days as KeyDays);
-  if (!made) return c.html(<ApiPage user={user} tokens={tokensFor(user.id)} error={messages.api_too_many} />, 400);
+  if (!made) return c.html(<ApiPage user={user} tokens={tokensFor(user.id)} error={flash('api_too_many')} />, 400);
   audit(c, 'api.key_created', { userId: user.id, keyId: made.id, canWrite: body.can_write === '1', days });
   // Shown on this answer only, never in an address or stored anywhere.
   return c.html(<ApiPage user={user} tokens={tokensFor(user.id)} newKey={{ key: made.key, name }} />);
@@ -1341,7 +1502,7 @@ app.post('/account/security/2fa/start', (c) => {
 app.post('/account/security/2fa/confirm', async (c) => {
   const user = findUser(c.get('user').id)!;
   const codes = confirmSetup(user, String((await c.req.parseBody()).code ?? ''));
-  if (!codes) return renderSecurity(c, { setupSecret: pendingSecret(user) ?? undefined, error: messages.code_wrong });
+  if (!codes) return renderSecurity(c, { setupSecret: pendingSecret(user) ?? undefined, error: flash('code_wrong') });
   audit(c, 'security.2fa_on', { userId: user.id });
   // Other devices signed in before; they keep their sessions, the next sign-ins ask for a code.
   return renderSecurity(c, { recoveryCodes: codes });
@@ -1350,7 +1511,7 @@ app.post('/account/security/2fa/confirm', async (c) => {
 app.post('/account/security/2fa/:action{off|new-codes}', async (c) => {
   const user = findUser(c.get('user').id)!;
   if (!hasTwoFactor(user)) return c.redirect('/account/security');
-  if (!verifySecondFactor(user, String((await c.req.parseBody()).code ?? ''))) return renderSecurity(c, { error: messages.code_wrong });
+  if (!verifySecondFactor(user, String((await c.req.parseBody()).code ?? ''))) return renderSecurity(c, { error: flash('code_wrong') });
   if (c.req.param('action') === 'off') {
     disableTwoFactor(user.id);
     audit(c, 'security.2fa_off', { userId: user.id });
@@ -1412,9 +1573,9 @@ app.post('/account/password', async (c) => {
   // Accounts that sign in by email link have no password to change.
   if (!user.password_hash) return c.redirect('/account');
   if (!(await Bun.password.verify(String(body.current ?? ''), user.password_hash))) {
-    return c.html(<AccountPage user={user} error={messages.wrong} />, 400);
+    return c.html(<AccountPage user={user} error={flash('wrong')} />, 400);
   }
-  if (password.length < MIN_PASSWORD) return c.html(<AccountPage user={user} error={messages.short} />, 400);
+  if (password.length < MIN_PASSWORD) return c.html(<AccountPage user={user} error={flash('short')} />, 400);
   await setPassword(user.id, password);
   audit(c, 'account.password_changed', { userId: user.id });
   startSession(c, user.id);
@@ -1534,7 +1695,11 @@ app.post('/admin/promoters/:id/photo', async (c) => {
   if (result !== 'ok') return c.redirect(`${back}?error=${photoError[result]}#photo`);
   audit(c, 'admin.photo_set', { by: admin.id, userId: promoter.id });
   if (promoter.id !== admin.id) {
-    notify(promoter.id, { title: 'The team set your profile photo', body: 'You can change it on Account.', link: '/account' });
+    notify(promoter.id, () => ({
+      title: t('The team set your profile photo', 'L’équipe a choisi ta photo de profil'),
+      body: t('You can change it on Account.', 'Tu peux la changer dans Compte.'),
+      link: '/account',
+    }));
   }
   return c.redirect(`${back}?ok=photo_set#photo`);
 });
@@ -1571,15 +1736,19 @@ app.post('/admin/promoters/:id/adjust', async (c) => {
   const data = await promoterData(promoter);
   const currency = data.balances[0]?.currency ?? 'CAD';
   const wholeNumber = Number.isInteger(quantity) && quantity !== 0 && Math.abs(quantity) <= 10_000;
-  let message: { title: string; body: string } | null = null;
+  // Worded when sent, in the promoter's language.
+  let message: (() => { title: string; body: string }) | null = null;
 
   if (kind === 'money') {
     if (!Number.isFinite(amountCents) || amountCents === 0 || Math.abs(amountCents) > 10_000_00) return c.redirect(`${back}?error=adjust_amount#adjust`);
     addAdjustment(admin, promoter.id, { kind: 'money', amountCents, currency, label });
-    message = {
-      title: amountCents > 0 ? `${formatMoney(amountCents, currency)} added to your balance` : `${formatMoney(-amountCents, currency)} removed from your balance`,
+    message = () => ({
+      title:
+        amountCents > 0
+          ? t(`${formatMoney(amountCents, currency)} added to your balance`, `${formatMoney(amountCents, currency)} ajouté à ton solde`)
+          : t(`${formatMoney(-amountCents, currency)} removed from your balance`, `${formatMoney(-amountCents, currency)} retiré de ton solde`),
       body: label,
-    };
+    });
   } else if (kind === 'outside_sale') {
     // The admin gives the ticket sales. For one of their events, they count in that event's rule
     // (outside_tickets, outside_sales). Otherwise the commission their own rule gives on them is added now.
@@ -1601,12 +1770,18 @@ app.post('/admin/promoters/:id/adjust', async (c) => {
     }
     const saleId = addAdjustment(admin, promoter.id, { kind: 'tickets_sold', quantity, amountCents: salesCents, currency, eventId, label });
     if (commission !== 0) addAdjustment(admin, promoter.id, { kind: 'money', amountCents: commission, currency, label: `${label} (commission)`, parentId: saleId });
-    message = {
-      title: `${quantity} ${Math.abs(quantity) === 1 ? 'ticket' : 'tickets'} added: ${label}`,
+    message = () => ({
+      title: t(
+        `${quantity} ${Math.abs(quantity) === 1 ? 'ticket' : 'tickets'} added: ${label}`,
+        `${quantity} ${Math.abs(quantity) < 2 ? 'billet ajouté' : 'billets ajoutés'} : ${label}`,
+      ),
       body: commission
-        ? `${formatMoney(salesCents, currency)} in sales: ${formatMoney(commission, currency)} commission added to your balance.`
-        : 'They count for your levels and rewards.',
-    };
+        ? t(
+            `${formatMoney(salesCents, currency)} in sales: ${formatMoney(commission, currency)} commission added to your balance.`,
+            `${formatMoney(salesCents, currency)} en ventes : ${formatMoney(commission, currency)} de commission ajouté à ton solde.`,
+          )
+        : t('They count for your levels and rewards.', 'Ils comptent pour tes niveaux et tes récompenses.'),
+    });
   } else if (kind === 'free_tickets') {
     const eventId = Number(body.event_id);
     const event = summarizeEvents(data.rows, data.percent).find((e) => e.id === eventId && (!e.end || e.end.getTime() >= Date.now()));
@@ -1615,20 +1790,30 @@ app.post('/admin/promoters/:id/adjust', async (c) => {
     const type = rewardTypeOf(String(body.reward_type ?? '') || FREE_TICKETS);
     if (!type) return c.redirect(`${back}?error=adjust_event#adjust`);
     addAdjustment(admin, promoter.id, { kind: 'free_tickets', quantity, eventId, label, rewardType: type.key });
-    const what = type.key === FREE_TICKETS ? `free ${Math.abs(quantity) === 1 ? 'ticket' : 'tickets'}` : type.label_en;
-    message = {
-      title: quantity > 0 ? `${quantity} ${what} for ${event.title}` : `${type.key === FREE_TICKETS ? 'Free tickets' : type.label_en} for ${event.title} changed`,
-      body: `${label}. Request them on Payouts & rewards.`,
+    message = () => {
+      const plain = type.key === FREE_TICKETS;
+      const what = plain ? t(`free ${Math.abs(quantity) === 1 ? 'ticket' : 'tickets'}`, Math.abs(quantity) < 2 ? 'billet gratuit' : 'billets gratuits') : t(type.label_en, type.label_fr);
+      return {
+        title:
+          quantity > 0
+            ? t(`${quantity} ${what} for ${event.title}`, `${quantity} ${what} pour ${event.title}`)
+            : t(`${plain ? 'Free tickets' : type.label_en} for ${event.title} changed`, `${plain ? 'Billets gratuits' : type.label_fr} pour ${event.title} modifiés`),
+        body: t(`${label}. Request them on Payouts & rewards.`, `${label}. Demande-les dans Paiements et récompenses.`),
+      };
     };
   } else if (kind === 'merch') {
     if (!wholeNumber) return c.redirect(`${back}?error=adjust_amount#adjust`);
     addAdjustment(admin, promoter.id, { kind: 'merch', quantity, label });
-    message = { title: quantity > 0 ? 'Merch for you' : 'Merch changed', body: `${label}. Request it on Payouts & rewards.` };
+    message = () => ({
+      title: quantity > 0 ? t('Merch for you', 'De la marchandise pour toi') : t('Merch changed', 'Marchandise modifiée'),
+      body: t(`${label}. Request it on Payouts & rewards.`, `${label}. Demande-la dans Paiements et récompenses.`),
+    });
   } else {
     return c.redirect(back);
   }
   audit(c, 'admin.adjustment', { by: admin.id, userId: promoter.id, kind, amountCents, quantity, label });
-  if (body.notify === '1' && message) notify(promoter.id, { ...message, link: '/payouts' });
+  const wording = message;
+  if (body.notify === '1' && wording) notify(promoter.id, () => ({ ...wording(), link: '/payouts' }));
   // A level or merch reached through these changes is announced right away.
   checkMilestones(promoter, (await promoterData(promoter)).rewards);
   return c.redirect(`${back}?ok=adjusted#adjust`);
@@ -1658,11 +1843,14 @@ app.post('/admin/promoters/:id/2fa-reset', (c) => {
   if (!promoter) return c.notFound();
   disableTwoFactor(promoter.id);
   audit(c, 'admin.2fa_reset', { by: c.get('user').id, userId: promoter.id });
-  notify(promoter.id, {
-    title: 'Two-step verification was reset',
-    body: 'An admin turned off two-step verification on your account. Turn it on again under Security.',
+  notify(promoter.id, () => ({
+    title: t('Two-step verification was reset', 'La vérification en deux étapes a été réinitialisée'),
+    body: t(
+      'An admin turned off two-step verification on your account. Turn it on again under Security.',
+      'Un admin a désactivé la vérification en deux étapes sur ton compte. Réactive-la sous Sécurité.',
+    ),
     link: '/account/security',
-  });
+  }));
   return c.redirect(`/admin/promoters/${promoter.id}?ok=2fa_reset`);
 });
 
@@ -1967,7 +2155,7 @@ app.post('/admin/rules/edit', async (c) => {
     check = await checkDraft(target.scope, target, text);
   } catch (err) {
     if (!(err instanceof RulesEngineUnavailable)) throw err;
-    return renderRuleEdit(c, target, text, { status: 400, error: messages.rules_down });
+    return renderRuleEdit(c, target, text, { status: 400, error: flash('rules_down') });
   }
   // Nothing is saved while the rule has a problem.
   if (check.problems.length > 0) return renderRuleEdit(c, target, text, { status: 400, error: 'The rule has a problem: see To fix.', problems: check });
@@ -2555,6 +2743,8 @@ app.post('/admin/emails/settings', async (c) => {
 });
 
 const emailType = (raw: string) => (emailTypes.includes(raw as EmailType) ? (raw as EmailType) : null);
+// The language being edited: French only for the emails that have it.
+const emailLang = (type: EmailType, raw: string | undefined): 'en' | 'fr' => (raw === 'fr' && languagesOf(type).includes('fr') ? 'fr' : 'en');
 
 app.get('/admin/emails/:type', (c) => {
   const type = emailType(c.req.param('type'));
@@ -2563,6 +2753,7 @@ app.get('/admin/emails/:type', (c) => {
     <AdminEmailEditPage
       user={c.get('user')}
       type={type}
+      lang={emailLang(type, c.req.query('lang'))}
       version={String(Date.now())}
       ok={flash(c.req.query('ok'))}
       error={flash(c.req.query('error'))}
@@ -2573,30 +2764,36 @@ app.get('/admin/emails/:type', (c) => {
 app.get('/admin/emails/:type/preview', (c) => {
   const type = emailType(c.req.param('type'));
   if (!type) return c.notFound();
-  return c.html(renderEmail(type, sampleVars(type, c.get('user').name)).html);
+  // Rendered in the language being edited: its wording and the fixed lines around it.
+  return c.html(withLang(emailLang(type, c.req.query('lang')), () => renderEmail(type, sampleVars(type, c.get('user').name)).html));
 });
 
 app.post('/admin/emails/:type', async (c) => {
   const type = emailType(c.req.param('type'));
   if (!type) return c.notFound();
   const body = await c.req.parseBody();
-  const back = `/admin/emails/${type}`;
+  const language = emailLang(type, String(body.lang ?? ''));
+  const back = `/admin/emails/${type}${language === 'fr' ? '?lang=fr&' : '?'}`;
   if (body.action === 'reset') {
-    resetTemplate(type);
+    resetTemplate(type, language);
     audit(c, 'admin.email_reset', { by: c.get('user').id, type });
-    return c.redirect(`${back}?ok=reset`);
+    return c.redirect(`${back}ok=reset`);
   }
-  saveTemplate(type, {
+  saveTemplate(
+    type,
+    {
     subject: String(body.subject ?? ''),
     heading: String(body.heading ?? ''),
     body: String(body.body ?? ''),
     button: String(body.button ?? ''),
-  });
-  audit(c, 'admin.email_saved', { by: c.get('user').id, type });
-  if (body.action !== 'test') return c.redirect(`${back}?ok=saved`);
+    },
+    language,
+  );
+  audit(c, 'admin.email_saved', { by: c.get('user').id, type, lang: language });
+  if (body.action !== 'test') return c.redirect(`${back}ok=saved`);
   const me = c.get('user');
-  const sent = await sendEmail(type, [me], sampleVars(type, me.name), getTemplate(type), { attempts: 1 });
-  return c.redirect(`${back}?${sent ? 'ok=test_sent' : 'error=test_failed'}`);
+  const sent = await sendEmail(type, [{ name: me.name, email: me.email, lang: language }], sampleVars(type, me.name), getTemplate(type, language), { attempts: 1 });
+  return c.redirect(`${back}${sent ? 'ok=test_sent' : 'error=test_failed'}`);
 });
 
 app.get('/admin/branding', (c) =>

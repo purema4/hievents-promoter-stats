@@ -31,6 +31,10 @@ services:
     image: axllent/mailpit:v1.27
     ports:
       - "127.0.0.1:8028:8025"
+    environment:
+      # No reverse DNS lookup of each sender: under Docker on WSL it can delay the SMTP greeting past
+      # the app's 10 s timeout, and sign-in emails then fail at random.
+      MP_SMTP_DISABLE_RDNS: "true"
 
   # Checks and evaluates the promoter rules (CEL). No published port: only promoter-stats reaches it,
   # on this network. Read-only, unprivileged, with no capabilities.

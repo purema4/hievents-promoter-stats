@@ -2,7 +2,8 @@ import nodemailer from 'nodemailer';
 import { getBrand } from './brand';
 import { config } from './config';
 import { getReplyTo, renderEmail, type EmailType } from './email-templates';
-import { db } from './local-db';
+import { db, findUserByEmail } from './local-db';
+import { withLang, type Lang } from './i18n';
 
 // One pooled connection is reused for every email instead of reconnecting each time.
 const transport = config.smtp.host
@@ -78,8 +79,10 @@ function sender(): { name: string; address: string } {
  */
 export async function sendEmail(
   type: EmailType,
-  to: { name: string; email: string }[],
-  vars: Record<string, string>,
+  // Each email is in the person's language: given, or the one saved on their account.
+  to: { name: string; email: string; lang?: Lang | null }[],
+  // A function is worded for each person, in their language (amounts, dates).
+  vars: Record<string, string> | (() => Record<string, string>),
   template?: Parameters<typeof renderEmail>[2],
   // Someone waiting on the page (an admin sending an invite or a test) gets one quick try and the
   // result; background sends retry.
@@ -87,14 +90,16 @@ export async function sendEmail(
 ): Promise<boolean> {
   let allSent = true;
   for (const person of to) {
-    const email = renderEmail(type, { name: person.name, ...vars }, template);
+    const language = person.lang ?? findUserByEmail(person.email)?.lang;
+    const email = withLang(language, () => renderEmail(type, { name: person.name, ...(typeof vars === 'function' ? vars() : vars) }, template));
     if (!transport) {
       if (!printLinks) {
         log(type, person.email, email.subject, 'failed', 0, 'SMTP is not configured');
         allSent = false;
         continue;
       }
-      console.log(`Email to ${person.email}: ${email.subject}${vars.link ? ` (${vars.link})` : ''}`);
+      const link = typeof vars === 'function' ? undefined : vars.link;
+      console.log(`Email to ${person.email}: ${email.subject}${link ? ` (${link})` : ''}`);
       log(type, person.email, email.subject, 'sent', 0, 'printed to the log, SMTP not set');
       continue;
     }

@@ -8,12 +8,13 @@ export type BarProps = {
   message: string | null;
   open: boolean;
   back: string;
+  lang: 'fr' | 'en' | null; // chosen in the bar; null follows the browser
 };
 
 const roleOf = (u: User) => (u.is_admin ? 'admin' : u.is_team_lead ? "chef d'équipe" : u.team_lead_id ? 'promoteur (équipe)' : 'promoteur');
 
 /** The debug bar, added at the end of every page. Plain forms: the strict CSP stays on, and it needs no script. */
-export function DemoBar({ user, personas, people, target, message, open, back }: BarProps) {
+export function DemoBar({ user, personas, people, target, message, open, back, lang }: BarProps) {
   return (
     <div id="demo-bar">
       <span class="demo-tag">DÉMO</span>
@@ -21,6 +22,21 @@ export function DemoBar({ user, personas, people, target, message, open, back }:
         {personas.map((p) => (
           <button name="user" value={String(p.user.id)} class={p.user.id === user?.id ? 'demo-on' : ''}>
             {p.label}
+          </button>
+        ))}
+      </form>
+      {/* The app follows the browser's language; this picks one for the demo without changing the browser. */}
+      <form method="post" action="/__demo/lang" class="demo-lang" aria-label="Langue">
+        <input type="hidden" name="back" value={back} />
+        {(
+          [
+            ['auto', 'Auto'],
+            ['fr', 'FR'],
+            ['en', 'EN'],
+          ] as const
+        ).map(([value, label]) => (
+          <button name="lang" value={value} class={(lang ?? 'auto') === value ? 'demo-on' : ''}>
+            {label}
           </button>
         ))}
       </form>

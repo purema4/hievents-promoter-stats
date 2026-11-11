@@ -31,8 +31,9 @@ import { countPendingPayouts, type Balance, type PayoutRequest } from './payouts
 import { LinkField, PayoutHistory, RewardHistory } from './promoter-views';
 import { countPendingRewards, describeReward, type RewardRequest } from './rewards';
 import { ANNOUNCEMENT_BODY_MAX, ANNOUNCEMENT_TITLE_MAX, unreadCount, type Announcement, type Notification } from './notifications';
-import { definitions, emailTypes, getReplyTo, getTemplate, isCustomized, type EmailType } from './email-templates';
+import { definitions, emailTypes, getReplyTo, getTemplate, isCustomized, languagesOf, type EmailType } from './email-templates';
 import type { EmailLogEntry } from './mail';
+import { lang, locale, plural, t, type Lang } from './i18n';
 import { tokensFor, type ApiToken } from './api-tokens';
 
 export const css = `
@@ -77,11 +78,34 @@ header { padding-top: env(safe-area-inset-top); position: sticky; top: 0; z-inde
 .sidebar a:hover { background: var(--bg); }
 .sidebar a[aria-current] { background: color-mix(in srgb, var(--accent) 12%, var(--surface)); color: var(--accent); font-weight: 600; }
 .nav-group { display: grid; gap: 2px; }
-.nav-title { font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); padding: 0 10px 4px; }
-.sidebar a.nav-cta { justify-content: center; margin: 2px 0 8px; background: var(--accent); color: var(--accent-text); font-weight: 700; }
+.nav-items { display: grid; gap: 2px; }
+.nav-title { font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); padding: 6px 10px; border-radius: 8px; list-style: none; cursor: pointer; display: flex; align-items: center; justify-content: space-between; user-select: none; }
+.nav-title::-webkit-details-marker { display: none; }
+.nav-title:hover { background: var(--bg); color: var(--text); }
+.nav-title:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.nav-chevron { transition: transform 0.15s ease; transform: rotate(-90deg); }
+.nav-group[open] .nav-chevron { transform: none; }
+.nav-bottom { margin-top: auto; display: grid; gap: 10px; }
+.nav-advanced { margin: 0; padding: 0 2px; }
+.lang-switch { margin: 0; display: grid; gap: 6px; padding: 4px 10px; }
+.lang-label { font-size: 14px; color: var(--muted); }
+.lang-options { display: flex; border: 1px solid var(--border); border-radius: 999px; padding: 2px; gap: 2px; }
+.lang-options button { flex: 1; text-align: center; background: none; border: 0; border-radius: 999px; padding: 4px 8px; font: inherit; font-size: 13px; color: var(--muted); cursor: pointer; width: auto; }
+.lang-options button:hover { color: var(--text); background: var(--bg); }
+.lang-options button[aria-pressed="true"] { background: var(--accent); color: var(--accent-text); font-weight: 600; }
+.account-menu .menu .lang-switch { border-top: 1px solid var(--border); margin-top: 4px; padding: 8px 10px 4px; }
+.account-menu .menu .lang-options button { flex: 1; width: auto; padding: 4px 8px; display: block; text-align: center; font-size: 13px; }
+.account-menu .menu .lang-options button[aria-pressed="true"] { background: var(--accent); color: var(--accent-text); }
+.switch { display: flex; align-items: center; gap: 10px; width: 100%; background: none; border: 0; padding: 8px; border-radius: 8px; color: var(--muted); font: inherit; font-size: 14px; cursor: pointer; text-align: left; }
+.switch:hover { background: var(--bg); color: var(--text); }
+.switch-track { flex: none; width: 34px; height: 20px; border-radius: 999px; background: var(--border); position: relative; transition: background 0.15s ease; }
+.switch-thumb { position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgb(0 0 0 / 0.3); transition: transform 0.15s ease; }
+.switch[aria-checked="true"] .switch-track { background: var(--accent); }
+.switch[aria-checked="true"] .switch-thumb { transform: translateX(14px); }
+.sidebar a.nav-cta { justify-content: center; margin: 2px 0 0; background: var(--accent); color: var(--accent-text); font-weight: 700; }
 .sidebar a.nav-cta:hover { background: color-mix(in srgb, var(--accent) 85%, var(--text)); }
 .nav-count { min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px; background: var(--danger); color: #fff; font: 700 11px/20px system-ui; text-align: center; }
-.nav-signout { margin-top: auto; padding: 0 10px; }
+.nav-signout { padding: 0 10px; }
 .nav-close { display: none !important; }
 .nav-overlay { display: none; }
 body.with-nav main { margin: 0; max-width: none; padding-left: 32px; padding-right: 32px; }
@@ -124,7 +148,8 @@ header nav { flex-wrap: wrap; }
 .who h1 { margin: 0; }
 .photo-row { display: flex; gap: 14px; align-items: center; }
 header .brand { font-weight: 650; margin-right: auto; text-decoration: none; color: var(--text); display: flex; align-items: center; gap: 10px; }
-.cover-thumb { width: 64px; height: 64px; flex: none; object-fit: cover; border-radius: 8px; background: var(--bg); }
+/* Event covers are wide banners: a wide thumbnail keeps most of the picture and its title. */
+.cover-thumb { width: 88px; height: 55px; flex: none; object-fit: cover; border-radius: 8px; background: var(--bg); }
 .cover-hero { display: block; width: 100%; max-height: 260px; object-fit: cover; border-radius: 10px; margin-bottom: 16px; background: var(--bg); }
 .install-banner { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; margin-bottom: 20px; border-color: var(--accent); }
 .install-banner img { border-radius: 10px; flex: none; }
@@ -334,6 +359,8 @@ a.event-card-main .event-main { min-width: 0; display: flex; gap: 12px; align-it
 .banner { display: flex; gap: 10px; align-items: flex-start; margin: 0 0 16px; padding: 10px 12px; border: 1px solid var(--warn); border-left-width: 4px; border-radius: 8px; background: color-mix(in srgb, var(--warn) 10%, var(--surface)); font-size: 14px; }
 .banner p { margin: 0; min-width: 0; white-space: pre-line; overflow-wrap: anywhere; }
 .banner svg { flex: none; margin-top: 1px; color: var(--warn); }
+.banner-close { margin: -6px -6px -6px auto; flex: none; background: none; border: 0; color: var(--muted); font-size: 22px; line-height: 1; padding: 4px 8px; border-radius: 6px; cursor: pointer; }
+.banner-close:hover { background: var(--bg); color: var(--text); }
 .event-card .banner { margin: 0; }
 .banner-form { display: grid; gap: 8px; justify-items: start; margin: 0; }
 .banner-form textarea { font: inherit; min-height: 0; }
@@ -626,7 +653,7 @@ ${chartCss}
 .shop-event-head p.muted { margin: 2px 0 0; color: var(--text); opacity: 0.75; }
 .shop-event-backdrop { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; filter: blur(28px) saturate(1.6); transform: scale(1.4); opacity: 0.45; pointer-events: none; }
 .with-cover .shop-event-head { border-bottom: 1px solid var(--border); }
-.shop-event-head .cover-thumb { width: 72px; height: 72px; border-radius: 10px; box-shadow: 0 4px 14px rgb(0 0 0 / 0.25); }
+.shop-event-head .cover-thumb { width: 104px; height: 65px; border-radius: 10px; box-shadow: 0 4px 14px rgb(0 0 0 / 0.25); }
 .shop-event-card > p.muted { margin: 2px 0 10px; }
 .bank-card { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 6%, var(--surface)); }
 table.shop-table { width: 100%; }
@@ -655,7 +682,6 @@ td.shop-add { width: 1%; text-align: right; white-space: nowrap; }
   table.shop-table td:first-child { grid-column: 1 / -1; }
   td.shop-avail { text-align: left; }
 }
-td.shop-avail .of { font-size: 16px; font-weight: 600; color: var(--muted); }
 button.plus[hidden] { display: none; }
 button.plus { display: inline-grid; place-items: center; width: 44px; height: 44px; padding: 0; border-radius: 50%; }
 button.plus svg, button.step svg { display: block; }
@@ -686,10 +712,17 @@ button.step { display: inline-grid; place-items: center; width: 32px; height: 32
 .checkout-facts dd { margin: 0; }
 .who-strong { font-weight: 700; }
 .checkout-confirm { display: grid; gap: 12px; margin: 16px 0; }
+.checkout-confirm h2 { margin: 12px 0 0; }
+.checkout-qty { display: flex; align-items: center; gap: 6px; }
+.checkout-qty select { font: inherit; font-size: 22px; font-weight: 700; padding: 2px 6px; width: auto; }
+.checkout-payout { display: grid; gap: 12px; }
+.checkout-include { font-size: 17px; }
+.payout-fields { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); align-items: start; }
+.payout-fields label { display: grid; gap: 4px; }
+.payout-fields p { grid-column: 1 / -1; margin: 0; }
+/* Not ticked: the payout fields stay, dimmed, and are not sent as a request. */
+.checkout-payout:has(input[name="payout"]:not(:checked)) .payout-fields { opacity: 0.45; }
 .checkout-actions { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
-dialog.notice-modal { max-width: min(520px, calc(100vw - 32px)); border: 1px solid var(--border); border-radius: 12px; padding: 20px; background: var(--surface); color: var(--text); }
-dialog.notice-modal::backdrop { background: rgb(0 0 0 / 0.55); }
-dialog.notice-modal h2 { margin-top: 0; }
 .notice-text { white-space: pre-line; font-size: 16px; }
 .cart { position: sticky; top: 72px; display: grid; gap: 10px; }
 .cart h3 { margin: 0; }
@@ -709,11 +742,11 @@ pre.code-block { font: 13px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; 
 export const cssVersion = new Bun.CryptoHasher('sha256').update(css).digest('hex').slice(0, 10);
 
 export function formatDate(date: Date | null, timezone: string | null): string {
-  if (!date) return 'No date';
+  if (!date) return t('No date', 'Pas de date');
   try {
-    return new Intl.DateTimeFormat('en-CA', { dateStyle: 'medium', timeStyle: 'short', timeZone: timezone ?? 'UTC' }).format(date);
+    return new Intl.DateTimeFormat(locale(), { dateStyle: 'medium', timeStyle: 'short', timeZone: timezone ?? 'UTC' }).format(date);
   } catch {
-    return new Intl.DateTimeFormat('en-CA', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'UTC' }).format(date);
+    return new Intl.DateTimeFormat(locale(), { dateStyle: 'medium', timeStyle: 'short', timeZone: 'UTC' }).format(date);
   }
 }
 
@@ -745,27 +778,36 @@ function ImpersonationBanner(props: { user: User }) {
 // What a change gets while viewing as a promoter.
 export function ReadOnlyPage(props: { user: User }) {
   return (
-    <Layout title="Viewing only" user={props.user}>
-      <h1>Viewing only</h1>
+    <Layout title={t('Viewing only', 'Consultation seulement')} user={props.user}>
+      <h1>{t('Viewing only', 'Consultation seulement')}</h1>
       <p>
-        You are viewing the app as {props.user.name}, so changes are turned off: nothing was sent or saved. To change
-        something for them, go back to your account and use their admin page.
+        {t(
+          `You are viewing the app as ${props.user.name}, so changes are turned off: nothing was sent or saved. To change something for them, go back to your account and use their admin page.`,
+          `Tu consultes l’app en tant que ${props.user.name}, donc les modifications sont désactivées : rien n’a été envoyé ni enregistré. Pour changer quelque chose pour cette personne, retourne à ton compte et utilise sa page d’admin.`,
+        )}
       </p>
       <p>
-        <a href="/">Back to their dashboard</a>
+        <a href="/">{t('Back to their dashboard', 'Retour à son tableau de bord')}</a>
       </p>
     </Layout>
   );
 }
 
 /** A notice from the team, kept as they typed it: the text is escaped and its line breaks kept. */
-export function Banner(props: { text: string; label: string }) {
+export function Banner(props: { text: string; label: string; dismissible?: boolean }) {
+  // Closed for good on this device, until the text changes (app.js keeps the key).
+  const key = props.dismissible ? `banner:${Bun.hash(props.text).toString(36)}` : undefined;
   return (
-    <div class="banner" role="note" aria-label={props.label}>
+    <div class="banner" role="note" aria-label={props.label} data-banner-key={key}>
       <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
         <path fill="currentColor" d="M12 2 1 21h22L12 2Zm-1 7h2v6h-2V9Zm0 8h2v2h-2v-2Z" />
       </svg>
       <p>{props.text}</p>
+      {key && (
+        <button type="button" class="banner-close" data-banner-close hidden aria-label={t('Close this notice', 'Fermer cet avis')}>
+          ×
+        </button>
+      )}
     </div>
   );
 }
@@ -782,7 +824,7 @@ export function Layout(props: {
   // The last call to the rules engine failed: the numbers on this page may be the last ones known.
   const rulesDown = !!props.user && rulesEngineSeemsDown();
   return (
-    <html lang="en" data-theme={props.user?.theme === 'light' || props.user?.theme === 'dark' ? props.user.theme : undefined}>
+    <html lang={lang()} data-theme={props.user?.theme === 'light' || props.user?.theme === 'dark' ? props.user.theme : undefined}>
       <head>
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
@@ -804,7 +846,7 @@ export function Layout(props: {
           <header class="topbar">
             <div class="inner">
               {/* Opens the sidebar on phones; works without scripts through the #sidebar target. */}
-              <a class="menu-button" href="#sidebar" aria-label="Menu" aria-controls="sidebar">
+              <a class="menu-button" href="#sidebar" aria-label={t('Menu', 'Menu')} aria-controls="sidebar">
                 <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
                   <path fill="currentColor" d="M3 6h18v2H3V6Zm0 5h18v2H3v-2Zm0 5h18v2H3v-2Z" />
                 </svg>
@@ -822,18 +864,21 @@ export function Layout(props: {
         {props.user ? (
           <div class="shell">
             <Sidebar user={props.user} />
-            <a class="nav-overlay" href="#" aria-label="Close the menu" tabindex={-1}></a>
+            <a class="nav-overlay" href="#" aria-label={t('Close the menu', 'Fermer le menu')} tabindex={-1}></a>
             <div>
               <main>
-                {notice && <Banner text={notice} label="Notice for all promoters" />}
+                {notice && <Banner text={notice} label={t('Notice for all promoters', 'Avis à tous les promoteurs')} dismissible />}
                 {rulesDown && (
                   <Banner
                     text={
                       props.user.is_admin
                         ? 'The rules engine is not available: commissions and rewards shown are the last ones known, and payouts cannot be approved until it is back.'
-                        : 'Some numbers may be a little behind right now. They will catch up shortly.'
+                        : t(
+                            'Some numbers may be a little behind right now. They will catch up shortly.',
+                            'Certains chiffres peuvent avoir un peu de retard en ce moment. Ils vont se mettre à jour sous peu.',
+                          )
                     }
-                    label="Rules engine unavailable"
+                    label={t('Rules engine unavailable', 'Calculs temporairement indisponibles')}
                   />
                 )}
                 {!props.user.app_installed_at && !props.user.impersonator && !props.hideInstallBanner && <InstallBanner brand={brand} />}
@@ -853,36 +898,47 @@ export function Layout(props: {
   );
 }
 
-const shareIcon = (
-  <svg class="inline-icon" viewBox="0 0 24 24" width="16" height="16" aria-label="Share">
+const shareIcon = () => (
+  <svg class="inline-icon" viewBox="0 0 24 24" width="16" height="16" aria-label={t('Share', 'Partager')}>
     <path fill="currentColor" d="M12 2 7.5 6.5l1.4 1.4L11 5.8V15h2V5.8l2.1 2.1 1.4-1.4L12 2Zm-7 9v9a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-9h-2v9H7v-9H5Z" />
   </svg>
 );
 
 // Shown by /app.js only where it applies: not inside the installed app, and not after "Not now".
 function InstallBanner(props: { brand: Brand }) {
+  const fr = lang() === 'fr';
   return (
     <div class="card install-banner" data-install-banner hidden>
       <img src={iconUrl('icon-192.png')} alt="" width="44" height="44" />
       <div class="install-text">
-        <strong>Install the {props.brand.name} app</strong>
+        <strong>{fr ? <>Installe l’app {props.brand.name}</> : <>Install the {props.brand.name} app</>}</strong>
         <span class="muted">
-          It works like an app on your phone: open it from your home screen and get notifications for payouts, rewards
-          and milestones.
+          {t(
+            'It works like an app on your phone: open it from your home screen and get notifications for payouts, rewards and milestones.',
+            'Elle fonctionne comme une app sur ton téléphone : ouvre-la depuis ton écran d’accueil et reçois des notifications pour tes paiements, tes récompenses et tes étapes atteintes.',
+          )}
         </span>
         <span data-install-ios hidden>
-          On iPhone: tap {shareIcon} <strong>Share</strong> in Safari, then <strong>Add to Home Screen</strong>.
+          {fr ? (
+            <>
+              Sur iPhone : touche {shareIcon()} <strong>Partager</strong> dans Safari, puis <strong>Sur l’écran d’accueil</strong>.
+            </>
+          ) : (
+            <>
+              On iPhone: tap {shareIcon()} <strong>Share</strong> in Safari, then <strong>Add to Home Screen</strong>.
+            </>
+          )}
         </span>
       </div>
       <div class="install-actions">
         <button type="button" data-install-button hidden>
-          Install
+          {t('Install', 'Installer')}
         </button>
         <button type="button" class="link" data-install-done>
-          I already installed it
+          {t('I already installed it', 'Je l’ai déjà installée')}
         </button>
         <button type="button" class="link" data-install-dismiss>
-          Not now
+          {t('Not now', 'Pas maintenant')}
         </button>
       </div>
     </div>
@@ -890,31 +946,59 @@ function InstallBanner(props: { brand: Brand }) {
 }
 
 export function InstallSteps() {
+  const fr = lang() === 'fr';
   return (
     <div class="card stack-card install-steps">
-      <h2 class="first">Install the app</h2>
+      <h2 class="first">{t('Install the app', 'Installer l’app')}</h2>
       <p class="muted">
-        This site is an app you can install (a PWA). Installed, it opens from your home screen like any other app and
-        can send you notifications.
+        {t(
+          'This site is an app you can install (a PWA). Installed, it opens from your home screen like any other app and can send you notifications.',
+          'Ce site est une app que tu peux installer (une PWA). Une fois installée, elle s’ouvre depuis ton écran d’accueil comme n’importe quelle autre app et peut t’envoyer des notifications.',
+        )}
       </p>
-      <dl>
-        <dt>iPhone or iPad</dt>
-        <dd>
-          Open this site in Safari, tap {shareIcon} <strong>Share</strong>, then <strong>Add to Home Screen</strong>.
-          Open it from the home screen; notifications only work there.
-        </dd>
-        <dt>Android</dt>
-        <dd>
-          In Chrome, tap <strong>Install</strong> on the banner, or open the ⋮ menu and choose{' '}
-          <strong>Install app</strong> (or <strong>Add to Home screen</strong>).
-        </dd>
-        <dt>Computer</dt>
-        <dd>
-          In Chrome or Edge, click the install icon at the right of the address bar, or the menu, then{' '}
-          <strong>Install</strong>.
-        </dd>
-      </dl>
-      <p class="muted">After installing, sign in once in the app and turn on notifications from the bell.</p>
+      {fr ? (
+        <dl>
+          <dt>iPhone ou iPad</dt>
+          <dd>
+            Ouvre ce site dans Safari, touche {shareIcon()} <strong>Partager</strong>, puis <strong>Sur l’écran d’accueil</strong>.
+            Ouvre-la ensuite depuis l’écran d’accueil : les notifications fonctionnent seulement là.
+          </dd>
+          <dt>Android</dt>
+          <dd>
+            Dans Chrome, touche <strong>Installer</strong> sur la bannière, ou ouvre le menu ⋮ et choisis{' '}
+            <strong>Installer l’application</strong> (ou <strong>Ajouter à l’écran d’accueil</strong>).
+          </dd>
+          <dt>Ordinateur</dt>
+          <dd>
+            Dans Chrome ou Edge, clique sur l’icône d’installation à droite de la barre d’adresse, ou sur le menu, puis sur{' '}
+            <strong>Installer</strong>.
+          </dd>
+        </dl>
+      ) : (
+        <dl>
+          <dt>iPhone or iPad</dt>
+          <dd>
+            Open this site in Safari, tap {shareIcon()} <strong>Share</strong>, then <strong>Add to Home Screen</strong>.
+            Open it from the home screen; notifications only work there.
+          </dd>
+          <dt>Android</dt>
+          <dd>
+            In Chrome, tap <strong>Install</strong> on the banner, or open the ⋮ menu and choose{' '}
+            <strong>Install app</strong> (or <strong>Add to Home screen</strong>).
+          </dd>
+          <dt>Computer</dt>
+          <dd>
+            In Chrome or Edge, click the install icon at the right of the address bar, or the menu, then{' '}
+            <strong>Install</strong>.
+          </dd>
+        </dl>
+      )}
+      <p class="muted">
+        {t(
+          'After installing, sign in once in the app and turn on notifications from the bell.',
+          'Après l’installation, connecte-toi une fois dans l’app et active les notifications à partir de la cloche.',
+        )}
+      </p>
     </div>
   );
 }
@@ -934,7 +1018,7 @@ export function Avatar(props: { user: User; size?: 'small' | 'large' }) {
 function Bell(props: { userId: number }) {
   const unread = unreadCount(props.userId);
   return (
-    <a class="bell" href="/notifications" aria-label={unread ? `Notifications, ${unread} unread` : 'Notifications'}>
+    <a class="bell" href="/notifications" aria-label={unread ? t(`Notifications, ${unread} unread`, `Notifications, ${unread} non ${unread > 1 ? 'lues' : 'lue'}`) : 'Notifications'}>
       <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
         <path
           fill="currentColor"
@@ -951,7 +1035,7 @@ function AccountMenu(props: { user: User }) {
   const u = props.user;
   return (
     <details class="account-menu">
-      <summary aria-label="Your account">
+      <summary aria-label={t('Your account', 'Ton compte')}>
         <Avatar user={u} size="small" />
       </summary>
       <div class="menu">
@@ -960,23 +1044,78 @@ function AccountMenu(props: { user: User }) {
           <span>{u.email}</span>
         </div>
         <a href="/notifications">Notifications {count(unreadCount(u.id))}</a>
-        <a href="/account">Account</a>
-        <a href="/account/security">Security</a>
-        <a href="/account/api">API &amp; Claude</a>
+        <a href="/account">{t('Account', 'Compte')}</a>
+        <a href="/account/security">{t('Security', 'Sécurité')}</a>
+        {!!u.show_advanced && <a href="/account/api">{t('API & Claude', 'API et Claude')}</a>}
+        <LangSwitch user={u} />
         <form method="post" action="/logout">
-          <button type="submit">Sign out</button>
+          <button type="submit">{t('Sign out', 'Se déconnecter')}</button>
         </form>
       </div>
     </details>
   );
 }
 
-function NavGroup(props: { title: string; children: Child }) {
+// An accordion: open by default so it works without scripts; /app.js remembers which ones were closed
+// and always opens the one holding the current page.
+function NavGroup(props: { id: string; title: string; children: Child }) {
   return (
-    <div class="nav-group">
-      <div class="nav-title">{props.title}</div>
-      {props.children}
-    </div>
+    <details class="nav-group" data-nav-group={props.id} open>
+      <summary class="nav-title">
+        <span>{props.title}</span>
+        <svg class="nav-chevron" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+          <path fill="currentColor" d="M7.4 8.6 12 13.2l4.6-4.6L18 10l-6 6-6-6z" />
+        </svg>
+      </summary>
+      <div class="nav-items">{props.children}</div>
+    </details>
+  );
+}
+
+// Français / English, in the avatar menu and at the bottom of the side menu. "Auto" follows the browser.
+function LangSwitch(props: { user: User }) {
+  const current = props.user.lang_pref ?? 'auto';
+  const options = [
+    ['fr', 'Français'],
+    ['en', 'English'],
+    ['auto', t('Auto', 'Auto')],
+  ] as const;
+  return (
+    <form class="lang-switch" method="post" action="/lang" aria-label={t('Language', 'Langue')}>
+      <input type="hidden" name="back" value="/" data-back-here />
+      <span class="lang-label">{t('Language', 'Langue')}</span>
+      <span class="lang-options">
+        {options.map(([value, label]) => (
+          <button
+            type="submit"
+            name="lang"
+            value={value}
+            aria-pressed={current === value ? 'true' : 'false'}
+            lang={value === 'auto' ? undefined : value}
+            title={value === 'auto' ? t('Use the language of my browser', 'Utiliser la langue de mon navigateur') : undefined}
+          >
+            {label}
+          </button>
+        ))}
+      </span>
+    </form>
+  );
+}
+
+// At the bottom of the menu: shows the Advanced section (API & Claude) for those who want it.
+function AdvancedToggle(props: { on: boolean }) {
+  return (
+    <form class="nav-advanced" method="post" action="/account/advanced">
+      <input type="hidden" name="on" value={props.on ? '0' : '1'} />
+      {/* Filled in by /app.js with the current page, to come back to it. */}
+      <input type="hidden" name="back" value="/" data-back-here />
+      <button type="submit" class="switch" role="switch" aria-checked={props.on ? 'true' : 'false'}>
+        <span class="switch-track" aria-hidden="true">
+          <span class="switch-thumb" />
+        </span>
+        <span>{t('Advanced options', 'Options avancées')}</span>
+      </button>
+    </form>
   );
 }
 
@@ -995,57 +1134,67 @@ function Sidebar(props: { user: User }) {
       {u.is_admin ? (
         <>
           {/* Grouped by task: what needs me today, who, which event, how people are paid, setup. */}
-          <NavGroup title="Today">
+          <NavGroup id="today" title="Today">
             <a href="/admin/dashboard">Dashboard</a>
             <a href="/admin/payouts">Requests {count(countPendingPayouts() + countPendingRewards())}</a>
           </NavGroup>
-          <NavGroup title="People">
+          <NavGroup id="people" title="People">
             <a href="/admin">Promoters</a>
             <a href="/admin/teams">Teams</a>
             <a href="/admin/invites">Invite links</a>
             <a href="/admin/notifications">Send a notification</a>
           </NavGroup>
-          <NavGroup title="Events">
+          <NavGroup id="events" title="Events">
             <a href="/admin/codes">Promo codes</a>
             <a href="/admin/media">Media drives</a>
             <a href="/admin/banners">Banners</a>
           </NavGroup>
-          <NavGroup title="Pay &amp; rewards">
+          <NavGroup id="pay" title="Pay &amp; rewards">
             <a href="/admin/commissions">Commissions</a>
             <a href="/admin/rewards">Levels &amp; rewards</a>
             <a href="/admin/rules">Rules (advanced)</a>
           </NavGroup>
-          <NavGroup title="Sharing">
+          <NavGroup id="sharing" title="Sharing">
             <a href="/admin/pages">Promoter pages</a>
             <a href="/admin/links">Event links</a>
           </NavGroup>
-          <NavGroup title="Settings">
+          <NavGroup id="settings" title="Settings">
             <a href="/admin/branding">Branding</a>
             <a href="/admin/emails">Emails</a>
           </NavGroup>
         </>
       ) : (
-        <NavGroup title="My sales">
-          <a class="nav-cta" href="/payouts#request">
-            Request payout
+        <>
+          <a class="nav-cta" href="/rewards/checkout">
+            {t('Make a request', 'Faire une demande')}
           </a>
-          <a href="/">Dashboard</a>
-          <a href="/payouts">Payouts &amp; rewards</a>
-          <a href="/page">My page</a>
-          {(isTeamLead(u) || !!u.team_lead_id) && <a href="/team">My team</a>}
-        </NavGroup>
+          <NavGroup id="sales" title={t('My sales', 'Mes ventes')}>
+            <a href="/">{t('Dashboard', 'Tableau de bord')}</a>
+            <a href="/payouts">{t('Payouts & rewards', 'Paiements et récompenses')}</a>
+            <a href="/page">{t('My page', 'Ma page')}</a>
+            {(isTeamLead(u) || !!u.team_lead_id) && <a href="/team">{t('My team', 'Mon équipe')}</a>}
+          </NavGroup>
+        </>
       )}
       {/* On computers these live in the avatar menu; the phone panel keeps them too. */}
       <div class="nav-me">
-        <NavGroup title="Me">
+        <NavGroup id="me" title={t('Me', 'Moi')}>
           <a href="/notifications">Notifications {count(unread)}</a>
-          <a href="/account">Account</a>
-          <a href="/account/security">Security</a>
-          <a href="/account/api">API &amp; Claude</a>
+          <a href="/account">{t('Account', 'Compte')}</a>
+          <a href="/account/security">{t('Security', 'Sécurité')}</a>
         </NavGroup>
-        <form class="nav-signout" method="post" action="/logout">
+      </div>
+      {!!u.show_advanced && (
+        <NavGroup id="advanced" title={t('Advanced', 'Avancé')}>
+          <a href="/account/api">{t('API & Claude', 'API et Claude')}</a>
+        </NavGroup>
+      )}
+      <div class="nav-bottom">
+        <LangSwitch user={u} />
+        <AdvancedToggle on={!!u.show_advanced} />
+        <form class="nav-signout nav-me" method="post" action="/logout">
           <button class="link" type="submit">
-            Sign out
+            {t('Sign out', 'Se déconnecter')}
           </button>
         </form>
       </div>
@@ -1070,7 +1219,7 @@ export function LoginPage(props: {
   offline?: boolean;
 }) {
   return (
-    <Layout title={props.offline ? 'Offline' : 'Sign in'}>
+    <Layout title={props.offline ? t('Offline', 'Hors ligne') : t('Sign in', 'Connexion')}>
       <div class="login card">
         <h1 class="login-brand">
           <BrandMark brand={getBrand()} />
@@ -1079,21 +1228,33 @@ export function LoginPage(props: {
           <p class="muted">{props.error}</p>
         ) : props.sent ? (
           <>
-            <p>Check your email.</p>
+            <p>{t('Check your email.', 'Vérifie tes courriels.')}</p>
             <p class="muted">
-              If <strong>{props.email}</strong> belongs to a promoter account, a sign-in link is on its way. It can take a
-              minute, and it may land in spam.
+              {lang() === 'fr' ? (
+                <>
+                  Si <strong>{props.email}</strong> correspond à un compte de promoteur, un lien de connexion s’en vient. Ça peut
+                  prendre une minute, et il peut se retrouver dans les indésirables.
+                </>
+              ) : (
+                <>
+                  If <strong>{props.email}</strong> belongs to a promoter account, a sign-in link is on its way. It can take a
+                  minute, and it may land in spam.
+                </>
+              )}
             </p>
             <p class="waiting" data-wait-login>
-              Open the link on any device. This page signs in by itself as soon as you do.
+              {t(
+                'Open the link on any device. This page signs in by itself as soon as you do.',
+                'Ouvre le lien sur n’importe quel appareil. Cette page se connecte toute seule dès que tu le fais.',
+              )}
             </p>
             <Flash error={props.error} />
             <details class="code-fallback" open={!!props.error}>
-              <summary>Or type the 6-digit code from the email</summary>
+              <summary>{t('Or type the 6-digit code from the email', 'Ou tape le code à 6 chiffres du courriel')}</summary>
             <form class="stack" method="post" action="/login/code">
               <input type="hidden" name="email" value={props.email ?? ''} />
               <label>
-                Code
+                {t('Code', 'Code')}
                 <input
                   class="code-input"
                   name="code"
@@ -1104,11 +1265,11 @@ export function LoginPage(props: {
                   required
                 />
               </label>
-              <button type="submit">Sign in</button>
+              <button type="submit">{t('Sign in', 'Se connecter')}</button>
             </form>
             </details>
             <p class="muted">
-              <a href="/login">Use a different email</a>
+              <a href="/login">{t('Use a different email', 'Utiliser un autre courriel')}</a>
             </p>
           </>
         ) : props.withPassword ? (
@@ -1116,33 +1277,38 @@ export function LoginPage(props: {
             <Flash error={props.error} />
             <form class="stack" method="post" action="/login">
               <label>
-                Email
+                {t('Email', 'Courriel')}
                 <input type="email" name="email" value={props.email ?? ''} autocomplete="username" required autofocus />
               </label>
               <label>
-                Password
+                {t('Password', 'Mot de passe')}
                 <input type="password" name="password" autocomplete="current-password" required />
               </label>
-              <button type="submit">Sign in</button>
+              <button type="submit">{t('Sign in', 'Se connecter')}</button>
             </form>
             <p class="muted">
-              <a href="/login">Email me a link instead</a>
+              <a href="/login">{t('Email me a link instead', 'Envoie-moi plutôt un lien par courriel')}</a>
             </p>
           </>
         ) : (
           <>
             {getBrand().loginMessage && <p>{getBrand().loginMessage}</p>}
-            <p class="muted">Enter your email and we will send you a link to sign in. No password needed.</p>
+            <p class="muted">
+              {t(
+                'Enter your email and we will send you a link to sign in. No password needed.',
+                'Entre ton courriel et on t’envoie un lien de connexion. Pas besoin de mot de passe.',
+              )}
+            </p>
             <Flash error={props.error} />
             <form class="stack" method="post" action="/login/link">
               <label>
-                Email
+                {t('Email', 'Courriel')}
                 <input type="email" name="email" value={props.email ?? ''} autocomplete="email" required autofocus />
               </label>
-              <button type="submit">Email me a sign-in link</button>
+              <button type="submit">{t('Email me a sign-in link', 'M’envoyer un lien de connexion')}</button>
             </form>
             <p class="muted">
-              <a href="/login?method=password">Sign in with a password</a>
+              <a href="/login?method=password">{t('Sign in with a password', 'Se connecter avec un mot de passe')}</a>
             </p>
           </>
         )}
@@ -1156,15 +1322,15 @@ export function LoginPage(props: {
 // real browser, which happens instantly. The button is the fallback when scripts are off.
 export function LoginConfirmPage(props: { token: string }) {
   return (
-    <Layout title="Signing in">
+    <Layout title={t('Signing in', 'Connexion en cours')}>
       <div class="login card">
         <h1 class="login-brand">
           <BrandMark brand={getBrand()} />
         </h1>
-        <p class="muted">Signing you in…</p>
+        <p class="muted">{t('Signing you in…', 'Connexion en cours…')}</p>
         <form class="stack" method="post" action="/login/verify" data-auto-submit>
           <input type="hidden" name="token" value={props.token} />
-          <button type="submit">Continue</button>
+          <button type="submit">{t('Continue', 'Continuer')}</button>
         </form>
       </div>
     </Layout>
@@ -1173,37 +1339,58 @@ export function LoginConfirmPage(props: { token: string }) {
 
 function timeAgo(epochSeconds: number): string {
   const minutes = Math.max(0, Math.round((Date.now() / 1000 - epochSeconds) / 60));
-  return minutes < 1 ? 'just now' : minutes === 1 ? '1 minute ago' : `${minutes} minutes ago`;
+  if (minutes < 1) return t('just now', 'à l’instant');
+  return t(minutes === 1 ? '1 minute ago' : `${minutes} minutes ago`, `il y a ${plural(minutes, ['minute', 'minute'], ['minutes', 'minutes'])}`);
 }
 
 // Shown after a link is opened somewhere other than the browser or app that asked for it.
 export function ApproveDevicePage(props: { request?: { rowId: number; from: string | null; at: number }; done?: boolean }) {
   return (
-    <Layout title="Sign in">
+    <Layout title={t('Sign in', 'Connexion')}>
       <div class="login card">
-        <h1>You're signed in</h1>
+        <h1>{t("You're signed in", 'Connexion réussie')}</h1>
         {props.request ? (
           <>
             <p>
-              Also sign in the device that asked for this link? It was requested {timeAgo(props.request.at)} from{' '}
-              <strong>{props.request.from ?? 'another device'}</strong>, for example the installed app on your phone.
+              {lang() === 'fr' ? (
+                <>
+                  Connecter aussi l’appareil qui a demandé ce lien ? La demande a été faite {timeAgo(props.request.at)} depuis{' '}
+                  <strong>{props.request.from ?? 'un autre appareil'}</strong>, par exemple l’app installée sur ton téléphone.
+                </>
+              ) : (
+                <>
+                  Also sign in the device that asked for this link? It was requested {timeAgo(props.request.at)} from{' '}
+                  <strong>{props.request.from ?? 'another device'}</strong>, for example the installed app on your phone.
+                </>
+              )}
             </p>
-            <p class="muted">Only say yes if you asked for it yourself just now.</p>
+            <p class="muted">
+              {t('Only say yes if you asked for it yourself just now.', 'Dis oui seulement si tu viens de le demander toi-même.')}
+            </p>
             <form class="stack" method="post" action="/login/approve">
               <input type="hidden" name="request" value={String(props.request.rowId)} />
               <button type="submit" name="answer" value="yes">
-                Yes, sign it in
+                {t('Yes, sign it in', 'Oui, le connecter')}
               </button>
               <button class="secondary" type="submit" name="answer" value="no">
-                No, only this browser
+                {t('No, only this browser', 'Non, seulement ce navigateur')}
               </button>
             </form>
           </>
         ) : props.done ? (
-          <p>Done. Go back to the app or the other device: it signs in by itself within a few seconds.</p>
+          <p>
+            {t(
+              'Done. Go back to the app or the other device: it signs in by itself within a few seconds.',
+              'C’est fait. Retourne dans l’app ou sur l’autre appareil : la connexion se fait toute seule en quelques secondes.',
+            )}
+          </p>
         ) : (
           <p class="muted">
-            That request has expired. On the other device, ask for a new link. <a href="/">Continue here</a>
+            {t(
+              'That request has expired. On the other device, ask for a new link.',
+              'Cette demande a expiré. Sur l’autre appareil, demande un nouveau lien.',
+            )}{' '}
+            <a href="/">{t('Continue here', 'Continuer ici')}</a>
           </p>
         )}
       </div>
@@ -1214,70 +1401,87 @@ export function ApproveDevicePage(props: { request?: { rowId: number; from: stri
 export function AccountPage(props: { user: User; error?: string; ok?: string }) {
   const u = props.user;
   const theme = u.theme ?? 'system';
+  const mb = Math.round(maxUploadBytes / 1024 / 1024);
   return (
-    <Layout title="Account" user={u}>
-      <h1>Account</h1>
+    <Layout title={t('Account', 'Compte')} user={u}>
+      <h1>{t('Account', 'Compte')}</h1>
       <p class="muted">
-        Signed in as {u.email}.{u.password_hash ? '' : ' You sign in with a link sent to this email; to change it, ask the team.'}
+        {t(`Signed in as ${u.email}.`, `Tu utilises le compte ${u.email}.`)}
+        {u.password_hash
+          ? ''
+          : t(
+              ' You sign in with a link sent to this email; to change it, ask the team.',
+              ' Tu te connectes avec un lien envoyé à ce courriel; pour le changer, demande à l’équipe.',
+            )}
       </p>
       <Flash error={props.error} ok={props.ok} />
 
       <form class="account-form" method="post" action="/account/profile" enctype="multipart/form-data">
         <div class="two-col">
           <div class="card stack-card">
-            <h2 class="first">About you</h2>
+            <h2 class="first">{t('About you', 'À propos de toi')}</h2>
             <div class="photo-row">
               <Avatar user={u} size="large" />
               <div class="muted">
                 {u.avatar_source === 'upload'
-                  ? 'Your uploaded photo.'
+                  ? t('Your uploaded photo.', 'La photo que tu as téléversée.')
                   : u.avatar_source === 'admin'
-                    ? 'A photo the team chose for you. Upload your own to replace it.'
+                    ? t('A photo the team chose for you. Upload your own to replace it.', 'Une photo choisie pour toi par l’équipe. Téléverse la tienne pour la remplacer.')
                   : u.avatar_source === 'instagram'
-                    ? `Your Instagram photo (${u.avatar_for ? `@${u.avatar_for}` : ''}), refreshed weekly.`
-                    : 'Add your Instagram below to use its photo, or upload one.'}
+                    ? t(
+                        `Your Instagram photo (${u.avatar_for ? `@${u.avatar_for}` : ''}), refreshed weekly.`,
+                        `Ta photo Instagram (${u.avatar_for ? `@${u.avatar_for}` : ''}), mise à jour chaque semaine.`,
+                      )
+                    : t('Add your Instagram below to use its photo, or upload one.', 'Ajoute ton Instagram plus bas pour utiliser sa photo, ou téléverses-en une.')}
               </div>
             </div>
             <label>
-              Upload a photo instead (PNG, JPEG or WebP, up to {Math.round(maxUploadBytes / 1024 / 1024)} MB)
+              {t(
+                `Upload a photo instead (PNG, JPEG or WebP, up to ${mb} MB)`,
+                `Téléverser une photo à la place (PNG, JPEG ou WebP, jusqu’à ${mb} Mo)`,
+              )}
               <input type="file" name="photo" accept="image/png,image/jpeg,image/webp" />
             </label>
             {(u.avatar_source === 'upload' || u.avatar_source === 'admin') && (
               <label class="check">
-                <input type="checkbox" name="use_instagram_photo" value="1" /> Remove my photo and use my Instagram one
+                <input type="checkbox" name="use_instagram_photo" value="1" />{' '}
+                {t('Remove my photo and use my Instagram one', 'Retirer ma photo et utiliser celle d’Instagram')}
               </label>
             )}
             <div class="field-row">
               <label>
-                First name
+                {t('First name', 'Prénom')}
                 <input name="first_name" value={u.first_name ?? ''} autocomplete="given-name" maxlength={60} />
               </label>
               <label>
-                Last name
+                {t('Last name', 'Nom')}
                 <input name="last_name" value={u.last_name ?? ''} autocomplete="family-name" maxlength={60} />
               </label>
             </div>
             <label>
-              Phone
+              {t('Phone', 'Téléphone')}
               <input name="phone" type="tel" value={u.phone ?? ''} autocomplete="tel" maxlength={30} />
             </label>
             <label>
-              City or region
+              {t('City or region', 'Ville ou région')}
               <CityInput value={u.city} />
             </label>
             <label>
               Instagram
-              <input name="instagram" value={u.instagram ?? ''} placeholder="@yourname" maxlength={60} />
+              <input name="instagram" value={u.instagram ?? ''} placeholder={t('@yourname', '@tonnom')} maxlength={60} />
             </label>
             <label>
-              Promoter alias (in your links as aff=…; letters, numbers, - and _)
+              {t(
+                'Promoter alias (in your links as aff=…; letters, numbers, - and _)',
+                'Alias de promoteur (dans tes liens, sous la forme aff=…; lettres, chiffres, - et _)',
+              )}
               <input name="alias" value={u.alias ?? ''} pattern="[a-zA-Z0-9][a-zA-Z0-9_-]{1,29}" maxlength={30} required />
             </label>
           </div>
           <div class="card stack-card">
-            <h2 class="first">Payouts</h2>
+            <h2 class="first">{t('Payouts', 'Paiements')}</h2>
             <label>
-              Preferred payout method
+              {t('Preferred payout method', 'Mode de paiement préféré')}
               <select name="payout_method">
                 {config.payoutMethods.map((m) => (
                   <option value={m} selected={m === (u.payout_method ?? config.payoutMethods[0])}>
@@ -1287,23 +1491,32 @@ export function AccountPage(props: { user: User; error?: string; ok?: string }) 
               </select>
             </label>
             <label>
-              Payout email or account
+              {t('Payout email or account', 'Courriel ou compte pour les paiements')}
               <input name="payout_details" value={u.payout_details ?? ''} placeholder={u.email} maxlength={200} />
             </label>
-            <p class="muted">Used to fill in your payout requests. You can still change it per request.</p>
+            <p class="muted">
+              {t(
+                'Used to fill in your payout requests. You can still change it per request.',
+                'Sert à remplir tes demandes de paiement. Tu peux quand même le changer à chaque demande.',
+              )}
+            </p>
 
-            <h2>Appearance</h2>
-            <div class="theme-choice" role="radiogroup" aria-label="Theme">
-              {(['system', 'light', 'dark'] as const).map((t) => (
+            <h2>{t('Appearance', 'Apparence')}</h2>
+            <div class="theme-choice" role="radiogroup" aria-label={t('Theme', 'Thème')}>
+              {(['system', 'light', 'dark'] as const).map((th) => (
                 <label class="check">
-                  <input type="radio" name="theme" value={t} checked={theme === t} />
-                  {t === 'system' ? 'Same as my device' : t === 'light' ? 'Light' : 'Dark'}
+                  <input type="radio" name="theme" value={th} checked={theme === th} />
+                  {th === 'system'
+                    ? t('Same as my device', 'Comme mon appareil')
+                    : th === 'light'
+                      ? t('Light', 'Clair')
+                      : t('Dark', 'Sombre')}
                 </label>
               ))}
             </div>
           </div>
         </div>
-        <button type="submit">Save</button>
+        <button type="submit">{t('Save', 'Enregistrer')}</button>
       </form>
 
       <InstallSteps />
@@ -1316,17 +1529,17 @@ export function AccountPage(props: { user: User; error?: string; ok?: string }) 
 function PasswordForm() {
   return (
     <>
-      <h2>Change password</h2>
+      <h2>{t('Change password', 'Changer de mot de passe')}</h2>
       <form class="stack" method="post" action="/account/password">
         <label>
-          Current password
+          {t('Current password', 'Mot de passe actuel')}
           <input type="password" name="current" autocomplete="current-password" required />
         </label>
         <label>
-          New password (at least 10 characters)
+          {t('New password (at least 10 characters)', 'Nouveau mot de passe (au moins 10 caractères)')}
           <input type="password" name="password" autocomplete="new-password" minlength={10} required />
         </label>
-        <button type="submit">Update password</button>
+        <button type="submit">{t('Update password', 'Mettre à jour le mot de passe')}</button>
       </form>
     </>
   );
@@ -2358,10 +2571,10 @@ export function AdminBrandingPage(props: { user: User; error?: string; ok?: stri
 function timeLabel(sqliteUtc: string): string {
   const date = new Date(`${sqliteUtc.replace(' ', 'T')}Z`);
   const minutes = Math.round((Date.now() - date.getTime()) / 60000);
-  if (minutes < 1) return 'just now';
-  if (minutes < 60) return `${minutes} min ago`;
-  if (minutes < 24 * 60) return `${Math.round(minutes / 60)} h ago`;
-  return new Intl.DateTimeFormat('en-CA', { dateStyle: 'medium', timeZone: config.timezone }).format(date);
+  if (minutes < 1) return t('just now', 'à l’instant');
+  if (minutes < 60) return t(`${minutes} min ago`, `il y a ${minutes} min`);
+  if (minutes < 24 * 60) return t(`${Math.round(minutes / 60)} h ago`, `il y a ${Math.round(minutes / 60)} h`);
+  return new Intl.DateTimeFormat(locale(), { dateStyle: 'medium', timeZone: config.timezone }).format(date);
 }
 
 // Admins choose, per alert, email and/or app notification (the bell and phone push). Both off = off.
@@ -2424,42 +2637,56 @@ export function NotificationsPage(props: {
       {props.prefs && <AlertSettings prefs={props.prefs} />}
       <div class="card push-box" data-push-key={props.pushKey}>
         <div>
-          <strong>Phone notifications</strong>
+          <strong>{t('Phone notifications', 'Notifications sur le téléphone')}</strong>
           <div class="muted" data-push-status>
-            Get a notification on this device for payouts, rewards and milestones. On iPhone, add the app to your Home
-            Screen first (Share → Add to Home Screen) and open it from there.
+            {t(
+              'Get a notification on this device for payouts, rewards and milestones. On iPhone, add the app to your Home Screen first (Share → Add to Home Screen) and open it from there.',
+              'Reçois une notification sur cet appareil pour tes paiements, tes récompenses et tes étapes atteintes. Sur iPhone, ajoute d’abord l’app à ton écran d’accueil (Partager → Sur l’écran d’accueil) et ouvre-la à partir de là.',
+            )}
           </div>
         </div>
         <div class="push-actions">
           <button type="button" data-push-toggle hidden>
-            Turn on
+            {t('Turn on', 'Activer')}
           </button>
           <form class="inline" method="post" action="/notifications/test">
             <button class="secondary" type="submit">
-              Send a test
+              {t('Send a test', 'Envoyer un test')}
             </button>
           </form>
         </div>
         <p class="muted push-devices">
           {props.devices === 0
-            ? 'No device has phone notifications on yet.'
-            : `Phone notifications are on for ${props.devices === 1 ? '1 device' : `${props.devices} devices`}.`}
+            ? t('No device has phone notifications on yet.', 'Aucun appareil n’a encore les notifications activées.')
+            : t(
+                `Phone notifications are on for ${props.devices === 1 ? '1 device' : `${props.devices} devices`}.`,
+                `Les notifications sont activées sur ${plural(props.devices, ['appareil', 'appareil'], ['appareils', 'appareils'])}.`,
+              )}
         </p>
       </div>
       {props.notifications.length > 0 && (
         <div class="notification-head">
-          <h2>{unread > 0 ? `${unread} unread` : 'All read'}</h2>
+          <h2>
+            {unread > 0
+              ? t(`${unread} unread`, `${unread} non ${unread > 1 ? 'lues' : 'lue'}`)
+              : t('All read', 'Tout est lu')}
+          </h2>
           {unread > 0 && (
             <form class="inline" method="post" action="/notifications/read">
               <button class="secondary" type="submit">
-                Mark all as read
+                {t('Mark all as read', 'Tout marquer comme lu')}
               </button>
             </form>
           )}
         </div>
       )}
       {props.notifications.length === 0 ? (
-        <p class="muted">Nothing yet. Payouts, rewards and milestones will show up here.</p>
+        <p class="muted">
+          {t(
+            'Nothing yet. Payouts, rewards and milestones will show up here.',
+            'Rien pour l’instant. Tes paiements, tes récompenses et tes étapes atteintes vont apparaître ici.',
+          )}
+        </p>
       ) : (
         <div class="notification-list">
           {props.notifications.map((n) => (
@@ -2490,9 +2717,15 @@ export function AdminEmailsPage(props: { user: User; log: EmailLogEntry[]; ok?: 
             <a class="card template-item" href={`/admin/emails/${type}`}>
               <span>
                 <strong>{definitions[type].label}</strong>
-                <span class="muted"> · to {definitions[type].audience.toLowerCase()}</span>
+                <span class="muted">
+                  {' '}
+                  · to {definitions[type].audience.toLowerCase()}
+                  {languagesOf(type).length > 1 ? ' · English and French' : ''}
+                </span>
               </span>
-              <span class={`badge${isCustomized(type) ? ' edited' : ''}`}>{isCustomized(type) ? 'Edited' : 'Default'}</span>
+              <span class={`badge${isCustomized(type) || isCustomized(type, 'fr') ? ' edited' : ''}`}>
+                {isCustomized(type) || isCustomized(type, 'fr') ? 'Edited' : 'Default'}
+              </span>
             </a>
           ))}
         </div>
@@ -2541,19 +2774,35 @@ export function AdminEmailsPage(props: { user: User; log: EmailLogEntry[]; ok?: 
   );
 }
 
-export function AdminEmailEditPage(props: { user: User; type: EmailType; version: string; ok?: string; error?: string }) {
+export function AdminEmailEditPage(props: { user: User; type: EmailType; lang: Lang; version: string; ok?: string; error?: string }) {
   const def = definitions[props.type];
-  const t = getTemplate(props.type);
+  const t = getTemplate(props.type, props.lang);
+  const both = languagesOf(props.type).length > 1;
+  const href = (l: Lang) => `/admin/emails/${props.type}${l === 'fr' ? '?lang=fr' : ''}`;
   return (
     <Layout title={def.label} user={props.user}>
       <p class="muted">
         <a href="/admin/emails">Emails</a> / {def.label}
       </p>
       <h1>{def.label}</h1>
-      <p class="muted">Sent to {def.audience.toLowerCase()}.</p>
+      <p class="muted">
+        Sent to {def.audience.toLowerCase()}
+        {both ? ', in French to those whose browser is in French, in English to everyone else.' : '.'}
+      </p>
+      {both && (
+        <nav class="tabs" aria-label="Language">
+          <a href={href('en')} aria-current={props.lang === 'en' ? 'page' : undefined}>
+            English
+          </a>
+          <a href={href('fr')} aria-current={props.lang === 'fr' ? 'page' : undefined}>
+            Français
+          </a>
+        </nav>
+      )}
       <Flash ok={props.ok} error={props.error} />
       <div class="email-editor">
-        <form class="card stack-card" method="post" action={`/admin/emails/${props.type}`}>
+        <form class="card stack-card" method="post" action={`/admin/emails/${props.type}`} lang={props.lang}>
+          <input type="hidden" name="lang" value={props.lang} />
           <label>
             Subject
             <input name="subject" value={t.subject} maxlength={200} required />
@@ -2585,7 +2834,7 @@ export function AdminEmailEditPage(props: { user: User; type: EmailType; version
             <button class="secondary" type="submit" name="action" value="test">
               Save and send me a test
             </button>
-            {isCustomized(props.type) && (
+            {isCustomized(props.type, props.lang) && (
               <button class="link" type="submit" name="action" value="reset" formnovalidate>
                 Reset to default
               </button>
@@ -2596,7 +2845,7 @@ export function AdminEmailEditPage(props: { user: User; type: EmailType; version
           <p class="muted">Preview with sample details:</p>
           <iframe
             class="email-preview"
-            src={`/admin/emails/${props.type}/preview?v=${props.version}`}
+            src={`/admin/emails/${props.type}/preview?v=${props.version}${props.lang === 'fr' ? '&lang=fr' : ''}`}
             sandbox="allow-same-origin"
             title="Email preview"
           ></iframe>
@@ -2610,7 +2859,14 @@ const WELCOME_STEPS = 4;
 
 function Steps(props: { at: number }) {
   return (
-    <div class="steps" role="progressbar" aria-valuemin={1} aria-valuemax={WELCOME_STEPS} aria-valuenow={props.at} aria-label={`Step ${props.at} of ${WELCOME_STEPS}`}>
+    <div
+      class="steps"
+      role="progressbar"
+      aria-valuemin={1}
+      aria-valuemax={WELCOME_STEPS}
+      aria-valuenow={props.at}
+      aria-label={t(`Step ${props.at} of ${WELCOME_STEPS}`, `Étape ${props.at} sur ${WELCOME_STEPS}`)}
+    >
       {Array.from({ length: WELCOME_STEPS }, (_, i) => (
         <span class={i < props.at ? 'done' : ''} />
       ))}
@@ -2622,7 +2878,7 @@ function SkipForm() {
   return (
     <form class="inline" method="post" action="/welcome/done">
       <button class="link" type="submit">
-        Skip for now
+        {t('Skip for now', 'Passer pour l’instant')}
       </button>
     </form>
   );
@@ -2641,47 +2897,63 @@ export function WelcomePage(props: {
   const rules = rewardRules();
   const levels = rules.levels;
   const first = u.first_name || u.name.split(' ')[0];
+  const fr = lang() === 'fr';
+  const mb = Math.round(maxUploadBytes / 1024 / 1024);
   return (
-    <Layout title="Welcome" user={u} hideInstallBanner>
+    <Layout title={t('Welcome', 'Bienvenue')} user={u} hideInstallBanner>
       <div class="welcome">
         <Steps at={props.step} />
         {props.step === 1 && (
           <>
             <div class="welcome-hero">
               <Avatar user={u} size="large" />
-              <h1>Welcome to {brand.name}, {first}</h1>
-              <p class="muted">Two minutes to get you set up. Here is how it works.</p>
+              <h1>{t(`Welcome to ${brand.name}, ${first}`, `Bienvenue chez ${brand.name}, ${first}`)}</h1>
+              <p class="muted">
+                {t('Two minutes to get you set up. Here is how it works.', 'Deux minutes pour te préparer. Voici comment ça marche.')}
+              </p>
             </div>
             <div class="how">
               <div class="card">
                 <span class="num">1</span>
                 <div>
-                  <strong>Share your promo codes</strong>
+                  <strong>{t('Share your promo codes', 'Partage tes codes promo')}</strong>
                   <div class="muted">
-                    Every ticket bought with{' '}
-                    {props.codes.length ? props.codes.map((c) => <span class="code">{c}</span>) : 'your codes'} counts for you,
-                    on every event, live.
+                    {t('Every ticket bought with', 'Chaque billet acheté avec')}{' '}
+                    {props.codes.length ? props.codes.map((c) => <span class="code">{c}</span>) : t('your codes', 'tes codes')}{' '}
+                    {t('counts for you, on every event, live.', 'compte pour toi, pour chaque événement, en direct.')}
                   </div>
                 </div>
               </div>
               <div class="card">
                 <span class="num">2</span>
                 <div>
-                  <strong>Earn commission</strong>
+                  <strong>{t('Earn commission', 'Gagne une commission')}</strong>
                   <div class="muted">
-                    On every ticket sold with your codes, set by the team for each event. Request a payout whenever you
-                    like.
+                    {t(
+                      'On every ticket sold with your codes, set by the team for each event. Request a payout whenever you like.',
+                      'Sur chaque billet vendu avec tes codes, fixée par l’équipe pour chaque événement. Demande ton paiement quand tu veux.',
+                    )}
                   </div>
                 </div>
               </div>
               <div class="card">
                 <span class="num">3</span>
                 <div>
-                  <strong>Unlock rewards and levels</strong>
+                  <strong>{t('Unlock rewards and levels', 'Débloque des récompenses et des niveaux')}</strong>
                   <div class="muted">
-                    {trackOn(rules.tickets) && <>Free tickets for each event: {describeTrack(rules.tickets, 'ticket').replace(/^./, (c) => c.toLowerCase())} </>}
-                    {trackOn(rules.merch) && <>Merch: {describeTrack(rules.merch, 'merch').replace(/^./, (c) => c.toLowerCase())} </>}
-                    {levels.length > 1 && <>Climb from {levels[0]!.name} to {levels.at(-1)!.name}.</>}
+                    {trackOn(rules.tickets) && (
+                      <>
+                        {t('Free tickets for each event:', 'Billets gratuits pour chaque événement :')}{' '}
+                        {describeTrack(rules.tickets, 'ticket').replace(/^./, (c) => c.toLowerCase())}{' '}
+                      </>
+                    )}
+                    {trackOn(rules.merch) && (
+                      <>
+                        {t('Merch:', 'Marchandise :')} {describeTrack(rules.merch, 'merch').replace(/^./, (c) => c.toLowerCase())}{' '}
+                      </>
+                    )}
+                    {levels.length > 1 &&
+                      t(`Climb from ${levels[0]!.name} to ${levels.at(-1)!.name}.`, `Monte de ${levels[0]!.name} jusqu’à ${levels.at(-1)!.name}.`)}
                   </div>
                 </div>
               </div>
@@ -2689,40 +2961,45 @@ export function WelcomePage(props: {
             <div class="welcome-actions">
               <SkipForm />
               <a class="button" href="/welcome?step=2">
-                Next
+                {t('Next', 'Suivant')}
               </a>
             </div>
           </>
         )}
         {props.step === 2 && (
           <>
-            <h1>About you</h1>
-            <p class="muted">So the team knows who you are and how to pay you. You can change this later in Account.</p>
+            <h1>{t('About you', 'À propos de toi')}</h1>
+            <p class="muted">
+              {t(
+                'So the team knows who you are and how to pay you. You can change this later in Account.',
+                'Pour que l’équipe sache qui tu es et comment te payer. Tu pourras changer ça plus tard dans Compte.',
+              )}
+            </p>
             <form class="card stack-card" method="post" action="/welcome/profile">
               <div class="field-row">
                 <label>
-                  First name
+                  {t('First name', 'Prénom')}
                   <input name="first_name" value={u.first_name ?? ''} autocomplete="given-name" maxlength={60} required />
                 </label>
                 <label>
-                  Last name
+                  {t('Last name', 'Nom')}
                   <input name="last_name" value={u.last_name ?? ''} autocomplete="family-name" maxlength={60} />
                 </label>
               </div>
               <label>
-                Phone
+                {t('Phone', 'Téléphone')}
                 <input name="phone" type="tel" value={u.phone ?? ''} autocomplete="tel" maxlength={30} />
               </label>
               <label>
-                City or region
+                {t('City or region', 'Ville ou région')}
                 <CityInput value={u.city} />
               </label>
               <label>
-                Instagram (its photo becomes your profile picture)
-                <input name="instagram" value={u.instagram ?? ''} placeholder="@yourname" maxlength={60} />
+                {t('Instagram (its photo becomes your profile picture)', 'Instagram (sa photo devient ta photo de profil)')}
+                <input name="instagram" value={u.instagram ?? ''} placeholder={t('@yourname', '@tonnom')} maxlength={60} />
               </label>
               <label>
-                How should we pay you?
+                {t('How should we pay you?', 'Comment veux-tu recevoir tes paiements ?')}
                 <select name="payout_method">
                   {config.payoutMethods.map((m) => (
                     <option value={m} selected={m === (u.payout_method ?? config.payoutMethods[0])}>
@@ -2732,65 +3009,77 @@ export function WelcomePage(props: {
                 </select>
               </label>
               <label>
-                Payout email (for e-Transfer)
+                {t('Payout email (for e-Transfer)', 'Courriel pour les paiements (pour le virement Interac)')}
                 <input name="payout_details" type="email" value={u.payout_details ?? u.email} maxlength={200} />
               </label>
               <div class="welcome-actions">
-                <a href="/welcome?step=1">Back</a>
-                <button type="submit">Next</button>
+                <a href="/welcome?step=1">{t('Back', 'Retour')}</a>
+                <button type="submit">{t('Next', 'Suivant')}</button>
               </div>
             </form>
           </>
         )}
         {props.step === 3 && (
           <>
-            <h1>Your photo</h1>
-            <p class="muted">It shows on your public page and to the team. A clear photo of your face works best.</p>
+            <h1>{t('Your photo', 'Ta photo')}</h1>
+            <p class="muted">
+              {t(
+                'It shows on your public page and to the team. A clear photo of your face works best.',
+                'Elle s’affiche sur ta page publique et pour l’équipe. Une photo claire de ton visage, c’est l’idéal.',
+              )}
+            </p>
             <Flash error={props.error} />
             <form class="card stack-card" method="post" action="/welcome/photo" enctype="multipart/form-data">
               <div class="photo-row">
                 <Avatar user={u} size="large" />
                 <div class="muted">
                   {!hasPhoto
-                    ? 'No photo yet.'
+                    ? t('No photo yet.', 'Pas encore de photo.')
                     : u.avatar_source === 'instagram'
-                      ? 'This is your Instagram photo. Upload another one if you prefer.'
-                      : 'Looking good. Upload another one to change it.'}
+                      ? t('This is your Instagram photo. Upload another one if you prefer.', 'C’est ta photo Instagram. Téléverses-en une autre si tu préfères.')
+                      : t('Looking good. Upload another one to change it.', 'Belle photo! Téléverses-en une autre pour la changer.')}
                 </div>
               </div>
               <label>
-                {hasPhoto ? 'Upload another photo' : 'Upload a photo'} (PNG, JPEG or WebP, up to {Math.round(maxUploadBytes / 1024 / 1024)} MB)
+                {fr
+                  ? `${hasPhoto ? 'Téléverser une autre photo' : 'Téléverser une photo'} (PNG, JPEG ou WebP, jusqu’à ${mb} Mo)`
+                  : `${hasPhoto ? 'Upload another photo' : 'Upload a photo'} (PNG, JPEG or WebP, up to ${mb} MB)`}
                 <input type="file" name="photo" accept="image/png,image/jpeg,image/webp" required={!hasPhoto} />
               </label>
               <div class="welcome-actions">
-                <a href="/welcome?step=2">Back</a>
-                {!hasPhoto && <a href="/welcome?step=4">Skip for now</a>}
-                <button type="submit">{hasPhoto ? 'Next' : 'Save my photo'}</button>
+                <a href="/welcome?step=2">{t('Back', 'Retour')}</a>
+                {!hasPhoto && <a href="/welcome?step=4">{t('Skip for now', 'Passer pour l’instant')}</a>}
+                <button type="submit">{hasPhoto ? t('Next', 'Suivant') : t('Save my photo', 'Enregistrer ma photo')}</button>
               </div>
             </form>
           </>
         )}
         {props.step === 4 && (
           <>
-            <h1>Get the app</h1>
-            <p class="muted">Install it on your phone and turn on notifications to hear about every payout, reward and milestone.</p>
+            <h1>{t('Get the app', 'Installe l’app')}</h1>
+            <p class="muted">
+              {t(
+                'Install it on your phone and turn on notifications to hear about every payout, reward and milestone.',
+                'Installe-la sur ton téléphone et active les notifications pour être au courant de chaque paiement, récompense et étape atteinte.',
+              )}
+            </p>
             <InstallSteps />
             <div class="card push-box" data-push-key={props.pushKey}>
               <div>
                 <strong>Notifications</strong>
                 <div class="muted" data-push-status>
-                  On iPhone, do this from the app on your Home Screen.
+                  {t('On iPhone, do this from the app on your Home Screen.', 'Sur iPhone, fais-le à partir de l’app sur ton écran d’accueil.')}
                 </div>
               </div>
               <div class="push-actions">
                 <button type="button" data-push-toggle hidden>
-                  Turn on
+                  {t('Turn on', 'Activer')}
                 </button>
               </div>
             </div>
             <form class="welcome-actions" method="post" action="/welcome/done">
-              <a href="/welcome?step=3">Back</a>
-              <button type="submit">Go to my dashboard</button>
+              <a href="/welcome?step=3">{t('Back', 'Retour')}</a>
+              <button type="submit">{t('Go to my dashboard', 'Aller à mon tableau de bord')}</button>
             </form>
           </>
         )}
@@ -3167,18 +3456,18 @@ function BoardTable(props: {
         <thead>
           <tr>
             <th>#</th>
-            <th>Promoter</th>
+            <th>{t('Promoter', 'Promoteur')}</th>
             <th class="num">
-              <a href={sortHref('tickets')} aria-current={sort === 'tickets' ? 'true' : undefined}>Tickets</a>
+              <a href={sortHref('tickets')} aria-current={sort === 'tickets' ? 'true' : undefined}>{t('Tickets', 'Billets')}</a>
             </th>
             <th class="num">
-              <a href={sortHref('sales')} aria-current={sort === 'sales' ? 'true' : undefined}>Sales</a>
+              <a href={sortHref('sales')} aria-current={sort === 'sales' ? 'true' : undefined}>{t('Sales', 'Ventes')}</a>
             </th>
             <th class="num">
-              <a href={sortHref('commission')} aria-current={sort === 'commission' ? 'true' : undefined}>Commission</a>
+              <a href={sortHref('commission')} aria-current={sort === 'commission' ? 'true' : undefined}>{t('Commission', 'Commission')}</a>
             </th>
-            {props.owed && <th class="num">Owed</th>}
-            <th>Last sale</th>
+            {props.owed && <th class="num">{t('Owed', 'Dû')}</th>}
+            <th>{t('Last sale', 'Dernière vente')}</th>
           </tr>
         </thead>
         <tbody>
@@ -3193,7 +3482,7 @@ function BoardTable(props: {
                       <span>
                         {e.user.name}
                         <LevelBadge level={e.level} tiny />
-                        {e.user.id === props.leadId && <span class="lead-tag">Team lead</span>}
+                        {e.user.id === props.leadId && <span class="lead-tag">{t('Team lead', 'Chef d’équipe')}</span>}
                       </span>
                     </>
                   );
@@ -3210,7 +3499,7 @@ function BoardTable(props: {
               <td class="num">{formatMoney(e.fullPrice, cur)}</td>
               <td class="num">{formatMoney(e.commission, cur)}</td>
               {props.owed && <td class="num">{formatMoney(e.owed, cur)}</td>}
-              <td class="muted">{e.lastSale ?? 'No sales yet'}</td>
+              <td class="muted">{e.lastSale ?? t('No sales yet', 'Aucune vente encore')}</td>
             </tr>
           ))}
         </tbody>
@@ -3231,7 +3520,7 @@ export function CityInput(props: { value: string | null | undefined }) {
       value={props.value ?? ''}
       autocomplete="off"
       maxlength={80}
-      placeholder="Montréal, QC"
+      placeholder={t('Montréal, QC', 'Montréal (QC)')}
       data-places={`/places.json?v=${placesVersion}`}
     />
   );
@@ -3252,7 +3541,8 @@ const tiers = [
 export function PromoterMapCard(props: { title: string; users: User[]; promoterHref: (u: User) => string }) {
   const map = promoterMap(props.users);
   const onMap = map.points.reduce((n, p) => n + p.users.length, 0);
-  const plural = (n: number) => (n === 1 ? '1 promoter' : `${n} promoters`);
+  const promoters = (n: number) => plural(n, ['promoter', 'promoteur'], ['promoters', 'promoteurs']);
+  const places = (n: number) => plural(n, ['place', 'endroit'], ['places', 'endroits']);
   // What the map needs: the place, and its promoters' names and links (relative to the app).
   const data = map.points.map((p) => ({ label: p.label, lat: p.lat, lng: p.lng, people: p.users.map((u) => ({ name: u.name, href: props.promoterHref(u) })) }));
   const people = (users: User[]) => (
@@ -3278,21 +3568,29 @@ export function PromoterMapCard(props: { title: string; users: User[]; promoterH
               class="promoter-map"
               data-promoter-map={JSON.stringify(data)}
               role="img"
-              aria-label={`Map of ${plural(onMap)} in ${map.points.length} ${map.points.length === 1 ? 'place' : 'places'}. The places are listed below.`}
+              aria-label={t(
+                `Map of ${promoters(onMap)} in ${places(map.points.length)}. The places are listed below.`,
+                `Carte de ${promoters(onMap)} dans ${places(map.points.length)}. Les endroits sont listés plus bas.`,
+              )}
             />
             <script src={`/vendor/leaflet.js?v=${vendorVersion}`} defer />
             <script src={`/vendor/leaflet-heat.js?v=${vendorVersion}`} defer />
             <script src="/map.js" defer />
-            <ul class="map-legend" aria-label="Promoters per place">
-              <li>Promoters per place:</li>
-              {tiers.map((t) => (
+            <ul class="map-legend" aria-label={t('Promoters per place', 'Promoteurs par endroit')}>
+              <li>{t('Promoters per place:', 'Promoteurs par endroit :')}</li>
+              {tiers.map((tier) => (
                 <li>
-                  <span class={`map-pin tier-${t.tier}`} aria-hidden="true" />
-                  {t.label}
+                  <span class={`map-pin tier-${tier.tier}`} aria-hidden="true" />
+                  {tier.label}
                 </li>
               ))}
             </ul>
-            <p class="muted">Tap a place on the map, or open one below, to see its promoters. Nearby places share a pin when zoomed out.</p>
+            <p class="muted">
+              {t(
+                'Tap a place on the map, or open one below, to see its promoters. Nearby places share a pin when zoomed out.',
+                'Touche un endroit sur la carte, ou ouvre-en un plus bas, pour voir ses promoteurs. Les endroits proches partagent une épingle quand on dézoome.',
+              )}
+            </p>
             <div class="map-places">
               {map.points.map((p) => (
                 <details class="map-place" data-place={p.label}>
@@ -3306,22 +3604,22 @@ export function PromoterMapCard(props: { title: string; users: User[]; promoterH
             </div>
           </>
         ) : (
-          <p class="muted">No promoter has a city that can be put on the map yet.</p>
+          <p class="muted">{t('No promoter has a city that can be put on the map yet.', 'Aucun promoteur n’a encore une ville qu’on peut placer sur la carte.')}</p>
         )}
         {map.noCity.length > 0 && (
           <details class="map-place map-missing">
             <summary>
-              <span>No city yet</span>
+              <span>{t('No city yet', 'Pas encore de ville')}</span>
               <span class="map-count">{map.noCity.length}</span>
             </summary>
-            <p class="muted map-note">They are reminded on their dashboard.</p>
+            <p class="muted map-note">{t('They are reminded on their dashboard.', 'Un rappel s’affiche sur leur tableau de bord.')}</p>
             {people(map.noCity)}
           </details>
         )}
         {map.unknown.length > 0 && (
           <details class="map-place map-missing">
             <summary>
-              <span>City not found on the map</span>
+              <span>{t('City not found on the map', 'Ville introuvable sur la carte')}</span>
               <span class="map-count">{map.unknown.length}</span>
             </summary>
             <ul class="map-people">
@@ -3438,8 +3736,12 @@ export function AdminDashboardPage(props: { user: User; board: Leaderboard; team
 
 /** "Team commission (10% of $1,516.00)", "(team rule)" or "(10% of $1,516.00 + team rule)". */
 function teamLabel(percent: number, sales: number, rule: number, cur: string): string {
-  const parts = [percent > 0 ? `${formatPercent(percent)} of ${formatMoney(sales, cur)}` : '', rule > 0 ? 'team rule' : ''].filter(Boolean);
-  return parts.length ? `Team commission (${parts.join(' + ')})` : 'Team commission';
+  const parts = [
+    percent > 0 ? t(`${formatPercent(percent)} of ${formatMoney(sales, cur)}`, `${formatPercent(percent)} de ${formatMoney(sales, cur)}`) : '',
+    rule > 0 ? t('team rule', 'règle d’équipe') : '',
+  ].filter(Boolean);
+  const label = t('Team commission', 'Commission d’équipe');
+  return parts.length ? `${label} (${parts.join(' + ')})` : label;
 }
 
 // A team's sales, team lead included. Three views: the team lead's on /team (with their team
@@ -3462,7 +3764,7 @@ export function TeamPage(props: {
   const self = mode === 'lead';
   const mine = mode !== 'admin';
   const sortHref = (s: Sort) => `${props.basePath}?range=${range}&sort=${s}`;
-  const rangeLabel = range === 'all' ? 'all time' : `last ${range} days`;
+  const rangeLabel = range === 'all' ? t('all time', 'depuis le début') : t(`last ${range} days`, `${range} derniers jours`);
   const ranked = new Set(board.entries.map((e) => e.user.id));
   const notSelling = props.members.filter((m) => !ranked.has(m.id));
   const percent = teamCommissionPercentFor(props.lead);
@@ -3470,34 +3772,39 @@ export function TeamPage(props: {
   const href = props.memberHref ? (u: User) => (u.id === props.lead.id && self ? '/' : props.memberHref!(u)) : undefined;
   const yours = board.entries.find((e) => e.user.id === props.user.id) ?? { tickets: 0, fullPrice: 0 };
   const intro = {
-    lead: 'Sales by your team, you included',
-    member: `Sales by your team, ${props.lead.name} (your team lead) and you included`,
+    lead: t('Sales by your team, you included', 'Ventes de ton équipe, incluant les tiennes'),
+    member: t(
+      `Sales by your team, ${props.lead.name} (your team lead) and you included`,
+      `Ventes de ton équipe, incluant celles de ${props.lead.name} (ton chef d’équipe) et les tiennes`,
+    ),
     admin: `Sales by ${props.lead.name}'s team, ${props.lead.name} included`,
   }[mode];
+  const myTeam = t('My team', 'Mon équipe');
   return (
-    <Layout title={mine ? 'My team' : `${props.lead.name}'s team`} user={props.user}>
+    <Layout title={mine ? myTeam : `${props.lead.name}'s team`} user={props.user}>
       {!mine && (
         <p class="muted">
           <a href="/admin/teams">Teams</a> / {props.lead.name}
         </p>
       )}
       <div class="dash-head">
-        <h1>{mine ? 'My team' : `${props.lead.name}'s team`}</h1>
+        <h1>{mine ? myTeam : `${props.lead.name}'s team`}</h1>
         <RangeLinks current={range} basePath={props.basePath} />
       </div>
       <p class="muted">
-        {intro}, {rangeLabel}.{self && ' Payouts and rewards stay with each promoter and the admins.'}
+        {intro}, {rangeLabel}.
+        {self && t(' Payouts and rewards stay with each promoter and the admins.', ' Les paiements et les récompenses restent entre chaque promoteur et les admins.')}
       </p>
       {self && (
         <p>
-          <a href="/team/invites">Invite promoters to your team →</a>
+          <a href="/team/invites">{t('Invite promoters to your team →', 'Inviter des promoteurs dans ton équipe →')}</a>
         </p>
       )}
       <div class="grid">
         {mode === 'member' ? (
           <div class="card stat highlight">
             <div class="value">{yours.tickets}</div>
-            <div class="label">Tickets sold by you</div>
+            <div class="label">{t('Tickets sold by you', 'Billets vendus par toi')}</div>
           </div>
         ) : (
           <div class="card stat highlight">
@@ -3509,33 +3816,45 @@ export function TeamPage(props: {
         )}
         <div class="card stat">
           <div class="value">{board.totals.tickets}</div>
-          <div class="label">Tickets sold by the team</div>
+          <div class="label">{t('Tickets sold by the team', 'Billets vendus par l’équipe')}</div>
         </div>
         <div class="card stat">
           <div class="value">{formatMoney(board.totals.fullPrice, cur)}</div>
-          <div class="label">Sales at full price</div>
+          <div class="label">{t('Sales at full price', 'Ventes au plein prix')}</div>
         </div>
         {mode === 'member' && (
           <div class="card stat">
             <div class="value">{formatMoney(yours.fullPrice, cur)}</div>
-            <div class="label">Your sales at full price</div>
+            <div class="label">{t('Your sales at full price', 'Tes ventes au plein prix')}</div>
           </div>
         )}
         <div class="card stat">
           <div class="value">{props.members.length}</div>
-          <div class="label">{props.members.length === 1 ? 'Promoter' : 'Promoters'} on the team</div>
+          <div class="label">
+            {t(
+              `${props.members.length === 1 ? 'Promoter' : 'Promoters'} on the team`,
+              `${props.members.length < 2 ? 'Promoteur' : 'Promoteurs'} dans l’équipe`,
+            )}
+          </div>
         </div>
       </div>
       {mode !== 'member' && (
         <p class="muted">
           {percent > 0
-            ? `The team commission is ${formatPercent(percent)} of the full-price sales of ${self ? 'your' : `${props.lead.name}'s`} promoters, from the day each joined the team, on top of what they earn. ${self ? 'Your own sales earn your own commission.' : 'Their own sales earn their own commission.'} It is part of ${self ? 'your' : 'their'} balance on Payouts.`
-            : `No team commission is set${self ? ' for you yet' : ''}.${self ? '' : ' Set it on Teams.'}`}
+            ? self
+              ? t(
+                  `The team commission is ${formatPercent(percent)} of the full-price sales of your promoters, from the day each joined the team, on top of what they earn. Your own sales earn your own commission. It is part of your balance on Payouts.`,
+                  `La commission d’équipe est de ${formatPercent(percent)} des ventes au plein prix de tes promoteurs, à partir du jour où chacun s’est joint à l’équipe, en plus de ce qu’ils gagnent. Tes propres ventes te rapportent ta propre commission. Elle fait partie de ton solde dans Paiements.`,
+                )
+              : `The team commission is ${formatPercent(percent)} of the full-price sales of ${props.lead.name}'s promoters, from the day each joined the team, on top of what they earn. Their own sales earn their own commission. It is part of their balance on Payouts.`
+            : self
+              ? t('No team commission is set for you yet.', 'Aucune commission d’équipe n’est encore fixée pour toi.')
+              : 'No team commission is set. Set it on Teams.'}
         </p>
       )}
 
       <SalesChart
-        title="Tickets sold per day"
+        title={t('Tickets sold per day', 'Billets vendus par jour')}
         daily={board.daily}
         percent={100}
         range={range}
@@ -3544,9 +3863,13 @@ export function TeamPage(props: {
         ticketsOnly={mode === 'member'}
       />
 
-      {mode !== 'member' && <h2>{mine ? 'Your team' : 'The team'}</h2>}
+      {mode !== 'member' && <h2>{mine ? t('Your team', 'Ton équipe') : 'The team'}</h2>}
       {props.members.length === 0 && mode !== 'member' && (
-        <p class="muted">{self ? 'No promoters on your team yet. An admin adds them.' : 'No promoters on this team yet.'}</p>
+        <p class="muted">
+          {self
+            ? t('No promoters on your team yet. An admin adds them.', 'Pas encore de promoteurs dans ton équipe. Un admin les ajoute.')
+            : 'No promoters on this team yet.'}
+        </p>
       )}
       {/* A promoter sees the team's totals, not who else is on it or what they sold: that is for the team lead. */}
       {mode !== 'member' && board.entries.length > 0 && (
@@ -3560,7 +3883,7 @@ export function TeamPage(props: {
       )}
       {mode !== 'member' && notSelling.length > 0 && (
         <p class="muted">
-          No codes yet:{' '}
+          {t('No codes yet:', 'Pas encore de codes :')}{' '}
           {notSelling.map((m, i) => (
             <>
               {i > 0 && ', '}
@@ -3570,7 +3893,7 @@ export function TeamPage(props: {
         </p>
       )}
       {mode !== 'member' && href && (
-        <PromoterMapCard title={mine ? 'Where your team is' : 'Where the team is'} users={[props.lead, ...props.members]} promoterHref={href} />
+        <PromoterMapCard title={mine ? t('Where your team is', 'Où est ton équipe') : 'Where the team is'} users={[props.lead, ...props.members]} promoterHref={href} />
       )}
     </Layout>
   );
@@ -3624,27 +3947,30 @@ export function InvitesPage(props: {
 }) {
   const admin = !!props.user.is_admin;
   const base = admin ? '/admin/invites' : '/team/invites';
-  const state = { open: 'Working', off: 'Turned off', expired: 'Expired', full: 'Full' } as const;
-  const day = (epoch: number) => new Intl.DateTimeFormat('en-CA', { dateStyle: 'medium', timeZone: config.timezone }).format(new Date(epoch * 1000));
+  const state = { open: t('Working', 'Actif'), off: t('Turned off', 'Désactivé'), expired: t('Expired', 'Expiré'), full: t('Full', 'Complet') } as const;
+  const day = (epoch: number) => new Intl.DateTimeFormat(locale(), { dateStyle: 'medium', timeZone: config.timezone }).format(new Date(epoch * 1000));
   return (
-    <Layout title="Invite links" user={props.user}>
+    <Layout title={t('Invite links', 'Liens d’invitation')} user={props.user}>
       {!admin && (
         <p class="muted">
-          <a href="/team">My team</a> / Invite links
+          <a href="/team">{t('My team', 'Mon équipe')}</a> / {t('Invite links', 'Liens d’invitation')}
         </p>
       )}
-      <h1>Invite links</h1>
+      <h1>{t('Invite links', 'Liens d’invitation')}</h1>
       <p class="muted">
         {admin
           ? 'Share a link: whoever opens it enters their name and email, gets a sign-in link by email and becomes a promoter. You are told when someone joins, so you can give them their promo codes.'
-          : 'Share a link: whoever opens it enters their name and email, gets a sign-in link by email and joins your team. The admins give them their promo codes.'}
+          : t(
+              'Share a link: whoever opens it enters their name and email, gets a sign-in link by email and joins your team. The admins give them their promo codes.',
+              'Partage un lien : la personne qui l’ouvre entre son nom et son courriel, reçoit un lien de connexion par courriel et rejoint ton équipe. Les admins lui donnent ses codes promo.',
+            )}
       </p>
       <Flash error={props.error} ok={props.ok} />
 
       <form class="card stack-card invite-form" method="post" action={base}>
-        <h2 class="first">New invite link</h2>
+        <h2 class="first">{t('New invite link', 'Nouveau lien d’invitation')}</h2>
         <label>
-          Name (for you, like "Montreal street team")
+          {t('Name (for you, like "Montreal street team")', 'Nom (pour toi, comme « Équipe de rue Laval »)')}
           <input name="label" maxlength={80} required />
         </label>
         <div class="field-row">
@@ -3660,25 +3986,25 @@ export function InvitesPage(props: {
             </label>
           )}
           <label>
-            Works for
+            {t('Works for', 'Valide pendant')}
             <select name="days">
-              <option value="7">7 days</option>
-              <option value="1">1 day</option>
-              <option value="30">30 days</option>
-              <option value="">No end date</option>
+              <option value="7">{t('7 days', '7 jours')}</option>
+              <option value="1">{t('1 day', '1 jour')}</option>
+              <option value="30">{t('30 days', '30 jours')}</option>
+              <option value="">{t('No end date', 'Sans date de fin')}</option>
             </select>
           </label>
           <label>
-            Sign-ups (empty for no limit)
+            {t('Sign-ups (empty for no limit)', 'Inscriptions (vide pour aucune limite)')}
             <input name="max_uses" type="number" min="1" max="1000" step="1" />
           </label>
         </div>
-        <button type="submit">Create link</button>
+        <button type="submit">{t('Create link', 'Créer le lien')}</button>
       </form>
 
-      <h2>Links</h2>
+      <h2>{t('Links', 'Liens')}</h2>
       {props.invites.length === 0 ? (
-        <p class="muted">No invite links yet.</p>
+        <p class="muted">{t('No invite links yet.', 'Aucun lien d’invitation pour l’instant.')}</p>
       ) : (
         <div class="rows">
           {props.invites.map((i) => {
@@ -3690,17 +4016,19 @@ export function InvitesPage(props: {
                   <span class={`invite-state invite-${st}`}>{state[st]}</span>
                 </div>
                 <p class="muted invite-meta">
-                  {i.uses} {i.uses === 1 ? 'sign-up' : 'sign-ups'}
-                  {i.max_uses !== null ? ` of ${i.max_uses}` : ''}
-                  {i.expires_at ? ` · ${i.expires_at < Date.now() / 1000 ? 'ended' : 'works until'} ${day(i.expires_at)}` : ' · no end date'}
+                  {plural(i.uses, ['sign-up', 'inscription'], ['sign-ups', 'inscriptions'])}
+                  {i.max_uses !== null ? t(` of ${i.max_uses}`, ` sur ${i.max_uses}`) : ''}
+                  {i.expires_at
+                    ? ` · ${i.expires_at < Date.now() / 1000 ? t('ended', 'terminé le') : t('works until', 'valide jusqu’au')} ${day(i.expires_at)}`
+                    : t(' · no end date', ' · sans date de fin')}
                   {admin && (i.team_lead_id ? ` · ${props.names.get(i.team_lead_id) ?? 'a team lead'}'s team` : ' · no team')}
                   {admin && i.created_by && ` · made by ${props.names.get(i.created_by) ?? 'someone'}`}
                 </p>
-                {st === 'open' && <LinkField link={`${config.appUrl}/join/${i.token}`} label={`Join: ${i.label}`} />}
+                {st === 'open' && <LinkField link={`${config.appUrl}/join/${i.token}`} label={t(`Join: ${i.label}`, `Rejoindre : ${i.label}`)} />}
                 {(st === 'open' || st === 'off') && (
                   <form method="post" action={`${base}/${i.id}/${st === 'off' ? 'on' : 'off'}`}>
                     <button class="link" type="submit">
-                      {st === 'off' ? 'Turn back on' : 'Turn off'}
+                      {st === 'off' ? t('Turn back on', 'Réactiver') : t('Turn off', 'Désactiver')}
                     </button>
                   </form>
                 )}
@@ -3718,48 +4046,57 @@ export function JoinPage(props: { invite: InviteLink | null; team?: string | nul
   const brand = getBrand();
   const st = props.invite ? inviteState(props.invite) : null;
   return (
-    <Layout title="Join">
+    <Layout title={t('Join', 'Rejoindre')}>
       <div class="login card">
         <h1 class="login-brand">
           <BrandMark brand={brand} />
         </h1>
         {!props.invite || st !== 'open' ? (
           <>
-            <p>{props.invite ? 'This invite link no longer works.' : 'This invite link does not work.'}</p>
-            <p class="muted">Ask whoever sent it for a new one.</p>
+            <p>
+              {props.invite
+                ? t('This invite link no longer works.', 'Ce lien d’invitation ne fonctionne plus.')
+                : t('This invite link does not work.', 'Ce lien d’invitation ne fonctionne pas.')}
+            </p>
+            <p class="muted">{t('Ask whoever sent it for a new one.', 'Demande-en un nouveau à la personne qui te l’a envoyé.')}</p>
           </>
         ) : props.signedIn ? (
           <>
-            <p>You already have an account.</p>
+            <p>{t('You already have an account.', 'Tu as déjà un compte.')}</p>
             <p>
-              <a href="/">Go to your dashboard</a>
+              <a href="/">{t('Go to your dashboard', 'Aller à ton tableau de bord')}</a>
             </p>
           </>
         ) : (
           <>
             <p>
-              Join as a promoter{props.team ? ` on ${props.team}'s team` : ''}: follow the tickets you sell, your commission and
-              your rewards, live.
+              {t(
+                `Join as a promoter${props.team ? ` on ${props.team}'s team` : ''}: follow the tickets you sell, your commission and your rewards, live.`,
+                `Deviens promoteur${props.team ? ` dans l’équipe de ${props.team}` : ''} : suis en direct les billets que tu vends, ta commission et tes récompenses.`,
+              )}
             </p>
             <Flash error={props.error} />
             <form class="stack" method="post" action={`/join/${props.invite.token}`}>
               <div class="field-row">
                 <label>
-                  First name
+                  {t('First name', 'Prénom')}
                   <input name="first_name" value={props.values?.first_name ?? ''} maxlength={60} autocomplete="given-name" required />
                 </label>
                 <label>
-                  Last name
+                  {t('Last name', 'Nom')}
                   <input name="last_name" value={props.values?.last_name ?? ''} maxlength={60} autocomplete="family-name" required />
                 </label>
               </div>
               <label>
-                Email
+                {t('Email', 'Courriel')}
                 <input type="email" name="email" value={props.values?.email ?? ''} maxlength={254} autocomplete="email" required />
               </label>
-              <button type="submit">Join</button>
+              <button type="submit">{t('Join', 'Rejoindre')}</button>
             </form>
-            <p class="muted">We email you a link to sign in. Already a promoter? <a href="/login">Sign in</a></p>
+            <p class="muted">
+              {t('We email you a link to sign in. Already a promoter?', 'On t’envoie un lien de connexion par courriel. Déjà promoteur?')}{' '}
+              <a href="/login">{t('Sign in', 'Se connecter')}</a>
+            </p>
           </>
         )}
       </div>
@@ -4019,8 +4356,8 @@ export function AdminBannersPage(props: {
       <div class="card rate-card" id="checkout">
         <h2 class="first">Before a reward request</h2>
         <p class="muted">
-          Shown in a pop-up when a promoter reviews their reward request: they must click “I understand” before they can
-          send it. Say what they need to know, like “Tickets are under your name at the door: bring ID.”
+          Shown when a promoter reviews their reward request: they must tick that they read it before they can send it.
+          Say what they need to know, like “Tickets are under your name at the door: bring ID.”
         </p>
         {props.checkout && <Banner text={props.checkout} label="Current notice before a reward request" />}
         <form class="banner-form" method="post" action="/admin/banners/checkout">
@@ -4161,16 +4498,16 @@ export function AdminTeamsPage(props: { user: User; leads: { lead: User; members
 
 export function TwoFactorPage(props: { error?: string }) {
   return (
-    <Layout title="Two-step verification">
+    <Layout title={t('Two-step verification', 'Vérification en deux étapes')}>
       <div class="login card">
         <h1 class="login-brand">
           <BrandMark brand={getBrand()} />
         </h1>
-        <p>Enter the 6-digit code from your authenticator app.</p>
+        <p>{t('Enter the 6-digit code from your authenticator app.', 'Entre le code à 6 chiffres de ton app d’authentification.')}</p>
         <Flash error={props.error} />
         <form class="stack" method="post" action="/login/2fa">
           <label>
-            Code
+            {t('Code', 'Code')}
             <input
               class="code-input"
               name="code"
@@ -4181,11 +4518,16 @@ export function TwoFactorPage(props: { error?: string }) {
               autofocus
             />
           </label>
-          <button type="submit">Continue</button>
+          <button type="submit">{t('Continue', 'Continuer')}</button>
         </form>
-        <p class="muted">No phone? Type one of your recovery codes instead (like abcde-12345). Each works once.</p>
         <p class="muted">
-          <a href="/login">Start over</a>
+          {t(
+            'No phone? Type one of your recovery codes instead (like abcde-12345). Each works once.',
+            'Pas de téléphone? Tape plutôt un de tes codes de récupération (comme abcde-12345). Chacun fonctionne une seule fois.',
+          )}
+        </p>
+        <p class="muted">
+          <a href="/login">{t('Start over', 'Recommencer')}</a>
         </p>
       </div>
     </Layout>
@@ -4204,12 +4546,12 @@ function apiAccessSummary(tokens: ApiToken[]): string {
 }
 
 export function since(epoch: number | null): string {
-  if (!epoch) return 'unknown';
+  if (!epoch) return t('unknown', 'inconnu');
   const minutes = Math.round((Date.now() / 1000 - epoch) / 60);
-  if (minutes < 5) return 'active now';
-  if (minutes < 60) return `${minutes} min ago`;
-  if (minutes < 48 * 60) return `${Math.round(minutes / 60)} h ago`;
-  return new Intl.DateTimeFormat('en-CA', { dateStyle: 'medium', timeZone: config.timezone }).format(new Date(epoch * 1000));
+  if (minutes < 5) return t('active now', 'actif maintenant');
+  if (minutes < 60) return t(`${minutes} min ago`, `il y a ${minutes} min`);
+  if (minutes < 48 * 60) return t(`${Math.round(minutes / 60)} h ago`, `il y a ${Math.round(minutes / 60)} h`);
+  return new Intl.DateTimeFormat(locale(), { dateStyle: 'medium', timeZone: config.timezone }).format(new Date(epoch * 1000));
 }
 
 export function SecurityPage(props: {
@@ -4225,17 +4567,21 @@ export function SecurityPage(props: {
   error?: string;
 }) {
   const others = props.sessions.filter((d) => d.rowid !== props.currentSessionId).length;
+  const fr = lang() === 'fr';
   return (
-    <Layout title="Security" user={props.user}>
-      <h1>Security</h1>
+    <Layout title={t('Security', 'Sécurité')} user={props.user}>
+      <h1>{t('Security', 'Sécurité')}</h1>
       <Flash ok={props.ok} error={props.error} />
 
       {props.recoveryCodes && (
         <div class="card stack-card">
-          <h2 class="first">Your recovery codes</h2>
+          <h2 class="first">{t('Your recovery codes', 'Tes codes de récupération')}</h2>
           <p>
-            Save these somewhere safe (a password manager, or printed). If you lose your phone, each one signs you in
-            once instead of a code from the app. <strong>They are shown only now.</strong>
+            {t(
+              'Save these somewhere safe (a password manager, or printed). If you lose your phone, each one signs you in once instead of a code from the app.',
+              'Garde-les dans un endroit sûr (un gestionnaire de mots de passe, ou imprimés). Si tu perds ton téléphone, chacun te connecte une fois à la place d’un code de l’app.',
+            )}{' '}
+            <strong>{t('They are shown only now.', 'Ils ne sont affichés que maintenant.')}</strong>
           </p>
           <div class="recovery">
             {props.recoveryCodes.map((code) => (
@@ -4243,38 +4589,41 @@ export function SecurityPage(props: {
             ))}
           </div>
           <div class="link-field">
-            <input readonly value={props.recoveryCodes.join(' ')} aria-label="Recovery codes" />
+            <input readonly value={props.recoveryCodes.join(' ')} aria-label={t('Recovery codes', 'Codes de récupération')} />
             <button type="button" data-copy>
-              Copy all
+              {t('Copy all', 'Tout copier')}
             </button>
           </div>
         </div>
       )}
 
-      <h2 id="two-step">Two-step verification</h2>
+      <h2 id="two-step">{t('Two-step verification', 'Vérification en deux étapes')}</h2>
       <div class="card stack-card">
         {props.twoFactorOn ? (
           <>
             <p>
-              <strong>On.</strong> Signing in asks for a code from your authenticator app. {props.codesLeft} recovery codes
-              left.
+              <strong>{t('On.', 'Activée.')}</strong>{' '}
+              {t(
+                `Signing in asks for a code from your authenticator app. ${props.codesLeft} recovery codes left.`,
+                `La connexion demande un code de ton app d’authentification. ${props.codesLeft < 2 ? `Il reste ${props.codesLeft} code de récupération.` : `Il reste ${props.codesLeft} codes de récupération.`}`,
+              )}
             </p>
             <form class="stack" method="post" action="/account/security/2fa/new-codes">
               <label>
-                Code from the app, to make new recovery codes
+                {t('Code from the app, to make new recovery codes', 'Code de l’app, pour créer de nouveaux codes de récupération')}
                 <input class="code-input" name="code" inputmode="numeric" autocomplete="one-time-code" maxlength={11} required />
               </label>
               <button class="secondary" type="submit">
-                Make new recovery codes
+                {t('Make new recovery codes', 'Créer de nouveaux codes de récupération')}
               </button>
             </form>
             <form class="stack" method="post" action="/account/security/2fa/off">
               <label>
-                Code from the app, to turn it off
+                {t('Code from the app, to turn it off', 'Code de l’app, pour la désactiver')}
                 <input class="code-input" name="code" inputmode="numeric" autocomplete="one-time-code" maxlength={11} required />
               </label>
               <button class="danger" type="submit">
-                Turn off two-step verification
+                {t('Turn off two-step verification', 'Désactiver la vérification en deux étapes')}
               </button>
             </form>
           </>
@@ -4283,54 +4632,71 @@ export function SecurityPage(props: {
             <div class="qr" dangerouslySetInnerHTML={{ __html: props.setup.svg }} />
             <div class="setup-steps">
               <p>
-                <strong>1.</strong> Open an authenticator app (Google Authenticator, Microsoft Authenticator, 1Password,
-                Authy…) and scan this code.
+                <strong>1.</strong>{' '}
+                {t(
+                  'Open an authenticator app (Google Authenticator, Microsoft Authenticator, 1Password, Authy…) and scan this code.',
+                  'Ouvre une app d’authentification (Google Authenticator, Microsoft Authenticator, 1Password, Authy…) et scanne ce code.',
+                )}
               </p>
               <p class="muted">
-                On this phone? <a href={props.setup.uri}>Open in my authenticator app</a>, or type this key:
+                {fr ? (
+                  <>
+                    Sur ce téléphone? <a href={props.setup.uri}>Ouvrir dans mon app d’authentification</a>, ou tape cette clé :
+                  </>
+                ) : (
+                  <>
+                    On this phone? <a href={props.setup.uri}>Open in my authenticator app</a>, or type this key:
+                  </>
+                )}
               </p>
               <p class="secret">{props.setupSecret.replace(/(.{4})/g, '$1 ').trim()}</p>
               <form class="stack" method="post" action="/account/security/2fa/confirm">
                 <label>
-                  <strong>2.</strong> Enter the 6-digit code it shows
+                  <strong>2.</strong> {t('Enter the 6-digit code it shows', 'Entre le code à 6 chiffres qu’elle affiche')}
                   <input class="code-input" name="code" inputmode="numeric" autocomplete="one-time-code" maxlength={6} required autofocus />
                 </label>
-                <button type="submit">Turn on</button>
+                <button type="submit">{t('Turn on', 'Activer')}</button>
               </form>
             </div>
           </div>
         ) : (
           <>
             <p>
-              Protect your account and your payouts: after the email link or code, signing in also asks for a code from an
-              authenticator app on your phone.
+              {t(
+                'Protect your account and your payouts: after the email link or code, signing in also asks for a code from an authenticator app on your phone.',
+                'Protège ton compte et tes paiements : après le lien ou le code reçu par courriel, la connexion demande aussi un code d’une app d’authentification sur ton téléphone.',
+              )}
             </p>
             <form method="post" action="/account/security/2fa/start">
-              <button type="submit">Set up two-step verification</button>
+              <button type="submit">{t('Set up two-step verification', 'Configurer la vérification en deux étapes')}</button>
             </form>
           </>
         )}
       </div>
 
-      <h2>Signed-in devices</h2>
+      <h2>{t('Signed-in devices', 'Appareils connectés')}</h2>
       <div class="device-list">
         {props.sessions.map((d) => (
           <div class="card device">
             <div>
               <strong>
-                {d.device ?? 'Unknown device'}
-                {d.is_app ? <span class="badge edited"> Installed app</span> : <span class="badge"> Browser</span>}
+                {d.device ?? t('Unknown device', 'Appareil inconnu')}
+                {d.is_app ? (
+                  <span class="badge edited"> {t('Installed app', 'App installée')}</span>
+                ) : (
+                  <span class="badge"> {t('Browser', 'Navigateur')}</span>
+                )}
               </strong>
               <span class="muted">
-                {d.rowid === props.currentSessionId ? 'This device · ' : ''}
-                {since(d.last_seen_at)} · signed in {since(d.created_at)}
+                {d.rowid === props.currentSessionId ? t('This device · ', 'Cet appareil · ') : ''}
+                {since(d.last_seen_at)} · {t('signed in', 'connecté')} {since(d.created_at)}
                 {d.ip ? ` · ${d.ip}` : ''}
               </span>
             </div>
             {d.rowid !== props.currentSessionId && (
               <form method="post" action={`/account/security/devices/${d.rowid}/sign-out`}>
                 <button class="secondary small" type="submit">
-                  Sign out
+                  {t('Sign out', 'Déconnecter')}
                 </button>
               </form>
             )}
@@ -4340,7 +4706,7 @@ export function SecurityPage(props: {
       {others > 0 && (
         <form method="post" action="/account/security/devices/sign-out-others">
           <button class="link" type="submit">
-            Sign out all other devices ({others})
+            {t(`Sign out all other devices (${others})`, `Déconnecter tous les autres appareils (${others})`)}
           </button>
         </form>
       )}

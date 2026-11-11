@@ -70,7 +70,7 @@ demo.get('/__demo/bar', (c) => {
   const people = sellers();
   const fallback = user && !user.is_admin ? user.id : (personaUsers().find((p) => !p.user.is_admin)?.user.id ?? null);
   return c.html(
-    <DemoBar user={user} personas={personaUsers()} people={people} target={target ?? fallback} message={shown} open={open} back={c.req.query('back') ?? '/'} />,
+    <DemoBar user={user} personas={personaUsers()} people={people} target={target ?? fallback} message={shown} open={open} back={c.req.query('back') ?? '/'} lang={chosenLang(c.req.raw) ?? null} />,
   );
 });
 
@@ -139,6 +139,18 @@ demo.post('/__demo/rush', async (c) => {
   return done(c, '12 ventes ajoutées au hasard.');
 });
 
+// The language the app shows, for the demo only: a cookie that stands in for the browser's language.
+const LANG_COOKIE = 'demo_lang';
+const chosenLang = (req: Request) => req.headers.get('cookie')?.match(/(?:^|;\s*)demo_lang=(fr|en)\b/)?.[1] as 'fr' | 'en' | undefined;
+
+demo.post('/__demo/lang', async (c) => {
+  const body = await c.req.parseBody();
+  const lang = body.lang === 'fr' || body.lang === 'en' ? body.lang : null;
+  const back = String(body.back ?? '/');
+  c.header('Set-Cookie', lang ? `${LANG_COOKIE}=${lang}; Path=/; SameSite=Lax; Max-Age=31536000` : `${LANG_COOKIE}=; Path=/; Max-Age=0`);
+  return c.redirect(/^\/(?![/\\])/.test(back) ? back : '/', 303);
+});
+
 // Ends the process: Docker starts it again and every start seeds from scratch, which also clears what
 // the app keeps in memory. The page waits for the app to answer, then goes to the sign-in page.
 demo.post('/__demo/reset', (c) => {
@@ -195,6 +207,12 @@ export default {
     if (url.host === local.host && url.host !== canonical.host && req.headers.get('origin') === local.origin) {
       const headers = new Headers(req.headers);
       headers.set('origin', canonical.origin);
+      req = new Request(req, { headers });
+    }
+    const lang = chosenLang(req);
+    if (lang) {
+      const headers = new Headers(req.headers);
+      headers.set('accept-language', lang === 'fr' ? 'fr-CA,fr;q=0.9' : 'en-CA,en;q=0.9');
       req = new Request(req, { headers });
     }
     if (url.pathname.startsWith('/__demo/')) return gzipped(req, await demo.fetch(req, server));

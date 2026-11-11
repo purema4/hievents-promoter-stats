@@ -1,3 +1,4 @@
+import { lang } from './i18n';
 import { config } from './config';
 import { addColumn, db, type User } from './local-db';
 
@@ -189,15 +190,19 @@ export function merchBonus(userId: number): number {
 }
 
 export function describeAdjustment(a: Adjustment, money: (cents: number, currency: string) => string): string {
-  const signed = (n: number, one: string, many = `${one}s`) => `${n > 0 ? '+' : '−'}${Math.abs(n)} ${Math.abs(n) === 1 ? one : many}`;
+  const fr = lang() === 'fr';
+  const signed = (n: number, one: string, many = `${one}s`) => `${n > 0 ? '+' : '−'}${Math.abs(n)} ${(fr ? Math.abs(n) < 2 : Math.abs(n) === 1) ? one : many}`;
+  const sales = a.amount_cents ? `${a.amount_cents < 0 ? '−' : ''}${money(Math.abs(a.amount_cents), a.currency ?? 'CAD')}` : '';
   switch (a.kind) {
     case 'money':
       return `${a.amount_cents >= 0 ? '+' : '−'}${money(Math.abs(a.amount_cents), a.currency ?? 'CAD')}`;
     case 'tickets_sold':
-      return `${signed(a.quantity, 'ticket')} sold${a.amount_cents ? ` (${a.amount_cents < 0 ? '−' : ''}${money(Math.abs(a.amount_cents), a.currency ?? 'CAD')} in sales)` : ''}`;
+      return fr
+        ? `${signed(a.quantity, 'billet vendu', 'billets vendus')}${sales ? ` (${sales} de ventes)` : ''}`
+        : `${signed(a.quantity, 'ticket')} sold${sales ? ` (${sales} in sales)` : ''}`;
     case 'free_tickets':
-      return signed(a.quantity, 'free ticket');
+      return fr ? signed(a.quantity, 'billet gratuit', 'billets gratuits') : signed(a.quantity, 'free ticket');
     case 'merch':
-      return signed(a.quantity, 'merch item');
+      return fr ? signed(a.quantity, 'article de merch', 'articles de merch') : signed(a.quantity, 'merch item');
   }
 }

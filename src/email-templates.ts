@@ -1,6 +1,7 @@
 import { getBrand, textOn } from './brand';
 import { config } from './config';
 import { db } from './local-db';
+import { lang, t, type Lang } from './i18n';
 
 /*
  * Every email the app sends has a type with editable wording (subject, heading, text, button) and
@@ -27,6 +28,8 @@ type Definition = {
   audience: 'Promoter' | 'Admins';
   placeholders: string[];
   defaults: Template;
+  // Promoters' emails also come in French, sent to those whose browser is in French. Admins' are English only.
+  defaultsFr?: Template;
   sample: Record<string, string>;
 };
 
@@ -43,6 +46,12 @@ export const definitions: Record<EmailType, Definition> = {
       body: 'You can now follow the tickets sold with your promo codes, your commission and your rewards, live.\n\n**Tip:** open this email on your phone and install the app after signing in, to get a notification for every payout, reward and milestone.',
       button: 'Sign in',
     },
+    defaultsFr: {
+      subject: 'Ton accès à {{brand}}',
+      heading: 'Bienvenue dans l’équipe, {{name}}',
+      body: 'Tu peux maintenant suivre en direct les billets vendus avec tes codes promo, ta commission et tes récompenses.\n\n**Astuce :** ouvre ce courriel sur ton téléphone et installe l’app après t’être connecté, pour recevoir une notification à chaque paiement, récompense et étape franchie.',
+      button: 'Se connecter',
+    },
     sample: { link: '#', code: '482913', expiry: '7 days' },
   },
   login: {
@@ -54,6 +63,12 @@ export const definitions: Record<EmailType, Definition> = {
       heading: 'Sign in to {{brand}}',
       body: 'Here is the sign-in link you asked for. If you did not ask for it, you can ignore this email.',
       button: 'Sign in',
+    },
+    defaultsFr: {
+      subject: 'Code de connexion {{brand}} : {{code}}',
+      heading: 'Connecte-toi à {{brand}}',
+      body: 'Voici le lien de connexion que tu as demandé. Si tu ne l’as pas demandé, tu peux ignorer ce courriel.',
+      button: 'Se connecter',
     },
     sample: { link: '#', code: '482913', expiry: '30 minutes' },
   },
@@ -79,6 +94,12 @@ export const definitions: Record<EmailType, Definition> = {
       body: 'We sent you **{{amount}}** by {{method}} {{details}}.\n\n{{note}}\n\nThank you for promoting with us.',
       button: 'See your payouts',
     },
+    defaultsFr: {
+      subject: 'Ton paiement de {{amount}} a été envoyé',
+      heading: 'Ton paiement s’en vient',
+      body: 'On t’a envoyé **{{amount}}** par {{method}} {{details}}.\n\n{{note}}\n\nMerci de faire la promotion avec nous.',
+      button: 'Voir tes paiements',
+    },
     sample: { amount: '$100.00', method: 'Interac e-Transfer', details: 'to max@example.com', note: 'Reference: CA1234', link: '#' },
   },
   payout_declined: {
@@ -90,6 +111,12 @@ export const definitions: Record<EmailType, Definition> = {
       heading: 'Your payout request was declined',
       body: '{{note}}\n\nThe amount is available to request again whenever you are ready.',
       button: 'See your payouts',
+    },
+    defaultsFr: {
+      subject: 'À propos de ta demande de paiement de {{amount}}',
+      heading: 'Ta demande de paiement a été refusée',
+      body: '{{note}}\n\nTu peux redemander ce montant dès que tu es prêt.',
+      button: 'Voir tes paiements',
     },
     sample: { amount: '$100.00', note: 'Please wait until the event is over.', link: '#' },
   },
@@ -115,6 +142,12 @@ export const definitions: Record<EmailType, Definition> = {
       body: '**{{reward}}** is yours.\n\n{{note}}',
       button: 'See your rewards',
     },
+    defaultsFr: {
+      subject: 'Ta récompense s’en vient : {{reward}}',
+      heading: 'Bonne nouvelle, {{name}}',
+      body: '**{{reward}}** est à toi.\n\n{{note}}',
+      button: 'Voir tes récompenses',
+    },
     sample: { reward: '1 free ticket for Warehouse Night', note: 'You are on the guest list.', link: '#' },
   },
   reward_declined: {
@@ -126,6 +159,12 @@ export const definitions: Record<EmailType, Definition> = {
       heading: 'Your reward request was declined',
       body: 'Your request for **{{reward}}** was declined: {{note}}\n\nYou can request it again.',
       button: 'See your rewards',
+    },
+    defaultsFr: {
+      subject: 'À propos de ta demande de récompense',
+      heading: 'Ta demande de récompense a été refusée',
+      body: 'Ta demande pour **{{reward}}** a été refusée : {{note}}\n\nTu peux la refaire.',
+      button: 'Voir tes récompenses',
     },
     sample: { reward: 'Merch', note: 'That size is out of stock, pick another one.', link: '#' },
   },
@@ -158,31 +197,45 @@ export const definitions: Record<EmailType, Definition> = {
 
 export const emailTypes = Object.keys(definitions) as EmailType[];
 
-export function getTemplate(type: EmailType): Template {
-  const row = db.query<{ value: string }, [string]>('SELECT value FROM settings WHERE key = ?').get(`email:${type}`);
+/** The languages an email type is written in: French only for promoters' emails. */
+export function languagesOf(type: EmailType): Lang[] {
+  return definitions[type].defaultsFr ? ['en', 'fr'] : ['en'];
+}
+
+// English wording keeps its original key, so templates saved before French existed still apply.
+const keyOf = (type: EmailType, language: Lang) => (language === 'fr' ? `email:${type}:fr` : `email:${type}`);
+const defaultsOf = (type: EmailType, language: Lang) => (language === 'fr' && definitions[type].defaultsFr) || definitions[type].defaults;
+// Admins' emails have no French: always English.
+const usable = (type: EmailType, language: Lang): Lang => (languagesOf(type).includes(language) ? language : 'en');
+
+/** The wording for an email type, in the current language unless one is given. */
+export function getTemplate(type: EmailType, language: Lang = lang()): Template {
+  const l = usable(type, language);
+  const row = db.query<{ value: string }, [string]>('SELECT value FROM settings WHERE key = ?').get(keyOf(type, l));
   const saved = row ? (JSON.parse(row.value) as Partial<Template>) : {};
-  return { ...definitions[type].defaults, ...saved };
+  return { ...defaultsOf(type, l), ...saved };
 }
 
-export function isCustomized(type: EmailType): boolean {
-  return !!db.query('SELECT 1 FROM settings WHERE key = ?').get(`email:${type}`);
+export function isCustomized(type: EmailType, language: Lang = 'en'): boolean {
+  return !!db.query('SELECT 1 FROM settings WHERE key = ?').get(keyOf(type, usable(type, language)));
 }
 
-export function saveTemplate(type: EmailType, t: Template) {
+export function saveTemplate(type: EmailType, tpl: Template, language: Lang = 'en') {
+  const l = usable(type, language);
   const clean: Template = {
-    subject: t.subject.trim().slice(0, 200) || definitions[type].defaults.subject,
-    heading: t.heading.trim().slice(0, 200),
-    body: t.body.replace(/\r\n/g, '\n').trim().slice(0, 4000),
-    button: t.button.trim().slice(0, 60),
+    subject: tpl.subject.trim().slice(0, 200) || defaultsOf(type, l).subject,
+    heading: tpl.heading.trim().slice(0, 200),
+    body: tpl.body.replace(/\r\n/g, '\n').trim().slice(0, 4000),
+    button: tpl.button.trim().slice(0, 60),
   };
   db.query('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value').run(
-    `email:${type}`,
+    keyOf(type, l),
     JSON.stringify(clean),
   );
 }
 
-export function resetTemplate(type: EmailType) {
-  db.query('DELETE FROM settings WHERE key = ?').run(`email:${type}`);
+export function resetTemplate(type: EmailType, language: Lang = 'en') {
+  db.query('DELETE FROM settings WHERE key = ?').run(keyOf(type, usable(type, language)));
 }
 
 // Reply-To for every email, so promoters' replies reach a real inbox.
@@ -245,11 +298,14 @@ export function renderEmail(type: EmailType, vars: Record<string, string>, templ
     ? `<img src="${config.appUrl}/brand/logo?v=${brand.updatedAt}" alt="${escapeHtml(brand.name)}" height="36" style="display:block;height:36px;width:auto;border:0">`
     : `<span style="font:700 20px/1.2 -apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#1b1b1a">${escapeHtml(brand.name)}</span>`;
   const codeBlock = vars.code
-    ? `<p style="margin:24px 0 6px;font-size:14px;color:#6b6b66">Using the installed app? Enter this code instead:</p>
+    ? `<p style="margin:24px 0 6px;font-size:14px;color:#6b6b66">${t('Using the installed app? Enter this code instead:', 'Tu utilises l’app installée? Entre plutôt ce code :')}</p>
        <p style="margin:0 0 8px;font:700 30px/1.2 ui-monospace,Menlo,Consolas,monospace;letter-spacing:6px;color:#1b1b1a">${escapeHtml(vars.code)}</p>`
     : '';
   const expiry = vars.expiry
-    ? `<p style="margin:16px 0 0;font-size:13px;line-height:1.5;color:#8a8a84">The link and code work once and expire in ${escapeHtml(vars.expiry)}. After that, ask for a new one on the sign-in page.</p>`
+    ? `<p style="margin:16px 0 0;font-size:13px;line-height:1.5;color:#8a8a84">${t(
+        `The link and code work once and expire in ${escapeHtml(vars.expiry)}. After that, ask for a new one on the sign-in page.`,
+        `Le lien et le code ne servent qu’une fois et expirent dans ${escapeHtml(vars.expiry)}. Ensuite, demandes-en un nouveau sur la page de connexion.`,
+      )}</p>`
     : '';
   const button = template.button.trim()
     ? `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:8px 0 0"><tr><td style="border-radius:10px;background:${accent}">
@@ -258,7 +314,7 @@ export function renderEmail(type: EmailType, vars: Record<string, string>, templ
     : '';
   const preheader = bodyText(template.body, all).split('\n')[0]!.slice(0, 140);
   const html = `<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light"><title>${escapeHtml(subject)}</title></head>
+<html lang="${lang()}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light"><title>${escapeHtml(subject)}</title></head>
 <body style="margin:0;padding:0;background:#f3f3f0;-webkit-text-size-adjust:100%">
 <span style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent">${escapeHtml(preheader)}</span>
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f3f3f0"><tr><td align="center" style="padding:32px 16px">
@@ -281,9 +337,9 @@ export function renderEmail(type: EmailType, vars: Record<string, string>, templ
   const text = [
     heading,
     bodyText(template.body, all),
-    template.button.trim() ? `${fill(template.button, all)}: ${link}` : '',
-    vars.code ? `Using the installed app? Enter this code instead: ${vars.code}` : '',
-    vars.expiry ? `The link and code work once and expire in ${vars.expiry}.` : '',
+    template.button.trim() ? t(`${fill(template.button, all)}: ${link}`, `${fill(template.button, all)} : ${link}`) : '',
+    vars.code ? `${t('Using the installed app? Enter this code instead:', 'Tu utilises l’app installée? Entre plutôt ce code :')} ${vars.code}` : '',
+    vars.expiry ? t(`The link and code work once and expire in ${vars.expiry}.`, `Le lien et le code ne servent qu’une fois et expirent dans ${vars.expiry}.`) : '',
     brand.footer,
     config.appUrl,
   ]

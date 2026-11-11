@@ -55,7 +55,7 @@ describeIntegration('rules screens', () => {
 
   test('the default rule, migrated from the old rates, in words', async () => {
     const page = text(await admin.page('/admin/rules'));
-    expect(page).toContain('Commission: 10% of your sales at full price, outside Hi.Events too.');
+    expect(page).toContain('Commission: 10% of your sales at full price, sales outside the ticketing site included.');
     expect(page).toContain('Free ticket: 1 from your first sale, then 1 more for every 5 tickets sold after the first one.');
     expect(page).toContain('Warehouse Night');
   });
@@ -121,11 +121,11 @@ describeIntegration('rules screens', () => {
     expect(card).toContain('VIP: 2 from your first sale.');
     expect(card).toContain('GA list: 1 for every 5 tickets sold.');
     expect(card).not.toContain('Free tickets'); // free_tickets = 0: nothing to say
-    expect(card).toContain('You sold 4: $20.00, 2 VIP, 0 GA list.');
+    expect(card).toContain('You sold 4: $20.00, 2 × VIP, 0 × GA list.');
     const fr = text(await (await maya.client.get('/events/1', { headers: { 'Accept-Language': 'fr-CA,fr;q=0.9,en;q=0.8' } })).text());
     expect(fr).toContain('Ton entente pour cet événement');
     expect(fr).toContain('Liste GA : 1 par tranche de 5 billets vendus.');
-    expect(fr).toContain('Tu as vendu 4 : 20,00 $, 2 VIP, 0 Liste GA.');
+    expect(fr).toContain('Tu as vendu 4 : 20,00 $, 2 × VIP, 0 × Liste GA.');
     for (const page of [en, fr]) {
       expect(page).not.toContain('tickets_sold');
       expect(page).not.toContain('floor(');

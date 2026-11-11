@@ -1,3 +1,4 @@
+import { withLang } from '../../src/i18n';
 import { afterEach, describe, expect, test } from 'bun:test';
 import {
   defaultRules,
@@ -71,6 +72,17 @@ describe('the rules in words', () => {
     [track([]), 'ticket', 'No free tickets for now.'],
   ] as const)('%#', (t, unit, words) => {
     expect(describeTrack(t, unit)).toBe(words);
+  });
+});
+
+describe('the rules in words, in French', () => {
+  test.each([
+    [defaultRules().tickets, 'ticket', '1 billet gratuit à 1 vente, puis 1 billet gratuit à chaque tranche de 5 ventes de plus.'],
+    [defaultRules().merch, 'merch', '1 article de merch à chaque tranche de 50 billets vendus.'],
+    [track([[3, 2]]), 'ticket', '2 billets gratuits à 3 ventes.'],
+    [track([]), 'ticket', 'Pas de billets gratuits pour l’instant.'],
+  ] as const)('%#', (t, unit, words) => {
+    expect(withLang('fr', () => describeTrack(t, unit))).toBe(words);
   });
 });
 
