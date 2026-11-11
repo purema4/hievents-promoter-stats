@@ -48,7 +48,7 @@ describeIntegration('rules screens', () => {
   });
 
   test('admins only', async () => {
-    expect(await admin.page('/admin')).toContain('<a href="/admin/rules">Rules</a>');
+    expect(await admin.page('/admin')).toContain('<a href="/admin/rules">Rules (advanced)</a>');
     expect((await maya.client.get('/admin/rules')).status).toBe(403);
     expect((await maya.client.post('/admin/rules/edit?scope=default', { text: 'commission = 999' })).status).toBe(403);
   });
