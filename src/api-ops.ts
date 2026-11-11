@@ -1,4 +1,4 @@
-import { setUsualRule } from './rules';
+import { describeCommission, setUsualRule, usualCommission } from './rules';
 import { rulesEngineUp } from './rules-engine';
 import type { Context } from 'hono';
 import { announcePayoutRequest, announceRewardRequest, commissionEvents, emailLoginLink, finishPayout, finishReward, promoterData } from './actions';
@@ -10,7 +10,7 @@ import { config } from './config';
 import { allPromoCodes, dailyForCodes, statsForCodes } from './hievents';
 import { leaderboard, type Sort } from './leaderboard';
 import { pageLink, setAlias, suggestAlias } from './links';
-import { codeOwners, codesFor, createUser, findUser, findUserByEmail, listUsers, normalizeCodes, setCodes, usualRuleFor, type User } from './local-db';
+import { codeOwners, codesFor, createUser, findUser, findUserByEmail, listUsers, normalizeCodes, setCodes, type User } from './local-db';
 import { describeRate, describeRule, formatMoney, splitCommission, toCents, totalsByCurrency, type EventRule } from './money';
 import { earningsFor } from './earnings';
 import { findPayout, listPayouts, payoutsFor, requestPayout, type PayoutRequest, type RequestResult } from './payouts';
@@ -445,7 +445,7 @@ export const ops: Op[] = [
         promoters: people.map((u) => ({
           id: u.id,
           name: u.name,
-          ...(user.is_admin ? { email: u.email, team_lead_id: u.team_lead_id ?? null, commission: describeRule(usualRuleFor(u)) } : {}),
+          ...(user.is_admin ? { email: u.email, team_lead_id: u.team_lead_id ?? null, commission: describeCommission(usualCommission(u.id)) } : {}),
           role: roleOf(u),
           alias: u.alias ?? null,
           codes: u.codes,
@@ -659,7 +659,7 @@ export const ops: Op[] = [
         name: { type: 'string', maxLength: 100, description: 'Their name.' },
         email: { type: 'string', maxLength: 254, description: 'Their email: they sign in with links sent there.' },
         codes: { type: 'array', items: { type: 'string', maxLength: 100 }, maxItems: 50, description: 'Their Hi.Events promo codes.' },
-        commission_percent: { type: 'integer', minimum: 0, maximum: 100, description: `Their usual commission as a percentage. Leave out (and the next one) for the default, ${config.commissionPercent}%.` },
+        commission_percent: { type: 'integer', minimum: 0, maximum: 100, description: 'Their usual commission as a percentage, written in their rule. Leave out (and the next one) for the default rule.' },
         commission_cents_per_ticket: { type: 'integer', minimum: 0, maximum: 1_000_000, description: 'Or: a flat amount per ticket, in cents.' },
         send_invite: { type: 'boolean', default: true, description: 'Email them a sign-in link now.' },
       },

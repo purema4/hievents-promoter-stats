@@ -199,10 +199,6 @@ export function updateUser(id: number, input: { name: string; email: string; isA
 }
 
 /** A promoter's usual commission: their flat amount per ticket, their percentage, or the default COMMISSION_PERCENT. */
-export function usualRuleFor(user: User): { kind: 'percent' | 'flat'; value: number } {
-  if (user.commission_flat_cents != null) return { kind: 'flat', value: user.commission_flat_cents };
-  return { kind: 'percent', value: user.commission_percent ?? config.commissionPercent };
-}
 
 export async function setPassword(id: number, password: string) {
   const hash = await Bun.password.hash(password);

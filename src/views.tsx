@@ -21,11 +21,11 @@ import { rateFor } from './commission';
 import { findInvite, inviteState, type InviteLink } from './invites';
 import { BANNER_MAX_LENGTH, generalBanner } from './banners';
 import { jsVersion } from './js-version';
-import type { RewardType } from './rules';
+import { describeCommission, ownCommission, usualCommission, type CommissionSetting, type RewardType } from './rules';
 import { rulesEngineSeemsDown } from './rules-engine';
 import { isTeamLead, teamCommissionPercentFor, type TeamCommission } from './teams';
 import { codesHref, codesPerPage, type CodeFilter, type CodePage } from './promo-code-list';
-import { usualRuleFor, type User } from './local-db';
+import { type User } from './local-db';
 import { describeRate, describeRule, formatMoney, formatPercent, type EventRule } from './money';
 import { countPendingPayouts, type Balance, type PayoutRequest } from './payouts';
 import { LinkField, PayoutHistory, RewardHistory } from './promoter-views';
@@ -212,6 +212,8 @@ td.failed { color: var(--danger); }
 .welcome-hero .avatar { margin: 0 auto 12px; }
 .how { display: grid; gap: 12px; margin: 16px 0; }
 .how .card { display: flex; gap: 14px; align-items: flex-start; }
+.welcome-perks { margin: 4px 0 0; padding-left: 18px; display: grid; gap: 4px; }
+.welcome-perks strong { color: var(--text); font-weight: 600; }
 .how .num { flex: none; width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; font-weight: 700; background: color-mix(in srgb, var(--accent) 14%, var(--surface)); color: var(--accent); }
 .welcome-actions { display: flex; gap: 14px; align-items: center; justify-content: space-between; flex-wrap: wrap; margin-top: 20px; }
 .card-actions { display: flex; gap: 8px; flex-wrap: wrap; border-top: 1px solid var(--border); padding-top: 10px; }
@@ -826,10 +828,11 @@ export function Layout(props: {
   user?: User;
   children: Child;
   hideInstallBanner?: boolean;
+  hideNotice?: boolean; // the welcome steps: the team's notice (payout dates…) can wait until the dashboard
   promoterView?: boolean; // an admin seeing a promoter's page gets its banner too
 }) {
   const brand = getBrand();
-  const notice = props.user && (!props.user.is_admin || props.promoterView) ? generalBanner() : '';
+  const notice = props.user && !props.hideNotice && (!props.user.is_admin || props.promoterView) ? generalBanner() : '';
   // The last call to the rules engine failed: the numbers on this page may be the last ones known.
   const rulesDown = !!props.user && rulesEngineSeemsDown();
   return (
@@ -960,17 +963,22 @@ function InstallBanner(props: { brand: Brand }) {
   );
 }
 
-export function InstallSteps() {
+export function InstallSteps(props: { heading?: boolean } = {}) {
   const fr = lang() === 'fr';
   return (
     <div class="card stack-card install-steps">
-      <h2 class="first">{t('Install the app', 'Installer l’app')}</h2>
-      <p class="muted">
-        {t(
-          'This site is an app you can install (a PWA). Installed, it opens from your home screen like any other app and can send you notifications.',
-          'Ce site est une app que tu peux installer (une PWA). Une fois installée, elle s’ouvre depuis ton écran d’accueil comme n’importe quelle autre app et peut t’envoyer des notifications.',
-        )}
-      </p>
+      {/* The welcome step already says "Get the app": no second title, no second intro. */}
+      {props.heading !== false && (
+        <>
+          <h2 class="first">{t('Install the app', 'Installer l’app')}</h2>
+          <p class="muted">
+            {t(
+              'This site is also an app. Installed, it opens from your home screen like any other app and can send you notifications.',
+              'Ce site est aussi une app. Une fois installée, elle s’ouvre depuis ton écran d’accueil comme n’importe quelle autre app et peut t’envoyer des notifications.',
+            )}
+          </p>
+        </>
+      )}
       {fr ? (
         <dl>
           <dt>iPhone ou iPad</dt>
@@ -1166,7 +1174,7 @@ function Sidebar(props: { user: User }) {
           </NavGroup>
           <NavGroup id="pay" title="Pay &amp; rewards">
             <a href="/admin/commissions">Commissions</a>
-            <a href="/admin/rewards">Levels &amp; rewards</a>
+            <a href="/admin/rewards">Levels &amp; merch</a>
             <a href="/admin/rules">Rules (advanced)</a>
           </NavGroup>
           <NavGroup id="sharing" title="Sharing">
@@ -1560,19 +1568,31 @@ function PasswordForm() {
   );
 }
 
-// A promoter's usual commission: the default percentage, their own percentage, or a flat amount per
-// ticket sold. Per event, admins can set another one on Commissions.
+// A promoter's usual commission, read from and written to their rule: the default rule's, their own
+// percentage, or a flat amount per ticket. A custom commission line is only changed in the rules editor.
 function CommissionField(props: { user?: User }) {
-  const u = props.user;
-  const kind = u?.commission_flat_cents != null ? 'flat' : u?.commission_percent != null ? 'percent' : 'default';
-  const value = kind === 'flat' ? (u!.commission_flat_cents! / 100).toFixed(2) : kind === 'percent' ? String(u!.commission_percent) : '';
+  const own: CommissionSetting = props.user ? ownCommission(props.user.id) : { scope: null, rule: null, custom: false };
+  const fallback = describeCommission(usualCommission(null));
+  if (own.custom) {
+    return (
+      <div class="commission-field">
+        <span>Commission</span>
+        <input type="hidden" name="commission_kind" value="keep" />
+        <span>
+          A custom rule. <a href={`/admin/rules/edit?scope=promoter&user=${props.user!.id}`}>Edit it in Rules →</a>
+        </span>
+      </div>
+    );
+  }
+  const kind = own.rule?.kind ?? 'default';
+  const value = own.rule ? (own.rule.kind === 'flat' ? (own.rule.value / 100).toFixed(2) : String(own.rule.value)) : '';
   return (
     <div class="commission-field">
       <span>Commission</span>
       <span class="rate-fields">
         <select name="commission_kind" aria-label="How they are paid">
           <option value="default" selected={kind === 'default'}>
-            Default ({formatPercent(config.commissionPercent)} of sales)
+            Default rule ({fallback})
           </option>
           <option value="percent" selected={kind === 'percent'}>
             % of sales
@@ -1583,7 +1603,7 @@ function CommissionField(props: { user?: User }) {
         </select>
         <input name="commission_value" inputmode="decimal" aria-label="Percentage or amount per ticket" placeholder="10 or 2.50" value={value} />
       </span>
-      <span class="muted">Their usual rate. For one event, set another on Commissions.</span>
+      <span class="muted">Their usual rate, written in their rule. For one event, set another on Commissions.</span>
     </div>
   );
 }
@@ -1601,9 +1621,8 @@ export function AdminPage(props: {
     <Layout title="Promoters" user={props.user}>
       <h1>Promoters</h1>
       <p class="muted">
-        Each promoter sees the sales of the promo codes assigned to them, across all events, and their commission: a
-        percentage of the full-price sales (by default {formatPercent(config.commissionPercent)}) or a flat amount per
-        ticket sold.
+        Each promoter sees the sales of the promo codes assigned to them, across all events, and their commission, as
+        their rule gives it (the default rule: {describeCommission(usualCommission(null))}).
       </p>
       <Flash error={props.error} ok={props.ok} />
 
@@ -1638,7 +1657,9 @@ export function AdminPage(props: {
                     </div>
                   </td>
                   <td>{p.codes.length ? p.codes.map((c) => <span class="code">{c}</span>) : <span class="muted">None</span>}</td>
-                  <td class="num">{describeRule(usualRuleFor(p))}</td>
+                  <td class="num">
+                    {((s) => `${describeCommission(s)}${s.scope === 'default' ? ' (default)' : ''}`)(usualCommission(p.id))}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -2902,6 +2923,8 @@ function SkipForm() {
 export function WelcomePage(props: {
   user: User;
   step: number;
+  /** Their usual deal in words, by output (commission, free_tickets, vip…): what they really earn. */
+  deal: { name: string; words: string }[];
   codes: string[];
   pushKey: string;
   error?: string;
@@ -2913,9 +2936,15 @@ export function WelcomePage(props: {
   const levels = rules.levels;
   const first = u.first_name || u.name.split(' ')[0];
   const fr = lang() === 'fr';
+  // "Free ticket: 1 from your first sale…" → the name in bold, then what it gives.
+  const split = (words: string) => {
+    const m = /^(.+?)\s?:\s(.*)$/.exec(words);
+    return m ? { label: m[1]!, rest: m[2]! } : { label: '', rest: words };
+  };
+  const perEvent = props.deal.filter((d) => d.name !== 'commission' && d.name !== 'bonus').map((d) => split(d.words));
   const mb = Math.round(maxUploadBytes / 1024 / 1024);
   return (
-    <Layout title={t('Welcome', 'Bienvenue')} user={u} hideInstallBanner>
+    <Layout title={t('Welcome', 'Bienvenue')} user={u} hideInstallBanner hideNotice>
       <div class="welcome">
         <Steps at={props.step} />
         {props.step === 1 && (
@@ -2931,7 +2960,9 @@ export function WelcomePage(props: {
               <div class="card">
                 <span class="num">1</span>
                 <div>
-                  <strong>{t('Share your promo codes', 'Partage tes codes promo')}</strong>
+                  <strong>
+                    {props.codes.length > 1 ? t('Share your promo codes', 'Partage tes codes promo') : t('Share your promo code', 'Partage ton code promo')}
+                  </strong>
                   <div class="muted">
                     {t('Every ticket bought with', 'Chaque billet acheté avec')}{' '}
                     {props.codes.length ? props.codes.map((c) => <span class="code">{c}</span>) : t('your codes', 'tes codes')}{' '}
@@ -2944,9 +2975,10 @@ export function WelcomePage(props: {
                 <div>
                   <strong>{t('Earn commission', 'Gagne une commission')}</strong>
                   <div class="muted">
+                    {/* No rate here: promoters only see one on an event page, as their deal for that event. */}
                     {t(
-                      'On every ticket sold with your codes, set by the team for each event. Request a payout whenever you like.',
-                      'Sur chaque billet vendu avec tes codes, fixée par l’équipe pour chaque événement. Demande ton paiement quand tu veux.',
+                      'An amount on every ticket sold with your code; the team sets it for each event, and each event page shows yours. Ask for your money whenever you like.',
+                      'Un montant sur chaque billet vendu avec ton code; l’équipe le fixe pour chaque événement, et la page de chaque événement montre le tien. Demande ton argent quand tu veux.',
                     )}
                   </div>
                 </div>
@@ -2954,22 +2986,30 @@ export function WelcomePage(props: {
               <div class="card">
                 <span class="num">3</span>
                 <div>
-                  <strong>{t('Unlock rewards and levels', 'Débloque des récompenses et des niveaux')}</strong>
-                  <div class="muted">
-                    {trackOn(rules.tickets) && (
-                      <>
-                        {t('Free tickets for each event:', 'Billets gratuits pour chaque événement :')}{' '}
-                        {describeTrack(rules.tickets, 'ticket').replace(/^./, (c) => c.toLowerCase())}{' '}
-                      </>
-                    )}
+                  <strong>{t('Earn rewards as you sell', 'Gagne des récompenses en vendant')}</strong>
+                  {/* One line per kind of reward, each with its name: not one paragraph of rules. */}
+                  {/* Per event, as their rule says (free tickets, VIP…); then merch and levels, from all their sales. */}
+                  <ul class="welcome-perks muted">
+                    {perEvent.map((r) => (
+                      <li>
+                        <strong>{t(`${r.label}, on each event:`, `${r.label}, pour chaque événement :`)}</strong> {r.rest}
+                      </li>
+                    ))}
                     {trackOn(rules.merch) && (
-                      <>
-                        {t('Merch:', 'Marchandise :')} {describeTrack(rules.merch, 'merch').replace(/^./, (c) => c.toLowerCase())}{' '}
-                      </>
+                      <li>
+                        <strong>{t('Merch:', 'Merch :')}</strong> {describeTrack(rules.merch, 'merch')}
+                      </li>
                     )}
-                    {levels.length > 1 &&
-                      t(`Climb from ${levels[0]!.name} to ${levels.at(-1)!.name}.`, `Monte de ${levels[0]!.name} jusqu’à ${levels.at(-1)!.name}.`)}
-                  </div>
+                    {levels.length > 1 && (
+                      <li>
+                        <strong>{t('Levels:', 'Niveaux :')}</strong>{' '}
+                        {t(
+                          `from ${levels[0]!.name} to ${levels.at(-1)!.name}. The more you sell, the higher you climb.`,
+                          `de ${levels[0]!.name} à ${levels.at(-1)!.name}. Plus tu vends, plus tu montes.`,
+                        )}
+                      </li>
+                    )}
+                  </ul>
                 </div>
               </div>
             </div>
@@ -3078,7 +3118,7 @@ export function WelcomePage(props: {
                 'Installe-la sur ton téléphone et active les notifications pour être au courant de chaque paiement, récompense et étape atteinte.',
               )}
             </p>
-            <InstallSteps />
+            <InstallSteps heading={false} />
             <div class="card push-box" data-push-key={props.pushKey}>
               <div>
                 <strong>Notifications</strong>
@@ -3273,15 +3313,16 @@ export function AdminRewardsPage(props: { user: User; rules: RewardRules; saved:
   const { rules, saved } = props;
   const levelRows = [...rules.levels, ...Array.from({ length: BLANK_ROWS }, () => ({ name: '', at: NaN, color: '' as LevelColor }))];
   return (
-    <Layout title="Levels & rewards" user={props.user}>
-      <h1>Levels &amp; rewards</h1>
+    <Layout title="Levels & merch" user={props.user}>
+      <h1>Levels &amp; merch</h1>
       <p class="muted">
-        Promoters climb levels and earn free tickets and merch as they sell. Changes apply to everyone right away, counted
-        from all their sales so far; rewards already requested stay requested.
+        Promoters climb levels and earn merch from all the tickets they sell, across events. Changes apply to everyone
+        right away, counted from all their sales so far; merch already requested stays requested.
       </p>
       <p class="muted">
-        Commission is set on <a href="/admin/commissions">Commissions</a>; deals with VIP or guest list on{' '}
-        <a href="/admin/rules">Rules (advanced)</a>.
+        What they earn per event (commission, free tickets, VIP, guest list, bonus) is in the{' '}
+        <a href="/admin/rules">rules</a>; a promoter&rsquo;s usual rate is on their page and rates per event on{' '}
+        <a href="/admin/commissions">Commissions</a>.
       </p>
       <Flash ok={props.ok} error={props.error} />
 
@@ -3293,9 +3334,6 @@ export function AdminRewardsPage(props: { user: User; rules: RewardRules; saved:
               <LevelBadge level={l} /> <span class="muted">{l.at}+</span>
             </span>
           ))}
-        </p>
-        <p>
-          <strong>Free tickets for each event:</strong> {describeTrack(saved.tickets, 'ticket')}
         </p>
         <p>
           <strong>Merch:</strong> {describeTrack(saved.merch, 'merch')}
@@ -3344,17 +3382,6 @@ export function AdminRewardsPage(props: { user: User; rules: RewardRules; saved:
         </div>
 
         <div class="card stack-card">
-          <h2 class="first">Free tickets</h2>
-          <p class="muted">
-            Counted per event, from the promoter's sales for that event. They use them on that event or ask to roll them
-            over to another upcoming one; you accept or decline each request. Unrequested ones are lost when the event is
-            over. Clear a row to remove it; leave every row empty and "every" at 0 to turn free tickets off.
-          </p>
-          <MilestoneRows prefix="ticket" track={rules.tickets} unit="sales" />
-          <RepeatRow prefix="ticket" track={rules.tickets} unit="sales" />
-        </div>
-
-        <div class="card stack-card">
           <h2 class="first">Merch</h2>
           <p class="muted">
             Counted from all tickets sold. Name what each milestone gives (like Hoodie) or leave it empty for "a merch item";
@@ -3365,13 +3392,13 @@ export function AdminRewardsPage(props: { user: User; rules: RewardRules; saved:
           <RepeatRow prefix="merch" track={rules.merch} unit="tickets" />
         </div>
 
-        <button type="submit">Save levels and rewards</button>
+        <button type="submit">Save levels and merch</button>
       </form>
 
       {props.customized && (
         <form method="post" action="/admin/rewards/reset" class="reset-rules">
           <button type="submit" class="secondary">
-            Back to the default levels and rewards
+            Back to the default levels and merch
           </button>
         </form>
       )}
@@ -4124,7 +4151,8 @@ export function JoinPage(props: { invite: InviteLink | null; team?: string | nul
 export function AdminCommissionsPage(props: {
   user: User;
   events: { id: number; title: string; start: Date | null; timezone: string | null; currency: string; promoters: User[] }[];
-  rules: Map<string, EventRule>;
+  // By "userId:eventId", from the rules: the promoter's own rate on the event, and what applies without it.
+  rates: Map<string, { own: CommissionSetting | null; without: CommissionSetting }>;
   ok?: string;
   error?: string;
 }) {
@@ -4148,8 +4176,24 @@ export function AdminCommissionsPage(props: {
           <p class="muted">{formatDate(e.start, e.timezone)}</p>
           <div class="rate-rows">
             {e.promoters.map((p) => {
-              const rule = props.rules.get(`${p.id}:${e.id}`);
-              const usual = describeRule(usualRuleFor(p), e.currency);
+              const rate = props.rates.get(`${p.id}:${e.id}`)!;
+              const rule = rate.own?.rule ?? null;
+              const usual = describeCommission(rate.without, e.currency);
+              // Written in the rules editor as something else than a rate: shown, and changed there.
+              if (rate.own?.custom) {
+                return (
+                  <div class="rate-row">
+                    <a class="who" href={`/admin/promoters/${p.id}`}>
+                      <Avatar user={p} size="small" />
+                      <span>
+                        {p.name}
+                        <span class="muted rate-now">Custom rule for this event</span>
+                      </span>
+                    </a>
+                    <a href={`/admin/rules/edit?scope=promoter_event&user=${p.id}&event=${e.id}`}>Edit in Rules →</a>
+                  </div>
+                );
+              }
               return (
                 <form class="rate-row" method="post" action="/admin/commissions">
                   <input type="hidden" name="user_id" value={String(p.id)} />

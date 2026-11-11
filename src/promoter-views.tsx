@@ -275,7 +275,7 @@ function Progress(props: { percent: number; label: string }) {
   );
 }
 
-function LevelCard(props: { rewards: Rewards; rewardsHref?: string }) {
+function LevelCard(props: { rewards: Rewards; rewardsHref?: string; deal?: { name: string; words: string }[] }) {
   const { totalSold, merch } = props.rewards;
   const rules = rewardRules();
   const { level, next, progress } = levelFor(totalSold);
@@ -303,18 +303,18 @@ function LevelCard(props: { rewards: Rewards; rewardsHref?: string }) {
           : t(`Top level: ${level.name}. Legendary.`, `Niveau maximum : ${level.name}. Légendaire.`)}
       </p>
       <ul class="unlocks">
-        {(trackOn(rules.tickets) || freeTickets > 0) && (
-          <li class={freeTickets > 0 ? 'ready' : ''}>
-            {freeTickets > 0
-              ? t(
-                  `${plural(freeTickets, [onlyPlain ? 'free ticket' : 'event reward', ''], [onlyPlain ? 'free tickets' : 'event rewards', ''])} ready to request`,
-                  `${plural(freeTickets, ['', onlyPlain ? 'billet gratuit prêt' : 'récompense d’événement prête'], ['', onlyPlain ? 'billets gratuits prêts' : 'récompenses d’événement prêtes'])} à demander`,
-                )
-              : t(
-                  `Free tickets for each event: ${lowerFirst(describeTrack(rules.tickets, 'ticket'))}`,
-                  `Billets gratuits pour chaque événement : ${lowerFirst(describeTrack(rules.tickets, 'ticket'))}`,
-                )}
+        {freeTickets > 0 ? (
+          <li class="ready">
+            {t(
+              `${plural(freeTickets, [onlyPlain ? 'free ticket' : 'event reward', ''], [onlyPlain ? 'free tickets' : 'event rewards', ''])} ready to request`,
+              `${plural(freeTickets, ['', onlyPlain ? 'billet gratuit prêt' : 'récompense d’événement prête'], ['', onlyPlain ? 'billets gratuits prêts' : 'récompenses d’événement prêtes'])} à demander`,
+            )}
           </li>
+        ) : (
+          // Nothing ready: what each event gives, as their rule says (not a copy of it that could drift).
+          (props.deal ?? [])
+            .filter((d) => d.name !== 'commission' && d.name !== 'bonus')
+            .map((d) => <li>{t(`On each event, ${lowerFirst(d.words)}`, `Pour chaque événement, ${lowerFirst(d.words)}`)}</li>)
         )}
         {(trackOn(rules.merch) || merch.available > 0) && (
           <li class={merch.available > 0 ? 'ready' : ''}>
@@ -503,6 +503,7 @@ export function DashboardPage(props: {
   media: Map<number, string>;
   banners: Map<number, string>;
   pageLink?: string | null; // the promoter's public page (short link when there is one); none when hidden
+  deal?: { name: string; words: string }[]; // their usual rule in words, for the level card
 }) {
   const events = summarizeEvents(props.rows, props.percent);
   const upcoming = events.filter((e) => !isPast(e));
@@ -581,7 +582,7 @@ export function DashboardPage(props: {
             outsideSold={props.rewards.outsideSold}
             payoutsHref={self ? '/rewards/checkout' : undefined}
           />
-          <LevelCard rewards={props.rewards} rewardsHref={self ? '/rewards/checkout' : undefined} />
+          <LevelCard rewards={props.rewards} rewardsHref={self ? '/rewards/checkout' : undefined} deal={props.deal} />
           {self && props.pageLink && <PageCard link={props.pageLink} />}
           {props.codes.length > 0 && <CodesCard codes={props.codes} rows={props.rows} upcoming={upcoming.filter((e) => !e.draft)} />}
 

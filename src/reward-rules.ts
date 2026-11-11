@@ -181,29 +181,43 @@ function reward(count: number, label: string, unit: 'ticket' | 'merch'): string 
   return unit === 'ticket' ? plural(count, 'free ticket') : plural(count, 'merch item');
 }
 
-/** The rule for a track in one sentence, like "1 free ticket at 1 sale, then 1 free ticket every 5 more sales." */
+/**
+ * The rule for a track in one plain sentence, like "1 free ticket from your first sale, then 1 more every
+ * 5 sales after that." The same reward again reads "1 more", not the whole name twice.
+ */
 export function describeTrack(t: Track, unit: 'ticket' | 'merch'): string {
   if (lang() === 'fr') return describeTrackFr(t, unit);
   if (!trackOn(t)) return unit === 'ticket' ? 'No free tickets for now.' : 'No merch for now.';
-  const sale = unit === 'ticket' ? 'sale' : 'ticket sold';
-  const sales = unit === 'ticket' ? 'sales' : 'tickets sold';
-  const parts = t.milestones.map((m) => `${reward(m.count, m.label, unit)} at ${m.at} ${m.at === 1 ? sale : sales}`);
+  const sales = (n: number) => (unit === 'ticket' ? `${n} ${n === 1 ? 'sale' : 'sales'}` : `${n} ${n === 1 ? 'ticket' : 'tickets'} sold`);
+  const first = unit === 'ticket' ? 'from your first sale' : 'from your first ticket sold';
+  const parts = t.milestones.map((m) => `${reward(m.count, m.label, unit)} ${m.at === 1 ? first : `at ${sales(m.at)}`}`);
   if (t.every > 0) {
-    const more = unit === 'ticket' ? 'more sales' : 'more tickets sold';
-    parts.push(`${parts.length ? 'then ' : ''}${reward(t.count, t.label, unit)} every ${t.every === 1 ? (unit === 'ticket' ? 'sale' : 'ticket sold') : `${t.every} ${parts.length ? more : sales}`}`);
+    const last = t.milestones.at(-1);
+    const what = last && last.count === t.count && last.label === t.label ? `${t.count} more` : reward(t.count, t.label, unit);
+    const each = t.every === 1 ? (unit === 'ticket' ? 'every sale' : 'every ticket sold') : `every ${sales(t.every)}${parts.length ? ' after that' : ''}`;
+    parts.push(`${parts.length ? 'then ' : ''}${what} ${each}`);
   }
   const sentence = parts.join(', ');
   return `${sentence[0]!.toUpperCase()}${sentence.slice(1)}.`;
 }
 
-// « 1 billet gratuit à 1 vente, puis 1 billet gratuit à chaque tranche de 5 ventes de plus. »
+// « 1 billet gratuit dès ta première vente, puis 1 de plus toutes les 5 ventes suivantes. »
 function describeTrackFr(t: Track, unit: 'ticket' | 'merch'): string {
   if (!trackOn(t)) return unit === 'ticket' ? 'Pas de billets gratuits pour l’instant.' : 'Pas de merch pour l’instant.';
   const sales = (n: number) => (unit === 'ticket' ? `${n} vente${n > 1 ? 's' : ''}` : `${n} billet${n > 1 ? 's' : ''} vendu${n > 1 ? 's' : ''}`);
-  const parts = t.milestones.map((m) => `${reward(m.count, m.label, unit)} à ${sales(m.at)}`);
+  const first = unit === 'ticket' ? 'dès ta première vente' : 'dès ton premier billet vendu';
+  const parts = t.milestones.map((m) => `${reward(m.count, m.label, unit)} ${m.at === 1 ? first : `à ${sales(m.at)}`}`);
   if (t.every > 0) {
-    const each = t.every === 1 ? (unit === 'ticket' ? 'à chaque vente' : 'à chaque billet vendu') : `à chaque tranche de ${sales(t.every)}${parts.length ? ' de plus' : ''}`;
-    parts.push(`${parts.length ? 'puis ' : ''}${reward(t.count, t.label, unit)} ${each}`);
+    const last = t.milestones.at(-1);
+    const what = last && last.count === t.count && last.label === t.label ? `${t.count} de plus` : reward(t.count, t.label, unit);
+    // Ventes is feminine, billets masculine: "toutes les 5 ventes", "tous les 50 billets vendus".
+    const each =
+      t.every === 1
+        ? unit === 'ticket'
+          ? 'à chaque vente'
+          : 'à chaque billet vendu'
+        : `${unit === 'ticket' ? 'toutes' : 'tous'} les ${sales(t.every)}${parts.length ? (unit === 'ticket' ? ' suivantes' : ' suivants') : ''}`;
+    parts.push(`${parts.length ? 'puis ' : ''}${what} ${each}`);
   }
   const sentence = parts.join(', ');
   return `${sentence[0]!.toUpperCase()}${sentence.slice(1)}.`;

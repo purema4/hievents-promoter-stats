@@ -4,7 +4,7 @@ import { codesFor, findUser, listUsers, type User } from './local-db';
 import { formatMoney } from './money';
 import { levelFor } from './reward-rules';
 import { checkRule, evaluateRules, parseRule, RulesEngineUnavailable, type RuleLine, type RuleNode, type RuleProblem } from './rules-engine';
-import { currentRule, listRewardTypes, ruleFor, ruleOutputs, type RuleScope, type RuleTarget } from './rules';
+import { currentRule, generalRuleFor, listRewardTypes, ruleFor, ruleOutputs, type RuleScope, type RuleTarget } from './rules';
 import { emptyInputs, type RuleInputs } from './rule-variables';
 import { describeLine, type Lang, type Unit } from './rule-words';
 
@@ -200,6 +200,32 @@ export async function dealInWords(userId: number, eventId: number, lang: Lang): 
     const words = ruleInWords(lines, checked.trees, lang);
     if (dealCache.size > 500) dealCache.clear();
     dealCache.set(key, words);
+    return words;
+  } catch (err) {
+    if (err instanceof RulesEngineUnavailable) return [];
+    throw err;
+  }
+}
+
+const generalCache = new Map<string, { name: string; words: string }[]>();
+
+/**
+ * A promoter's usual deal (their rule, else the default rule; no event's), line by line in words with
+ * the output it sets: what the welcome steps and the level card tell them. Lines that always give 0 are
+ * left out. Empty when the engine cannot be reached.
+ */
+export async function generalDealInWords(userId: number, lang: Lang): Promise<{ name: string; words: string }[]> {
+  const rule = generalRuleFor(userId);
+  const types = listRewardTypes();
+  const key = `${rule.key}:${lang}:${types.map((t) => `${t.key}=${t.label_en}/${t.label_fr}`).join(',')}`;
+  const cached = generalCache.get(key);
+  if (cached) return cached;
+  try {
+    const checked = await checkRule(rule.lines.map((l) => `${l.name} = ${l.expr}`).join('\n'), ruleOutputs());
+    const lines = checked.lines.filter((l) => !isZero(checked.trees.get(l.name)) && checked.trees.has(l.name));
+    const words = lines.map((l) => ({ name: l.name, words: ruleInWords([l], checked.trees, lang)[0]! }));
+    if (generalCache.size > 500) generalCache.clear();
+    generalCache.set(key, words);
     return words;
   } catch (err) {
     if (err instanceof RulesEngineUnavailable) return [];

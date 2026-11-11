@@ -39,7 +39,8 @@ export function commissionCents(fullPrice: string, percent: number): number {
 // the Commissions page and the usual rate are entered. They are saved as rules (see rules.ts).
 export type EventRule = { kind: 'percent' | 'flat'; value: number };
 /** A promoter's usual rate and the rates set per event, as entered (for describing them). */
-export type LegacyRate = { usual: EventRule; events: Map<number, EventRule> };
+// usual null: a custom rule (not a plain percentage or amount per ticket), described as such.
+export type LegacyRate = { usual: EventRule | null; events: Map<number, EventRule | null> };
 
 /** What the rules gave a promoter on one event (see earnings.ts). */
 export type EventEarning = {
@@ -117,7 +118,8 @@ export function usualCommissionOn(rule: EventRule, salesCents: number, tickets: 
   return rule.kind === 'flat' ? Math.round(rule.value) * tickets : Math.round((salesCents * rule.value) / 100);
 }
 
-export function describeRule(rule: EventRule, currency = 'CAD'): string {
+export function describeRule(rule: EventRule | null, currency = 'CAD'): string {
+  if (!rule) return 'custom rule';
   return rule.kind === 'flat' ? `${formatMoney(rule.value, currency)} per ticket` : formatPercent(rule.value);
 }
 

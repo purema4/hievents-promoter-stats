@@ -1,5 +1,5 @@
-import { commissionLine, setRuleLine } from './rules';
-import { db, usualRuleFor, type User } from './local-db';
+import { commissionLine, eventCommissionsOf, setRuleLine, usualCommission } from './rules';
+import { db, type User } from './local-db';
 import type { EventRule, LegacyRate } from './money';
 
 /*
@@ -17,18 +17,10 @@ db.exec(`
   );
 `);
 
-/** A promoter's usual rate and their event rates. */
+/** A promoter's usual rate and their event rates, as the rules give them (null: a custom rule). */
 export function rateFor(user: User): LegacyRate {
-  const rows = db
-    .query<{ event_id: number } & EventRule, [number]>('SELECT event_id, kind, value FROM event_commissions WHERE user_id = ?')
-    .all(user.id);
-  return { usual: usualRuleFor(user), events: new Map(rows.map((r) => [r.event_id, { kind: r.kind, value: r.value }])) };
-}
-
-/** Every event rate, by "userId:eventId". */
-export function allEventRules(): Map<string, EventRule> {
-  const rows = db.query<{ user_id: number; event_id: number } & EventRule, []>('SELECT user_id, event_id, kind, value FROM event_commissions').all();
-  return new Map(rows.map((r) => [`${r.user_id}:${r.event_id}`, { kind: r.kind, value: r.value }]));
+  const events = new Map([...eventCommissionsOf(user.id)].map(([id, s]) => [id, s.rule]));
+  return { usual: usualCommission(user.id).rule, events };
 }
 
 /** Sets a promoter's rate for an event, or back to their usual rate with null. */

@@ -1,6 +1,9 @@
 // Started by test/integration/rules-migration.test.ts in a subprocess with its own DATA_DIR and the test
 // stack's Hi.Events database: the old commission and free-ticket numbers next to the migrated rules'.
-import { setEventRule, rateFor } from '../../src/commission';
+import { setEventRule } from '../../src/commission';
+import { config } from '../../src/config';
+import { db, type User } from '../../src/local-db';
+import type { EventRule } from '../../src/money';
 import { statsForCodes } from '../../src/hievents';
 import { createUser, findUser } from '../../src/local-db';
 import { summarizeEvents } from '../../src/promoter-views';
@@ -8,6 +11,15 @@ import { freeTicketsEarned } from '../../src/rewards';
 import { evaluateRules } from '../../src/rules-engine';
 import { migrateToRules, ruleFor } from '../../src/rules';
 import { emptyInputs } from '../../src/rule-variables';
+
+// How the code before rules read a promoter's rates: their columns (or COMMISSION_PERCENT) and the
+// event_commissions table. The app now reads them from the rules; this keeps the old answer to compare.
+function rateFor(user: User): { usual: EventRule; events: Map<number, EventRule> } {
+  const usual: EventRule =
+    user.commission_flat_cents != null ? { kind: 'flat', value: user.commission_flat_cents } : { kind: 'percent', value: user.commission_percent ?? config.commissionPercent };
+  const rows = db.query<{ event_id: number } & EventRule, [number]>('SELECT event_id, kind, value FROM event_commissions WHERE user_id = ?').all(user.id);
+  return { usual, events: new Map(rows.map((r) => [r.event_id, { kind: r.kind, value: r.value }])) };
+}
 
 const people = [
   { name: 'Default rate', commission: undefined },

@@ -29,7 +29,8 @@ describeIntegration('usual commission: percentage or flat per ticket', () => {
   test('the add form offers the default, a percentage or CAD per ticket', async () => {
     const html = await admin.page('/admin');
     expect(html).toContain('name="commission_kind"');
-    expect(text(html)).toContain('Default (10% of sales)');
+    // Read from the default rule, not a number set apart from it.
+    expect(text(html)).toContain('Default rule (10%)');
     expect(text(html)).toContain('CAD per ticket');
   });
 

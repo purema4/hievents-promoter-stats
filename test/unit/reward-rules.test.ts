@@ -65,9 +65,9 @@ describe('counting on a track', () => {
 
 describe('the rules in words', () => {
   test.each([
-    [defaultRules().tickets, 'ticket', '1 free ticket at 1 sale, then 1 free ticket every 5 more sales.'],
+    [defaultRules().tickets, 'ticket', '1 free ticket from your first sale, then 1 more every 5 sales after that.'],
     [defaultRules().merch, 'merch', '1 merch item every 50 tickets sold.'],
-    [track([[20, 1, 'T-shirt'], [50, 2, 'Sticker']], 100, 1, 'Cap'), 'merch', 'T-shirt at 20 tickets sold, 2 × Sticker at 50 tickets sold, then Cap every 100 more tickets sold.'],
+    [track([[20, 1, 'T-shirt'], [50, 2, 'Sticker']], 100, 1, 'Cap'), 'merch', 'T-shirt at 20 tickets sold, 2 × Sticker at 50 tickets sold, then Cap every 100 tickets sold after that.'],
     [track([[3, 2]]), 'ticket', '2 free tickets at 3 sales.'],
     [track([]), 'ticket', 'No free tickets for now.'],
   ] as const)('%#', (t, unit, words) => {
@@ -77,8 +77,8 @@ describe('the rules in words', () => {
 
 describe('the rules in words, in French', () => {
   test.each([
-    [defaultRules().tickets, 'ticket', '1 billet gratuit à 1 vente, puis 1 billet gratuit à chaque tranche de 5 ventes de plus.'],
-    [defaultRules().merch, 'merch', '1 article de merch à chaque tranche de 50 billets vendus.'],
+    [defaultRules().tickets, 'ticket', '1 billet gratuit dès ta première vente, puis 1 de plus toutes les 5 ventes suivantes.'],
+    [defaultRules().merch, 'merch', '1 article de merch tous les 50 billets vendus.'],
     [track([[3, 2]]), 'ticket', '2 billets gratuits à 3 ventes.'],
     [track([]), 'ticket', 'Pas de billets gratuits pour l’instant.'],
   ] as const)('%#', (t, unit, words) => {

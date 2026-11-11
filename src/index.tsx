@@ -120,13 +120,13 @@ import {
 } from './directory';
 import { directoryPreview, previewVersion } from './directory-preview';
 import { hiddenByTeam, pageEvents, pageOwner, setPageHidden } from './promoter-page';
-import { allEventRules, setEventRule } from './commission';
+import { setEventRule } from './commission';
 import { db as localDb, saveLang, setLangPref, setShowAdvanced } from './local-db';
 import { lang as currentLang, langFromHeader, t, withLang } from './i18n';
-import { currentRule, endRulesOf, ruleFor, FREE_TICKETS, generalRuleFor, listRewardTypes, listTemplates, migrateToRules, removeTemplate, rewardTypeOf, ruleHistory, ruleOutputs, saveRewardType, saveRuleVersion, saveTemplate as saveRuleTemplate, type RuleScope, setRuleLine, setUsualRule, trackExpression } from './rules';
+import { commissionBeforeOwnEventRate, currentRule, endRulesOf, eventCommissionsOf, ownCommission, ruleFor, usualCommission, type CommissionSetting, FREE_TICKETS, generalRuleFor, listRewardTypes, listTemplates, migrateToRules, removeTemplate, rewardTypeOf, ruleHistory, ruleOutputs, saveRewardType, saveRuleVersion, saveTemplate as saveRuleTemplate, type RuleScope, setRuleLine, setUsualRule, trackExpression } from './rules';
 import { checkRule, evaluateRules, RULE_MAX_LENGTH, RulesEngineUnavailable, rulesEngineUp } from './rules-engine';
 import { ruleWriterEnabled, writeRule } from './rule-writer';
-import { checkDraft, dealInWords, labelOf, resultSentence, ruleInWords, type RuleCheck } from './rule-admin';
+import { checkDraft, dealInWords, generalDealInWords, labelOf, resultSentence, ruleInWords, type RuleCheck } from './rule-admin';
 import { AdminRuleEditPage, AdminRulesPage, ruleEditHref, type RuleTargetInfo } from './rule-views';
 import { emptyInputs } from './rule-variables';
 import { allEventBanners, checkoutNotice, generalBanner, setCheckoutNotice, parseBanner, setEventBanner, setGeneralBanner } from './banners';
@@ -169,7 +169,6 @@ import { tidyCity } from './places';
 import {
   codeOwners,
   codesFor,
-  usualRuleFor,
   type UsualCommission,
   countAdmins,
   createUser,
@@ -351,8 +350,10 @@ function flash(key?: string): string | undefined {
 }
 
 // A promoter's usual commission from their form: the default, a percentage, or a flat amount per ticket.
-function parseUsualCommission(body: Record<string, unknown>): UsualCommission | 'invalid' {
+function parseUsualCommission(body: Record<string, unknown>): UsualCommission | 'invalid' | 'keep' {
   const kind = String(body.commission_kind ?? 'default');
+  // A custom commission line in their rule: left as it is.
+  if (kind === 'keep') return 'keep';
   if (kind === 'default') return { percent: null, flatCents: null };
   const raw = String(body.commission_value ?? '').trim().replace(',', '.');
   const value = /^[0-9]+(\.[0-9]{1,2})?$/.test(raw) ? Number(raw) : NaN;
@@ -872,6 +873,7 @@ async function renderDashboard(c: Context<Env>, promoter: User, basePath: string
       media={data.media}
       banners={data.banners}
       pageLink={withPage ? (pageShortLink(promoter) ?? pageLink(promoter)) : null}
+      deal={await generalDealInWords(promoter.id, currentLang())}
     />,
   );
 }
@@ -925,13 +927,14 @@ app.get('/', async (c) => {
 
 app.get('/events/:eventId', (c) => renderEvent(c, c.get('user'), ''));
 
-app.get('/welcome', (c) => {
+app.get('/welcome', async (c) => {
   const user = c.get('user');
   const step = Math.min(4, Math.max(1, Number(c.req.query('step') ?? 1) || 1));
   return c.html(
     <WelcomePage
       user={user}
       step={step}
+      deal={step === 1 ? await generalDealInWords(user.id, currentLang()) : []}
       codes={codesFor(user.id)}
       pushKey={pushPublicKey}
       error={flash(c.req.query('error'))}
@@ -1605,9 +1608,10 @@ app.post('/admin/promoters', async (c) => {
   const body = await c.req.parseBody();
   const name = String(body.name ?? '').trim();
   const email = String(body.email ?? '').trim();
-  const commission = parseUsualCommission(body);
+  const parsed = parseUsualCommission(body);
   if (!name || !email) return c.redirect('/admin?error=missing');
-  if (commission === 'invalid') return c.redirect('/admin?error=commission');
+  if (parsed === 'invalid') return c.redirect('/admin?error=commission');
+  const commission = parsed === 'keep' ? { percent: null, flatCents: null } : parsed;
   if (findUserByEmail(email)) return c.redirect('/admin?error=exists');
   const id = await createUser({ name, email, isAdmin: body.is_admin === '1', commission });
   setUsualRule(id, commission, c.get('user').id);
@@ -1652,9 +1656,19 @@ app.post('/admin/promoters/:id', async (c) => {
   const name = String(body.name ?? '').trim();
   const email = String(body.email ?? '').trim();
   const isAdmin = body.is_admin === '1';
-  const commission = parseUsualCommission(body);
+  const parsed = parseUsualCommission(body);
   if (!name || !email) return c.redirect(`${back}?error=missing`);
-  if (commission === 'invalid') return c.redirect(`${back}?error=commission`);
+  if (parsed === 'invalid') return c.redirect(`${back}?error=commission`);
+  // Compared with their rule, which is what counts (the columns are only how it was entered).
+  const own = ownCommission(promoter.id);
+  const commission = parsed === 'keep' ? { percent: promoter.commission_percent, flatCents: promoter.commission_flat_cents ?? null } : parsed;
+  const unchanged =
+    parsed === 'keep' ||
+    (own.rule
+      ? own.rule.kind === 'flat'
+        ? commission.flatCents === own.rule.value
+        : commission.flatCents === null && commission.percent === own.rule.value
+      : !own.custom && commission.percent === null && commission.flatCents === null);
   const existing = findUserByEmail(email);
   if (existing && existing.id !== promoter.id) return c.redirect(`${back}?error=exists`);
   if (promoter.is_admin && !isAdmin && countAdmins() === 1) return c.redirect(`${back}?error=last_admin`);
@@ -1664,9 +1678,7 @@ app.post('/admin/promoters/:id', async (c) => {
   setAlias(promoter.id, alias);
   updateUser(promoter.id, { name, email, isAdmin, commission });
   // Only when the usual rate changed, so the rest of the promoter's rule is left alone.
-  if (commission.percent !== promoter.commission_percent || commission.flatCents !== (promoter.commission_flat_cents ?? null)) {
-    setUsualRule(promoter.id, commission, c.get('user').id);
-  }
+  if (!unchanged) setUsualRule(promoter.id, commission, c.get('user').id);
   if (isAdmin && !promoter.is_admin) leaveTeams(promoter.id);
   if (email.toLowerCase() !== promoter.email.toLowerCase()) {
     revokeAccess(promoter.id);
@@ -1954,17 +1966,17 @@ app.post('/team/invites/:id/:action{off|on}', (c) => toggleInvite(c, '/team/invi
 
 // --- Commission per event ---------------------------------------------------------------------------
 
-app.get('/admin/commissions', async (c) =>
-  c.html(
-    <AdminCommissionsPage
-      user={c.get('user')}
-      events={await commissionEvents()}
-      rules={allEventRules()}
-      ok={flash(c.req.query('ok'))}
-      error={flash(c.req.query('error'))}
-    />,
-  ),
-);
+app.get('/admin/commissions', async (c) => {
+  const events = await commissionEvents();
+  // Read from the rules: each promoter's own rate on the event, and what they get without one.
+  const rates = new Map<string, { own: CommissionSetting | null; without: CommissionSetting }>();
+  for (const e of events) {
+    for (const p of e.promoters) {
+      rates.set(`${p.id}:${e.id}`, { own: eventCommissionsOf(p.id).get(e.id) ?? null, without: commissionBeforeOwnEventRate(p.id, e.id) });
+    }
+  }
+  return c.html(<AdminCommissionsPage user={c.get('user')} events={events} rates={rates} ok={flash(c.req.query('ok'))} error={flash(c.req.query('error'))} />);
+});
 
 app.post('/admin/commissions', async (c) => {
   const body = await c.req.parseBody();
@@ -2663,7 +2675,8 @@ function rulesFromForm(body: Record<string, string | File | (string | File)[]>):
       label: list(`${prefix}_every_label`)[0] ?? '',
     };
   };
-  return { levels, tickets: track('ticket'), merch: track('merch') };
+  // Free tickets are set in the rules only (Rules → free_tickets): the saved track stays as it was.
+  return { levels, tickets: rewardRules().tickets, merch: track('merch') };
 }
 
 app.post('/admin/rewards', async (c) => {
@@ -2677,16 +2690,12 @@ app.post('/admin/rewards', async (c) => {
     );
   }
   saveRewardRules(rules);
-  // Free tickets are counted by the rules: the track becomes the default rule's free_tickets line.
-  setRuleLine('default', {}, FREE_TICKETS, trackOn(rules.tickets) ? `${FREE_TICKETS} = ${trackExpression(rules.tickets)}` : null, c.get('user').id);
   audit(c, 'admin.rewards_saved', { by: c.get('user').id, levels: rules.levels.length });
   return c.redirect('/admin/rewards?ok=rewards_saved');
 });
 
 app.post('/admin/rewards/reset', (c) => {
   saveRewardRules(null);
-  const tickets = rewardRules().tickets;
-  setRuleLine('default', {}, FREE_TICKETS, trackOn(tickets) ? `${FREE_TICKETS} = ${trackExpression(tickets)}` : null, c.get('user').id);
   audit(c, 'admin.rewards_reset', { by: c.get('user').id });
   return c.redirect('/admin/rewards?ok=rewards_reset');
 });

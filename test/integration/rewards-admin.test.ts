@@ -55,17 +55,21 @@ describeIntegration('levels and rewards set by admins', () => {
   });
 
   test('the defaults until an admin changes them', async () => {
-    const page = text(await admin.page('/admin/rewards'));
-    expect(page).toContain('Free tickets for each event: 1 free ticket at 1 sale, then 1 free ticket every 5 more sales.');
+    const html = await admin.page('/admin/rewards');
+    const page = text(html);
+    expect(page).toContain('Levels & merch');
     expect(page).toContain('Merch: 1 merch item every 50 tickets sold.');
-    expect(page).not.toContain('Back to the default levels and rewards');
+    // Free tickets are in the rules only: no second place to set them, out of step with the rules.
+    expect(html).not.toContain('name="ticket_at"');
+    expect(page).not.toContain('Free tickets for each event');
+    expect(html).toContain('<a href="/admin/rules">rules</a>');
+    expect(page).not.toContain('Back to the default levels and merch');
     expect(await promoter.client.page('/')).toContain('level-c-bronze">Bronze');
   });
 
   test('admins set levels and milestones; promoters see them at once', async () => {
     expect(location(await admin.post('/admin/rewards', customRules))).toBe('/admin/rewards?ok=rewards_saved');
     const settings = text(await admin.page('/admin/rewards'));
-    expect(settings).toContain('Free tickets for each event: 3 free tickets at 2 sales.');
     expect(settings).toContain('Merch: Hoodie at 8 tickets sold.');
 
     const dashboard = await promoter.client.page('/');
@@ -74,9 +78,10 @@ describeIntegration('levels and rewards set by admins', () => {
     expect(text(dashboard)).toContain('Hoodie unlocked: request it now');
 
     const payouts = await promoter.client.page('/payouts');
-    // 4 sold on Warehouse Night: the milestone at 2 sales gives 3 free tickets, ready in the shop.
+    // 4 sold on Warehouse Night: free tickets still come from the default rule (1 from the first sale),
+    // whatever ticket rows a form sends here.
     expect(payouts).toContain('name="qty.1.free_tickets"');
-    expect(text(payouts.slice(payouts.indexOf('data-name="Free ticket · Warehouse Night"')))).toMatch(/3 available/);
+    expect(text(payouts.slice(payouts.indexOf('data-name="Free ticket · Warehouse Night"')))).toMatch(/1 available/);
     expect(payouts).toContain('value="Hoodie, "');
     expect(location(await promoter.client.post('/rewards/merch', { details: 'Hoodie, size M' }))).toBe('/payouts?ok=reward_requested#rewards');
 
@@ -114,7 +119,7 @@ describeIntegration('levels and rewards set by admins', () => {
   });
 
   test('back to the defaults', async () => {
-    expect(text(await admin.page('/admin/rewards'))).toContain('Back to the default levels and rewards');
+    expect(text(await admin.page('/admin/rewards'))).toContain('Back to the default levels and merch');
     expect(location(await admin.post('/admin/rewards/reset'))).toBe('/admin/rewards?ok=rewards_reset');
     expect(await promoter.client.page('/')).toContain('level-c-bronze">Bronze');
   });

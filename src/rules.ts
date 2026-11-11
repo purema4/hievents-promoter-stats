@@ -1,6 +1,6 @@
 import { config } from './config';
 import { addColumn, db, listUsers } from './local-db';
-import type { EventRule } from './money';
+import { describeRule, type EventRule } from './money';
 import { rewardRules, trackOn, type Track } from './reward-rules';
 import { parseRule, type RuleLine } from './rules-engine';
 import { FIXED_OUTPUTS } from './rule-variables';
@@ -312,6 +312,81 @@ export function trackExpression(t: Track): string {
 }
 
 export const FREE_TICKETS = 'free_tickets';
+
+// --- Commission, read back from the rules --------------------------------------------------------------
+
+/*
+ * The rules are the only place pay is set. The simple screens (a promoter's usual rate, Commissions)
+ * read the commission line back: a percentage or a flat amount per ticket when it is one written by
+ * commissionLine(), else "a custom rule", which only the rules editor changes.
+ */
+const PERCENT_LINE = /^\(\s*full_price_sales\s*\+\s*outside_sales\s*\)\s*\*\s*([0-9]+(?:\.[0-9]+)?)\s*\/\s*100$/;
+const FLAT_LINE = /^\(\s*tickets_sold\s*\+\s*outside_tickets\s*\)\s*\*\s*([0-9]+(?:\.[0-9]+)?)$/;
+
+/** A commission expression as a percentage or a flat amount per ticket (cents), when it is one; null for anything else. */
+export function simpleCommission(expr: string): EventRule | null {
+  const e = expr.trim();
+  const percent = PERCENT_LINE.exec(e);
+  if (percent) return { kind: 'percent', value: Number(percent[1]) };
+  const flat = FLAT_LINE.exec(e);
+  if (flat) return { kind: 'flat', value: Math.round(Number(flat[1]) * 100) };
+  return null;
+}
+
+/** Where a commission comes from, and what it is: scope null means no rule gives one (nothing is earned). */
+export type CommissionSetting = { scope: RuleScope | null; rule: EventRule | null; custom: boolean };
+
+function commissionIn(levels: [RuleScope, RuleVersion | null][]): CommissionSetting {
+  let found: { scope: RuleScope; expr: string } | null = null;
+  for (const [scope, version] of levels) {
+    const line = version && parseRule(version.text).lines.find((l) => l.name === 'commission');
+    if (line) found = { scope, expr: line.expr };
+  }
+  if (!found) return { scope: null, rule: null, custom: false };
+  const rule = simpleCommission(found.expr);
+  return { scope: found.scope, rule, custom: !rule };
+}
+
+/** A promoter's usual commission: their own rule's, else the default rule's. Without a promoter, the default's. */
+export function usualCommission(userId?: number | null): CommissionSetting {
+  return commissionIn([
+    ['default', currentRule('default')],
+    ...(userId ? ([['promoter', currentRule('promoter', { userId })]] as [RuleScope, RuleVersion | null][]) : []),
+  ]);
+}
+
+/** The commission line of a promoter's own rule only (scope null: they get the default). */
+export function ownCommission(userId: number): CommissionSetting {
+  return commissionIn([['promoter', currentRule('promoter', { userId })]]);
+}
+
+/** What a promoter gets on an event without a rate of their own there: default, theirs, then the event's. */
+export function commissionBeforeOwnEventRate(userId: number, eventId: number): CommissionSetting {
+  return commissionIn([
+    ['default', currentRule('default')],
+    ['promoter', currentRule('promoter', { userId })],
+    ['event', currentRule('event', { eventId })],
+  ]);
+}
+
+/** "10%", "$2.50 per ticket", "custom rule", or "no commission" when no rule gives one. */
+export function describeCommission(s: CommissionSetting, currency = 'CAD'): string {
+  if (!s.scope) return 'no commission';
+  return s.custom ? 'custom rule' : describeRule(s.rule, currency);
+}
+
+/** The rate set for a promoter on one event (their promoter-on-event rule), by event. */
+export function eventCommissionsOf(userId: number): Map<number, CommissionSetting> {
+  const events = db
+    .query<{ event_id: number }, [number]>("SELECT DISTINCT event_id FROM rule_versions WHERE scope = 'promoter_event' AND user_id = ?")
+    .all(userId);
+  const out = new Map<number, CommissionSetting>();
+  for (const { event_id } of events) {
+    const setting = commissionIn([['promoter_event', currentRule('promoter_event', { userId, eventId: event_id })]]);
+    if (setting.scope) out.set(event_id, setting);
+  }
+  return out;
+}
 
 /**
  * Once: turns the rates and the free-ticket track used before rules into rules, with the same results.
