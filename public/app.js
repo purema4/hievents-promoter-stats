@@ -692,3 +692,55 @@ for (const select of document.querySelectorAll('select[data-picks]')) {
     if (radio && !radio.disabled) radio.checked = true;
   });
 }
+
+// Checkout: each reward's count as the shop's − n + pill, over the list underneath (sent with the form).
+for (const box of document.querySelectorAll('[data-checkout-qty]')) {
+  const select = box.querySelector('select');
+  const max = select.options.length - 1;
+  const svg = (d) => {
+    const ns = 'http://www.w3.org/2000/svg';
+    const icon = document.createElementNS(ns, 'svg');
+    icon.setAttribute('viewBox', '0 0 24 24');
+    icon.setAttribute('width', '20');
+    icon.setAttribute('height', '20');
+    icon.setAttribute('aria-hidden', 'true');
+    const path = document.createElementNS(ns, 'path');
+    path.setAttribute('fill', 'currentColor');
+    path.setAttribute('d', d);
+    icon.append(path);
+    return icon;
+  };
+  const what = select.getAttribute('aria-label') || '';
+  const minus = document.createElement('button');
+  minus.type = 'button';
+  minus.setAttribute('aria-label', t(`One less (${what})`, `Un de moins (${what})`));
+  minus.append(svg('M5 11h14v2H5z'));
+  const plus = document.createElement('button');
+  plus.type = 'button';
+  plus.setAttribute('aria-label', t(`One more (${what})`, `Un de plus (${what})`));
+  plus.append(svg('M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z'));
+  const count = document.createElement('span');
+  count.className = 'stepper-n';
+  count.setAttribute('aria-live', 'polite');
+  const pill = document.createElement('div');
+  pill.className = 'stepper';
+  pill.append(minus, count, plus);
+  const line = box.closest('.checkout-line');
+  const show = () => {
+    const n = Number(select.value);
+    count.textContent = String(n);
+    minus.disabled = n <= 0;
+    plus.disabled = n >= max;
+    // At 0 the line stays, dimmed: it is left out of the request.
+    line?.classList.toggle('off', n === 0);
+  };
+  const step = (by) => {
+    select.value = String(Math.min(max, Math.max(0, Number(select.value) + by)));
+    show();
+  };
+  minus.addEventListener('click', () => step(-1));
+  plus.addEventListener('click', () => step(1));
+  select.hidden = true;
+  box.append(pill);
+  show();
+}

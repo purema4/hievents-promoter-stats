@@ -717,8 +717,13 @@ button.step { display: inline-grid; place-items: center; width: 32px; height: 32
 .who-strong { font-weight: 700; }
 .checkout-confirm { display: grid; gap: 12px; margin: 16px 0; }
 .checkout-confirm h2 { margin: 12px 0 0; }
-.checkout-qty { display: flex; align-items: center; gap: 6px; }
-.checkout-qty select { font: inherit; font-size: 22px; font-weight: 700; padding: 2px 6px; width: auto; }
+.checkout-qty { display: flex; align-items: center; gap: 6px; flex: none; }
+/* Same look as the shop's − n + pill; without scripts, the list itself wears it. */
+.checkout-qty select { width: auto; height: 44px; padding: 0 14px; border: 0; border-radius: 999px; background: var(--accent); color: var(--accent-text); font: inherit; font-size: 17px; font-weight: 700; font-variant-numeric: tabular-nums; cursor: pointer; }
+.checkout-qty .stepper:not([hidden]) { display: inline-flex; }
+.checkout-line.off .checkout-body { opacity: 0.45; }
+/* On phones the text gets the full width, under the pill. */
+@media (max-width: 560px) { .checkout-line:has([data-checkout-qty]) { flex-direction: column; gap: 10px; } }
 .checkout-payout { display: grid; gap: 12px; }
 .checkout-include { font-size: 17px; }
 .payout-fields { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); align-items: start; }

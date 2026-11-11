@@ -1433,20 +1433,23 @@ export function CheckoutPage(props: {
           <div class="checkout-lines">
             {props.lines.map((l) => (
               <div class="card checkout-line">
-                <div class="checkout-qty">
-                  {l.field && l.max ? (
-                    <select name={`qty.${l.field}`} aria-label={t('How many', 'Combien')}>
+                {l.field && l.max ? (
+                  // The shop's − n + pill, drawn by app.js over this list (which works without scripts).
+                  <div class="checkout-qty" data-checkout-qty>
+                    <select
+                      name={`qty.${l.field}`}
+                      aria-label={t(`How many: ${l.merch !== undefined ? 'Merch' : l.type ? typeName(l.type) : ''}`, `Combien : ${l.merch !== undefined ? 'Merch' : l.type ? typeName(l.type) : ''}`)}
+                    >
                       {Array.from({ length: l.max + 1 }, (_, n) => (
                         <option value={String(n)} selected={n === l.quantity}>
                           {n}
                         </option>
                       ))}
                     </select>
-                  ) : (
-                    l.quantity
-                  )}{' '}
-                  ×
-                </div>
+                  </div>
+                ) : (
+                  <div class="checkout-qty">{l.quantity} ×</div>
+                )}
                 <div class="checkout-body">
                   <div class="checkout-type">{l.merch !== undefined ? t('Merch', 'Merch') : l.type ? typeName(l.type) : ''}</div>
                   {l.type && typeWhat(l.type) && <p class="shop-what">{typeWhat(l.type)}</p>}

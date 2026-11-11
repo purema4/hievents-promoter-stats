@@ -165,7 +165,7 @@ describeIntegration('rewards shop', () => {
     // How many can still be changed here, up to what is available.
     expect(page).toContain('<select name="qty.1.vip_tickets"');
     expect(page).toContain('<option value="2" selected="">2</option>');
-    expect(words).toContain('× VIP ticket');
+    expect(words).toContain('VIP ticket');
     expect(words).toContain('Skip the line and get into the VIP area.');
     expect(words).toContain('Warehouse Night');
     expect(words).toContain(`Sent to you (${maya.name})`);
