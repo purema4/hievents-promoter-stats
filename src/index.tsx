@@ -78,7 +78,7 @@ import {
   sendTestNotification,
 } from './notifications';
 import { blankPng, eventCover } from './covers';
-import { allPromoCodes, dailyForCodes, sql } from './hievents';
+import { allPromoCodes, dailyForCodes, sql, ticketTypesForCodes } from './hievents';
 import { recentEmails, sendEmail, purgeEmailLog } from './mail';
 import { emailTypes, getTemplate, languagesOf, renderEmail, resetTemplate, sampleVars, saveReplyTo, saveTemplate, type EmailType } from './email-templates';
 import { formatMoney, parseAmountCents, usualCommissionOn, type EventRule } from './money';
@@ -97,6 +97,8 @@ import {
   rewardRequestsFor,
   checkRewards,
   requestRewards,
+  ticketLedger,
+  bankByAdmin,
   type RewardInput,
 } from './rewards';
 import { describeProblem, isCustomized as isRulesCustomized, rewardRules, saveRewardRules, trackOn, type LevelColor, type RewardRules, type Track } from './reward-rules';
@@ -250,6 +252,8 @@ const messages: Record<string, string | [en: string, fr: string]> = {
   bad_color: 'Pick a colour with the colour picker.',
   bad_email: 'That is not a valid email address.',
   adjusted: 'Change added.',
+  banked: 'Put in their bank.',
+  bank_amount: 'Pick how many to put in the bank: at most what is left on that event.',
   undone: 'Change undone.',
   adjust_reason: 'Give a reason: the promoter sees it.',
   adjust_amount: 'Enter an amount like 50 or -12.50, and whole numbers for tickets and merch (not 0).',
@@ -867,6 +871,7 @@ async function renderDashboard(c: Context<Env>, promoter: User, basePath: string
       codes={data.codes}
       rows={data.rows}
       daily={await dailyForCodes(data.codes)}
+      types={await ticketTypesForCodes(data.codes)}
       balances={data.balances}
       rewards={data.rewards}
       percent={data.percent}
@@ -903,6 +908,7 @@ async function renderEvent(c: Context<Env>, promoter: User, basePath: string) {
       rows={data.rows}
       eventId={eventId}
       daily={await dailyForCodes(data.codes, eventId)}
+      types={await ticketTypesForCodes(data.codes, eventId)}
       rewards={data.rewards}
       percent={data.percent}
       media={data.media.get(eventId) ?? null}
@@ -1208,22 +1214,19 @@ function cartFrom(
   const lines: CartLine[] = [];
   for (const t of data.rewards.tickets) {
     const key = `${t.event.id}.${t.type.key}`;
-    const quantity = Number(field(`qty.${key}`) || 0);
-    if (!quantity) continue;
-    // "Use them for": this event, or the bank (the team accepts it; then it keeps until asked for).
-    const toBank = field(`for.${key}`) === 'bank';
-    const guestList = !!t.type.guest_list && !toBank;
-    if (guestList && !guestNames(field(`guests.${key}`))) return { items, lines, fields: [], error: namesNeeded() };
-    items.push({
-      kind: 'ticket',
-      eventId: t.event.id,
-      rewardType: t.type.key,
-      toBank,
-      quantity,
-      details: ticketsFor(user, guestList, field(`guests.${key}`)),
-      ruleVersions: data.percent.events.get(t.event.id)?.versionIds,
-    });
-    lines.push({ field: key, max: t.available, quantity, type: t.type, event: t.event, toBank, who: toBank ? '' : whoFor(user, guestList, field(`guests.${key}`)) });
+    // How many for this event, and how many to save for later (the bank: the team accepts it; then it
+    // keeps until asked for). "for.<key>=bank" (older carts) saves them all.
+    const count = (name: string) => Math.max(0, Math.floor(Number(field(name)) || 0));
+    const all = field(`for.${key}`) === 'bank';
+    const quantity = all ? 0 : count(`qty.${key}`);
+    const saved = all ? count(`qty.${key}`) : count(`save.${key}`);
+    if (!quantity && !saved) continue;
+    const guestList = !!t.type.guest_list;
+    if (quantity && guestList && !guestNames(field(`guests.${key}`))) return { items, lines, fields: [], error: namesNeeded() };
+    const ruleVersions = data.percent.events.get(t.event.id)?.versionIds;
+    if (quantity) items.push({ kind: 'ticket', eventId: t.event.id, rewardType: t.type.key, quantity, details: ticketsFor(user, guestList, field(`guests.${key}`)), ruleVersions });
+    if (saved) items.push({ kind: 'ticket', eventId: t.event.id, rewardType: t.type.key, toBank: true, quantity: saved, details: ticketsFor(user, false, ''), ruleVersions });
+    lines.push({ field: key, max: t.available, quantity, saved, type: t.type, event: t.event, who: whoFor(user, guestList, field(`guests.${key}`)) });
   }
   // Out of the bank, for an upcoming event of their choice; the type stays.
   for (const b of data.rewards.bank) {
@@ -1235,7 +1238,7 @@ function cartFrom(
     const guestList = !!b.type.guest_list;
     if (guestList && !guestNames(field(`guests.${key}`))) return { items, lines, fields: [], error: namesNeeded() };
     items.push({ kind: 'ticket', rewardType: b.type.key, fromBank: event, quantity, details: ticketsFor(user, guestList, field(`guests.${key}`)) });
-    lines.push({ field: key, max: b.balance, quantity, type: b.type, event, fromBank: true, who: whoFor(user, guestList, field(`guests.${key}`)) });
+    lines.push({ field: key, max: b.balance, quantity, type: b.type, event, eventId: event.id, events: data.ticketEvents, fromBank: true, who: whoFor(user, guestList, field(`guests.${key}`)) });
   }
   const merch = Number(field('qty.merch') || 0);
   if (merch) {
@@ -1298,7 +1301,8 @@ function renderCheckout(
     <CheckoutPage
       user={user}
       lines={cart.lines}
-      fields={cart.fields.filter(([name]) => !name.startsWith('qty.'))}
+      // Counts (for the event, saved for another event) and the event for banked tickets are fields of their own on each line.
+      fields={cart.fields.filter(([name]) => !/^(qty|for|save|event)\./.test(name))}
       payout={payoutForm(user, data, options.body) ?? undefined}
       includePayout={options.includePayout}
       waiting={payoutWaiting(data)}
@@ -1319,7 +1323,18 @@ app.get('/rewards/checkout', async (c) => {
   const ready = data.rewards.tickets.filter((r) => r.available > 0 && (eventId === null || r.event.id === eventId));
   const body = Object.fromEntries(ready.filter((r) => !r.type.guest_list).map((r) => [`qty.${r.event.id}.${r.type.key}`, String(r.available)]));
   const cart = cartFrom(body, data, user, { allowEmpty: true });
-  const left = ready.some((r) => r.type.guest_list) || (eventId === null && (data.rewards.merch.available > 0 || data.rewards.bank.some((b) => b.balance > 0)));
+  // Their bank too, at 0 to start, for this event when it is one they can be used on (else the next one).
+  const target = data.ticketEvents.find((e) => e.id === eventId) ?? data.ticketEvents[0];
+  if (target) {
+    for (const b of data.rewards.bank) {
+      if (b.balance <= 0 || b.type.guest_list) continue;
+      cart.lines.push({ field: `bank.${b.type.key}`, max: b.balance, quantity: 0, type: b.type, event: target, eventId: target.id, events: data.ticketEvents, fromBank: true, who: whoFor(user, false, '') });
+    }
+  }
+  const left =
+    ready.some((r) => r.type.guest_list) ||
+    data.rewards.bank.some((b) => b.balance > 0 && b.type.guest_list) ||
+    (eventId === null && data.rewards.merch.available > 0);
   return renderCheckout(c, data, cart, { includePayout: true, left });
 });
 
@@ -1637,6 +1652,7 @@ app.get('/admin/promoters/:id', async (c) => {
       payouts={payoutsFor(promoter.id)}
       rewardRequests={rewardRequestsFor(promoter.id)}
       rewards={data.rewards}
+      ledger={ticketLedger(promoter.id, summarizeEvents(data.rows, data.percent), data.percent)}
       adjustments={adjustmentsFor(promoter.id)}
       teamLeads={teamLeads().filter((l) => l.id !== promoter.id)}
       team={teamMembers(promoter.id)}
@@ -1731,6 +1747,30 @@ app.post('/admin/promoters/:id/invite', async (c) => {
   const sent = await emailLoginLink(promoter, 'invite', undefined, 1);
   audit(c, 'admin.link_sent', { by: c.get('user').id, userId: promoter.id, sent });
   return c.redirect(`/admin/promoters/${promoter.id}?${sent ? 'ok=link_sent' : 'error=mail_failed'}`);
+});
+
+// Tickets left on an event (a past one too) into the promoter's bank, kept for any later event.
+app.post('/admin/promoters/:id/bank', async (c) => {
+  const promoter = findUser(Number(c.req.param('id')));
+  if (!promoter) return c.notFound();
+  const back = `/admin/promoters/${promoter.id}`;
+  const body = await c.req.parseBody();
+  const admin = c.get('user');
+  const data = await promoterData(promoter);
+  const line = ticketLedger(promoter.id, summarizeEvents(data.rows, data.percent), data.percent).find(
+    (l) => l.event.id === Number(body.event_id) && l.type.key === String(body.reward_type ?? ''),
+  );
+  const quantity = Number(body.quantity ?? 0);
+  if (!line || !bankByAdmin(admin, promoter, line, quantity, String(body.note ?? '').trim().slice(0, 200))) return c.redirect(`${back}?error=bank_amount#tickets`);
+  audit(c, 'admin.banked', { by: admin.id, userId: promoter.id, eventId: line.event.id, rewardType: line.type.key, quantity });
+  const what = line.type.key === FREE_TICKETS ? t(quantity === 1 ? 'free ticket' : 'free tickets', quantity < 2 ? 'billet gratuit' : 'billets gratuits') : t(line.type.label_en, line.type.label_fr || line.type.label_en);
+  if (body.notify === '1')
+    notify(promoter.id, () => ({
+      title: t(`${quantity} ${what} saved for another event`, `${quantity} ${what} gardés pour un autre événement`),
+      body: t(`From ${line.event.title}. Use them on any upcoming event, on Payouts & rewards.`, `De ${line.event.title}. Utilise-les pour n’importe quel prochain événement, dans Paiements et récompenses.`),
+      link: '/payouts',
+    }));
+  return c.redirect(`${back}?ok=banked#tickets`);
 });
 
 // Changes by hand: money, sales outside Hi.Events, free tickets and merch.

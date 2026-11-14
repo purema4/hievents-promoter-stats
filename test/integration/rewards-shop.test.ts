@@ -113,7 +113,7 @@ describeIntegration('rewards shop', () => {
     const id = queue.match(/1 free ticket into the bank[\s\S]*?action="\/admin\/rewards\/(\d+)\/fulfil"/)![1]!;
     expect(location(await admin.post(`/admin/rewards/${id}/fulfil`, { admin_note: '' }))).toBe('/admin/payouts?ok=reward_fulfilled');
     page = await maya.client.page('/payouts');
-    expect(text(page.slice(page.indexOf('data-name="Free ticket · saved for later"')).split('data-shop-item')[0]!)).toMatch(/1 available/);
+    expect(text(page.slice(page.indexOf('data-name="Free ticket · saved for another event"')).split('data-shop-item')[0]!)).toMatch(/1 available/);
 
     // Too many out of the bank: refused, nothing saved.
     const before = requests();
@@ -127,7 +127,7 @@ describeIntegration('rewards shop', () => {
     db.query("INSERT INTO reward_requests (user_id, promoter_name, promoter_email, kind, event_id, source_event_id, source_event_title, quantity, reward_type, reward_label, status) VALUES (?, 'x', 'x', 'ticket', NULL, 1, 'Warehouse Night', 1, 'ga_list', 'GA list', 'fulfilled')").run(maya.id);
     expect((await order({ 'qty.bank.ga_list': '1', 'event.bank.ga_list': '4' })).status).toBe(400);
     const banked = await maya.client.page('/payouts');
-    expect(text(banked.slice(banked.indexOf('data-name="GA list · saved for later"')).split('data-shop-item')[0]!)).toMatch(/1 available/);
+    expect(text(banked.slice(banked.indexOf('data-name="GA list · saved for another event"')).split('data-shop-item')[0]!)).toMatch(/1 available/);
   });
 
   test('a bank request the team declines goes back to its event', async () => {
@@ -181,6 +181,16 @@ describeIntegration('rewards shop', () => {
     expect(unread.status).toBe(400);
     expect(text(await unread.text())).toContain('tick the box first');
     expect(requests()).toBe(before);
+    // Some for the event, some saved for later: both counts are kept when the page comes back.
+    const split = await order({ 'qty.1.vip_tickets': '1', 'save.1.vip_tickets': '1' });
+    expect(split.status).toBe(400);
+    const splitPage = await split.text();
+    expect(splitPage).toMatch(/name="qty\.1\.vip_tickets"[\s\S]*?<option value="1" selected="">/);
+    expect(splitPage).toMatch(/name="save\.1\.vip_tickets"[\s\S]*?<option value="1" selected="">/);
+    expect(splitPage.match(/name="save\.1\.vip_tickets"/g)).toHaveLength(1);
+    expect(text(splitPage)).toContain('Saved for another event: the team confirms it');
+    // More than available between the two: refused.
+    expect((await order({ 'qty.1.vip_tickets': '2', 'save.1.vip_tickets': '1', ack: '1' })).status).toBe(400);
     expect(location(await order({ ...cart, ack: '1' }))).toBe('/payouts?ok=reward_ordered#rewards');
     expect(requests()).toBe(before + 1);
     expect(text(await admin.page('/admin/payouts'))).toContain('2 VIP ticket for Warehouse Night');
@@ -228,6 +238,10 @@ describeIntegration('rewards shop', () => {
     expect(html).toContain(`name="details" value="${luna.email}"`);
     expect(html).toContain('<select name="qty.1.free_tickets"');
     expect(html).toContain('<select name="qty.1.vip_tickets"');
+    // Straight from the event page, each reward can also be saved for a later event, next to its count.
+    expect(html).toContain('<div class="checkout-qtys" data-qty-total="2">');
+    expect(html).toContain('<select name="save.1.vip_tickets"');
+    expect(words).toContain('Save for another event');
 
     // Without the payout ticked, and no rewards: nothing to send.
     const none = await luna.client.post('/rewards/order', { currency: 'CAD', amount: '2.50', method: 'Interac e-Transfer', details: luna.email, 'qty.1.free_tickets': '0' });
@@ -241,7 +255,7 @@ describeIntegration('rewards shop', () => {
     expect(db.query<{ n: number }, [number]>('SELECT count(*) AS n FROM reward_requests WHERE user_id = ?').get(luna.id)!.n).toBe(0);
 
     // The payout, one VIP of two, and the free ticket left out (0): all in one go.
-    const fields = { payout: '1', currency: 'CAD', amount: '2,50 $', method: 'Interac e-Transfer', details: luna.email, note: '', 'qty.1.free_tickets': '0', 'qty.1.vip_tickets': '1' };
+    const fields = { payout: '1', currency: 'CAD', amount: '2,50 $', method: 'Interac e-Transfer', details: luna.email, note: '', 'qty.1.free_tickets': '0', 'qty.1.vip_tickets': '1', 'save.1.vip_tickets': '0' };
     expect(location(await luna.client.post('/rewards/order', fields))).toBe('/payouts?ok=all_requested');
     expect(db.query<{ amount_cents: number }, [number]>('SELECT amount_cents FROM payout_requests WHERE user_id = ?').all(luna.id)).toEqual([{ amount_cents: 250 }]);
     expect(db.query<{ n: number }, [number]>('SELECT sum(quantity) AS n FROM reward_requests WHERE user_id = ?').get(luna.id)!.n).toBe(1);
@@ -257,6 +271,69 @@ describeIntegration('rewards shop', () => {
     // The payout alone.
     const solo = await newPromoter(server, admin);
     expect(location(await solo.client.post('/rewards/order', { payout: '1', currency: 'CAD', amount: '28.50', method: 'Interac e-Transfer', details: solo.email }))).toBe('/payouts?ok=requested');
+  });
+
+  test('at checkout, some for the event and the others saved for later', async () => {
+    const p = await newPromoter(server, admin, { name: `Split ${uid()}`, codes: 'LUNA' });
+    await admin.post(`/admin/promoters/${p.id}/adjust`, { kind: 'free_tickets', event_id: '1', reward_type: 'vip_tickets', quantity: '2', label: 'More' });
+    expect(await p.client.page('/rewards/checkout?event=1')).toContain('<div class="checkout-qtys" data-qty-total="4">');
+    const res = await p.client.post('/rewards/order', { 'qty.1.vip_tickets': '2', 'save.1.vip_tickets': '2', 'qty.1.free_tickets': '0', ack: '1' });
+    expect(location(res)).toBe('/payouts?ok=reward_ordered#rewards');
+    const rows = db
+      .query<{ event_title: string | null; source_event_title: string; quantity: number }, [number]>(
+        'SELECT event_title, source_event_title, quantity FROM reward_requests WHERE user_id = ? ORDER BY id',
+      )
+      .all(p.id);
+    expect(rows).toEqual([
+      { event_title: 'Warehouse Night', source_event_title: 'Warehouse Night', quantity: 2 },
+      { event_title: null, source_event_title: 'Warehouse Night', quantity: 2 },
+    ]);
+  });
+
+  test('admins see each promoter\'s tickets by event: given by the rules and by hand, and what became of them', async () => {
+    const p = await newPromoter(server, admin, { name: `Ledger ${uid()}`, codes: 'LUNA' });
+    await admin.post(`/admin/promoters/${p.id}/adjust`, { kind: 'free_tickets', event_id: '1', reward_type: 'vip_tickets', quantity: '2', label: 'More' });
+    expect(location(await p.client.post('/rewards/order', { 'qty.1.vip_tickets': '1', 'save.1.vip_tickets': '1', 'qty.1.free_tickets': '0', ack: '1' }))).toBe('/payouts?ok=reward_ordered#rewards');
+    const page = await admin.page(`/admin/promoters/${p.id}`);
+    expect(page).toContain('Tickets by event');
+    // The dashboard link is gone: "View the app as" shows it.
+    expect(page).not.toContain(`/admin/promoters/${p.id}/view"`);
+    expect(page).toContain(`View the app as ${p.name}`);
+    const row = (type: string) => text(page.split('class="ticket-ledger"')[1]!.split('</table>')[0]!.split('<tr').find((r) => r.includes(`<td>${type}</td>`))!);
+    // VIP: 2 from the rules, 2 by hand; 1 waiting for this event, 1 waiting to go into the bank; 2 left.
+    expect(row('VIP ticket')).toMatch(/VIP ticket\s+2\s+\+2\s+1\s+0\s+0\s+\+1 waiting\s+2/);
+    expect(text(page)).toContain(`In ${p.name}'s bank now: 0 VIP ticket (+1 waiting for approval)`);
+  });
+
+  test('admins put tickets left on an event that is over into the bank', async () => {
+    // DJMAX sold 3 on Summer Rooftop, 70 days ago: a free ticket nobody asked for, lost since.
+    const p = await newPromoter(server, admin, { name: `Banked ${uid()}`, codes: 'DJMAX' });
+    const before = await admin.page(`/admin/promoters/${p.id}`);
+    expect(text(before)).toContain('Summer Rooftop');
+    expect(text(before)).toContain('1 lost');
+    expect(text(before)).toContain(`Nothing in ${p.name}'s bank.`);
+    // More than is left: refused.
+    expect(location(await admin.post(`/admin/promoters/${p.id}/bank`, { event_id: '4', reward_type: 'free_tickets', quantity: '2', notify: '1' }))).toContain('error=bank_amount');
+    expect(location(await admin.post(`/admin/promoters/${p.id}/bank`, { event_id: '4', reward_type: 'free_tickets', quantity: '1', notify: '1' }))).toBe(`/admin/promoters/${p.id}?ok=banked#tickets`);
+    const after = text(await admin.page(`/admin/promoters/${p.id}`));
+    expect(after).toContain(`In ${p.name}'s bank now: 1 Free ticket`);
+    expect(after).not.toContain('1 lost');
+    // The promoter finds it in their shop, for any upcoming event, and is told.
+    const shop = await p.client.page('/payouts');
+    expect(text(shop)).toContain('Saved for another event');
+    expect(shop).toContain('name="qty.bank.free_tickets"');
+    expect(text(await p.client.page('/notifications'))).toContain('1 free ticket saved for another event');
+    // At checkout from an event page: the bank is there too, at 0, set to that event.
+    const checkout = await p.client.page('/rewards/checkout?event=1');
+    expect(checkout).toContain('<select name="qty.bank.free_tickets"');
+    expect(checkout).toMatch(/name="event\.bank\.free_tickets"[\s\S]*?<option value="1" selected="">Warehouse Night/);
+    expect(text(checkout)).toContain('Your saved tickets');
+    expect(text(checkout)).not.toContain('saved rewards are picked in the shop');
+    // Used on another upcoming event, picked right there.
+    expect(location(await p.client.post('/rewards/order', { 'qty.bank.free_tickets': '1', 'event.bank.free_tickets': '2', ack: '1' }))).toBe('/payouts?ok=reward_ordered#rewards');
+    expect(db.query<{ event_title: string; from_bank: number }, [number]>('SELECT event_title, from_bank FROM reward_requests WHERE user_id = ? ORDER BY id DESC LIMIT 1').get(p.id)).toEqual({ event_title: 'Winter Opening', from_bank: 1 });
+    // Promoters cannot.
+    expect((await p.client.post(`/admin/promoters/${p.id}/bank`, { event_id: '4', reward_type: 'free_tickets', quantity: '1' })).status).toBe(403);
   });
 
   test('checkout refuses a cart that would not go through', async () => {

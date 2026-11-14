@@ -83,6 +83,16 @@ describeIntegration('sales numbers from the seeded Hi.Events database', () => {
     expect(cards.get('Tickets sold, 3 orders · 1 awaiting payment')).toBe('4');
   });
 
+  test('tickets sold by type: on the event page and the event card', async () => {
+    // DJMAX on Warehouse Night: 2 GA early bird, 1 VIP (its pair was refunded), 1 GA regular and 1 waiting for payment.
+    const page = text(await promoter.client.page('/events/1'));
+    expect(page).toContain('Tickets sold by type');
+    expect(page).toMatch(/GA – Early bird\s*2/);
+    expect(page).toMatch(/VIP\s*1/);
+    expect(page).toMatch(/GA – Regular\s*1\s*1/);
+    expect(text(await promoter.client.page('/'))).toContain('2 GA – Early bird · 1 GA – Regular · 1 VIP');
+  });
+
   test('past event and the other account’s event', async () => {
     const rooftop = stats(await promoter.client.page('/events/4'));
     expect(rooftop.get('Ticket sales at full price')).toBe('$75.00');

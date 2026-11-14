@@ -451,8 +451,8 @@ if (ruleForm) {
 
 // Payouts & rewards: the rewards shop, by event. "+" adds one of a reward to the cart; each cart line
 // then says exactly what it is and who it is for, and holds the choices: how many, the names for a guest
-// list (other rewards are tickets sent to the promoter), this event or the bank (or, for banked rewards,
-// which event). The choices are written back
+// list (other rewards are tickets sent to the promoter), and for saved rewards which event (saving an
+// event's rewards for later is chosen at checkout). The choices are written back
 // to the fields in the reward's row, which is what the form sends. Without scripts, the "How many" boxes
 // in the rows do the job.
 const shop = document.querySelector('form[data-shop]');
@@ -531,8 +531,6 @@ if (shop) {
     line.append(el('div', { class: 'cart-steps' }, minus, el('span', { class: 'cart-n', text: String(n) }), plus, remove));
 
     if (kind === 'event' || kind === 'bank') {
-      const use = row.querySelector('[data-use-field]');
-      const banking = use && use.value === 'bank';
       if (kind === 'bank') {
         const source = row.querySelector('[data-event-field]');
         const pick = el('select', { 'aria-label': t('For which event', 'Pour quel événement') });
@@ -542,38 +540,25 @@ if (shop) {
           source.value = pick.value;
         });
         line.append(el('label', { class: 'cart-field' }, t('For which event', 'Pour quel événement'), pick));
-      } else {
-        const pick = el('select', { 'aria-label': t('Use them for', 'Les utiliser pour') });
-        pick.append(el('option', { value: '', text: `${row.dataset.where}` }), el('option', { value: 'bank', text: t('Save them for a later event', 'Les garder pour un prochain événement') }));
-        pick.value = use.value;
-        pick.addEventListener('change', () => {
-          use.value = pick.value;
-          refresh();
+      }
+      const guestsField = row.querySelector('[data-guests-field]');
+      const who = el('p', { class: 'who', text: whoOf(row) });
+      if (guestsField) {
+        const guests = el('input', { maxlength: '200', placeholder: n > 1 ? 'Ana, Ben' : 'Ana Roy', value: guestsField.value, required: '' });
+        guests.addEventListener('input', () => {
+          guestsField.value = guests.value;
+          who.textContent = whoOf(row);
         });
-        line.append(el('label', { class: 'cart-field' }, t('Use them for', 'Les utiliser pour'), pick));
+        line.append(
+          el(
+            'label',
+            { class: 'cart-field' },
+            n > 1 ? t(`Names on the guest list (${n})`, `Noms sur la liste d’invités (${n})`) : t('Name on the guest list', 'Nom sur la liste d’invités'),
+            guests,
+          ),
+        );
       }
-      if (!banking) {
-        const guestsField = row.querySelector('[data-guests-field]');
-        const who = el('p', { class: 'who', text: whoOf(row) });
-        if (guestsField) {
-          const guests = el('input', { maxlength: '200', placeholder: n > 1 ? 'Ana, Ben' : 'Ana Roy', value: guestsField.value, required: '' });
-          guests.addEventListener('input', () => {
-            guestsField.value = guests.value;
-            who.textContent = whoOf(row);
-          });
-          line.append(
-            el(
-              'label',
-              { class: 'cart-field' },
-              n > 1 ? t(`Names on the guest list (${n})`, `Noms sur la liste d’invités (${n})`) : t('Name on the guest list', 'Nom sur la liste d’invités'),
-              guests,
-            ),
-          );
-        }
-        line.append(who);
-      } else {
-        line.append(el('p', { class: 'who', text: t(`${n} saved for a later event`, `${n} mis de côté pour un prochain événement`) }));
-      }
+      line.append(who);
     } else if (kind === 'merch') {
       const field = row.querySelector('[data-merch-field]');
       const details = el('input', { maxlength: '120', placeholder: t('T-shirt, size L', 'T-shirt, taille L'), value: field.value, required: '' });
@@ -694,9 +679,15 @@ for (const select of document.querySelectorAll('select[data-picks]')) {
 }
 
 // Checkout: each reward's count as the shop's − n + pill, over the list underneath (sent with the form).
+// An event's reward has two, for the event and saved for another event, which together stay within what is
+// available: "+" on one when they are at the limit moves one over from the other.
+const checkoutSyncs = new Map();
 for (const box of document.querySelectorAll('[data-checkout-qty]')) {
   const select = box.querySelector('select');
-  const max = select.options.length - 1;
+  const line = box.closest('.checkout-line');
+  const group = box.closest('[data-qty-total]');
+  const total = group ? Number(group.dataset.qtyTotal) : select.options.length - 1;
+  const selects = () => [...(group ?? box).querySelectorAll('select')];
   const svg = (d) => {
     const ns = 'http://www.w3.org/2000/svg';
     const icon = document.createElementNS(ns, 'svg');
@@ -725,22 +716,40 @@ for (const box of document.querySelectorAll('[data-checkout-qty]')) {
   const pill = document.createElement('div');
   pill.className = 'stepper';
   pill.append(minus, count, plus);
-  const line = box.closest('.checkout-line');
   const show = () => {
     const n = Number(select.value);
     count.textContent = String(n);
     minus.disabled = n <= 0;
-    plus.disabled = n >= max;
-    // At 0 the line stays, dimmed: it is left out of the request.
-    line?.classList.toggle('off', n === 0);
+    plus.disabled = n >= total;
+  };
+  checkoutSyncs.set(select, show);
+  // The whole line: every pill, who gets them (when some are for the event), the saved note, and dimmed at 0.
+  const sync = () => {
+    for (const s of selects()) checkoutSyncs.get(s)?.();
+    const used = Number(line?.querySelector('select[name^="qty."]')?.value || 0);
+    const saved = Number(line?.querySelector('select[name^="save."]')?.value || 0);
+    for (const node of line?.querySelectorAll('[data-when-used]') ?? []) node.hidden = used === 0;
+    for (const node of line?.querySelectorAll('[data-when-banked]') ?? []) node.hidden = saved === 0;
+    line?.classList.toggle('off', used + saved === 0);
   };
   const step = (by) => {
-    select.value = String(Math.min(max, Math.max(0, Number(select.value) + by)));
-    show();
+    const n = Number(select.value) + by;
+    if (n < 0 || n > total) return;
+    if (by > 0) {
+      const others = selects().filter((s) => s !== select);
+      const sum = selects().reduce((a, s) => a + Number(s.value), 0);
+      if (sum >= total) {
+        const other = others.find((s) => Number(s.value) > 0);
+        if (!other) return;
+        other.value = String(Number(other.value) - 1);
+      }
+    }
+    select.value = String(n);
+    sync();
   };
   minus.addEventListener('click', () => step(-1));
   plus.addEventListener('click', () => step(1));
   select.hidden = true;
   box.append(pill);
-  show();
+  sync();
 }

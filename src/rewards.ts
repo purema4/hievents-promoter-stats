@@ -144,6 +144,95 @@ function usedRewards(userId: number): Map<string, number> {
   return new Map(rows.map((r) => [`${r.kind}:${r.event_id}:${r.type}`, r.n]));
 }
 
+/** One reward type on one event, for admins: where every ticket of it went. */
+export type EventTicketLedger = {
+  event: EventSummary;
+  type: RewardType;
+  over: boolean;
+  fromRules: number;
+  byHand: number; // added (or removed) by an admin
+  waiting: number; // asked for this event (or rolled over), not handled yet
+  given: number;
+  toBankWaiting: number; // asked to go into the bank, not handled yet
+  banked: number; // in the bank, accepted
+  left: number; // not asked for yet: still available, or lost once the event is over
+};
+
+/**
+ * Every event with one of their codes, past ones included, newest first: per reward type, what the rules
+ * gave, what admins added, and what became of it. Declined requests count for nothing; tickets taken
+ * out of the bank belong to the bank, not to an event.
+ */
+export function ticketLedger(userId: number, events: EventSummary[], rate: Rate | number = 0): EventTicketLedger[] {
+  const extra = freeTicketBonus(userId);
+  const types = new Map(listRewardTypes().map((t) => [t.key, t]));
+  const order = [...types.keys()];
+  const typeOf = (key: string) => types.get(key) ?? (key === FREE_TICKETS ? plainFreeTickets : { key, label_en: key, label_fr: key });
+  const rows = db
+    .query<{ event_id: number; type: string; status: string; deposit: number; n: number }, [number]>(
+      `SELECT coalesce(source_event_id, event_id) AS event_id, coalesce(reward_type, '${FREE_TICKETS}') AS type, status,
+         (event_id IS NULL AND source_event_id IS NOT NULL) AS deposit, sum(quantity) AS n
+       FROM reward_requests WHERE user_id = ? AND kind = 'ticket' AND status <> 'rejected' AND from_bank IS NOT 1 GROUP BY 1, 2, 3, 4`,
+    )
+    .all(userId);
+  const requested = (eventId: number, type: string, status: string, deposit: boolean) =>
+    rows.filter((r) => r.event_id === eventId && r.type === type && r.status === status && !!r.deposit === deposit).reduce((sum, r) => sum + r.n, 0);
+  const out: EventTicketLedger[] = [];
+  const byNewest = [...events].sort((a, b) => (b.start?.getTime() ?? 0) - (a.start?.getTime() ?? 0));
+  for (const event of byNewest) {
+    const earning = typeof rate === 'number' ? null : rate.events.get(event.id);
+    const counts: Record<string, number> = earning ? { ...earning.rewards } : { [FREE_TICKETS]: freeTicketsEarned(event.tickets) };
+    for (const key of extra.keys()) {
+      const [id, type] = key.split(':') as [string, string];
+      if (Number(id) === event.id && !(type in counts)) counts[type] = 0;
+    }
+    for (const r of rows) if (r.event_id === event.id && !(r.type in counts)) counts[r.type] = 0;
+    const keys = Object.keys(counts).sort((a, b) => (order.indexOf(a) + 1 || 999) - (order.indexOf(b) + 1 || 999));
+    for (const key of keys) {
+      const line = {
+        event,
+        type: typeOf(key),
+        over: !isUpcoming(event),
+        fromRules: Math.max(0, counts[key]!),
+        byHand: extra.get(`${event.id}:${key}`) ?? 0,
+        waiting: requested(event.id, key, 'pending', false),
+        given: requested(event.id, key, 'fulfilled', false),
+        toBankWaiting: requested(event.id, key, 'pending', true),
+        banked: requested(event.id, key, 'fulfilled', true),
+      };
+      const left = Math.max(0, line.fromRules + line.byHand - line.waiting - line.given - line.toBankWaiting - line.banked);
+      if (line.fromRules || line.byHand || line.waiting || line.given || line.toBankWaiting || line.banked) out.push({ ...line, left });
+    }
+  }
+  return out;
+}
+
+/**
+ * An admin puts tickets left on an event (past ones too) into a promoter's bank: a deposit already
+ * accepted, the same as a "Save for another event" the team accepted (shown in their reward history).
+ */
+export function bankByAdmin(admin: User, promoter: User, line: EventTicketLedger, quantity: number, note: string): boolean {
+  if (!Number.isInteger(quantity) || quantity < 1 || quantity > line.left) return false;
+  db.query(
+    `INSERT INTO reward_requests (user_id, promoter_name, promoter_email, kind, event_id, event_title, quantity, details, status, admin_note,
+       processed_at, processed_by, source_event_id, source_event_title, reward_type, reward_label)
+     VALUES (?, ?, ?, 'ticket', NULL, NULL, ?, ?, 'fulfilled', ?, datetime('now'), ?, ?, ?, ?, ?)`,
+  ).run(
+    promoter.id,
+    promoter.name,
+    promoter.email,
+    quantity,
+    promoter.name,
+    note || null,
+    admin.id,
+    line.event.id,
+    line.event.title,
+    line.type.key !== FREE_TICKETS ? line.type.key : null,
+    line.type.key !== FREE_TICKETS ? line.type.label_en : null,
+  );
+  return true;
+}
+
 /**
  * What a promoter can request. Ticket rewards come from each event's rule (a bare number rate stands
  * for the free-ticket track of Levels & rewards, as before rules); merch from the merch track plus any

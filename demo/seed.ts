@@ -19,7 +19,7 @@ import { setPageHidden } from '../src/promoter-page';
 import { requestReward } from '../src/rewards';
 import { migrateToRules, saveRewardType, saveRuleVersion, saveTemplate } from '../src/rules';
 import { assignTeam, setTeamCommission, setTeamLead } from '../src/teams';
-import { addOrders, writer, type NewOrder } from './sales';
+import { addOrders, forgetTicketTypes, writer, type NewOrder } from './sales';
 
 /*
  * Everything in the demo is made up here, on every start, with dates relative to today so it never
@@ -101,7 +101,8 @@ function saleDate(eventDays: number) {
 }
 
 async function wipe() {
-  await writer`TRUNCATE events, event_occurrences, promo_codes, orders, order_items, images, attendees RESTART IDENTITY CASCADE`;
+  await writer`TRUNCATE events, event_occurrences, promo_codes, orders, order_items, images, attendees, product_prices, products RESTART IDENTITY CASCADE`;
+  forgetTicketTypes();
   const tables = db.query<{ name: string }, []>("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name <> 'settings'").all();
   db.exec('PRAGMA foreign_keys = OFF');
   for (const { name } of tables) db.exec(`DELETE FROM "${name}"`);

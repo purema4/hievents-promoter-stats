@@ -26,9 +26,19 @@ CREATE TABLE images (
   id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY, entity_id bigint, entity_type varchar(120), type varchar(40),
   path text, deleted_at timestamp
 );
+-- Ticket types: a product, and a price tier when it has more than one (its label).
+CREATE TABLE products (
+  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY, event_id bigint NOT NULL REFERENCES events, title varchar(255) NOT NULL,
+  deleted_at timestamp
+);
+CREATE TABLE product_prices (
+  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY, product_id bigint NOT NULL REFERENCES products, label varchar(255),
+  deleted_at timestamp
+);
 CREATE TABLE attendees (
   id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY, order_id integer NOT NULL REFERENCES orders, event_id integer NOT NULL REFERENCES events,
-  status varchar(20) NOT NULL, email varchar(255) NOT NULL DEFAULT 'guest@example.com', deleted_at timestamp
+  status varchar(20) NOT NULL, email varchar(255) NOT NULL DEFAULT 'guest@example.com', deleted_at timestamp,
+  product_id integer REFERENCES products, product_price_id integer REFERENCES product_prices
 );
 
 -- Dates are relative to today so the sandbox always has one past event and two upcoming ones.
@@ -73,17 +83,20 @@ INSERT INTO order_items (order_id, item_name, quantity, price, price_before_disc
   (5, 'GA', 1, 9.00, 10.00), (6, 'GA', 1, 22.50, 25.00), (7, 'GA', 2, 45.00, 50.00), (8, 'GA', 1, 25.00, NULL),
   (9, 'GA', 3, 22.50, 25.00), (10, 'GA', 1, 22.50, 25.00);
 
-INSERT INTO attendees (order_id, event_id, status) VALUES
-  (1, 1, 'ACTIVE'), (1, 1, 'ACTIVE'),
-  (2, 1, 'ACTIVE'), (2, 1, 'CANCELLED'),
-  (3, 1, 'AWAITING_PAYMENT'),
-  (4, 1, 'CANCELLED'),
-  (5, 2, 'ACTIVE'),
-  (6, 1, 'ACTIVE'),
-  (7, 3, 'ACTIVE'), (7, 3, 'ACTIVE'),
-  (8, 1, 'ACTIVE'),
-  (9, 4, 'ACTIVE'), (9, 4, 'ACTIVE'), (9, 4, 'ACTIVE'),
-  (10, 1, 'ACTIVE');
+INSERT INTO products (event_id, title) VALUES (1, 'GA'), (1, 'VIP'), (2, 'GA'), (3, 'GA'), (4, 'GA');
+INSERT INTO product_prices (product_id, label) VALUES (1, 'Early bird'), (1, 'Regular'), (2, NULL), (3, NULL), (4, NULL), (5, NULL);
+
+INSERT INTO attendees (order_id, event_id, status, product_id, product_price_id) VALUES
+  (1, 1, 'ACTIVE', 1, 1), (1, 1, 'ACTIVE', 1, 1),
+  (2, 1, 'ACTIVE', 2, 3), (2, 1, 'CANCELLED', 2, 3),
+  (3, 1, 'AWAITING_PAYMENT', 1, 2),
+  (4, 1, 'CANCELLED', 1, 2),
+  (5, 2, 'ACTIVE', 3, 4),
+  (6, 1, 'ACTIVE', 1, 2),
+  (7, 3, 'ACTIVE', 4, 5), (7, 3, 'ACTIVE', 4, 5),
+  (8, 1, 'ACTIVE', 1, 2),
+  (9, 4, 'ACTIVE', 5, 6), (9, 4, 'ACTIVE', 5, 6), (9, 4, 'ACTIVE', 5, 6),
+  (10, 1, 'ACTIVE', 1, 2);
 
 -- Event covers, served in the sandbox by the "cdn" container from dev/covers.
 INSERT INTO images (entity_id, entity_type, type, path) VALUES

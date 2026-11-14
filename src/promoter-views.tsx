@@ -1,6 +1,6 @@
 import { MiniChart, parseRange, recentTickets, SalesChart, type Range } from './chart';
 import { config } from './config';
-import type { CodeStats, DailySales, TicketEvent } from './hievents';
+import type { CodeStats, DailySales, TicketEvent, TicketTypeSales } from './hievents';
 import type { User } from './local-db';
 import { eventBonus, eventCommission, formatMoney, splitCommission, toCents, totalsByCurrency, type Rate, type Totals } from './money';
 import { type Balance, type PayoutRequest } from './payouts';
@@ -420,6 +420,46 @@ function MediaButton(props: { url: string }) {
   );
 }
 
+/** A ticket type's name, or "Tickets" when Hi.Events did not say. */
+const ticketTypeName = (type: string) => type || t('Tickets', 'Billets');
+
+/** "6 GA · 2 VIP" for an event card; '' when nothing is sold or the types are unknown. */
+function typesInWords(types: TicketTypeSales[]): string {
+  const sold = types.filter((x) => x.tickets > 0);
+  if (sold.length === 0 || sold.every((x) => !x.type)) return '';
+  return sold.map((x) => `${x.tickets} ${ticketTypeName(x.type)}`).join(' · ');
+}
+
+/** On an event page: each ticket type sold with their codes, how many, and how many wait for payment. */
+function TicketTypesCard(props: { types: TicketTypeSales[] }) {
+  const types = props.types.filter((x) => x.tickets > 0 || x.pending > 0);
+  if (types.length === 0) return null;
+  const anyPending = types.some((x) => x.pending > 0);
+  return (
+    <div class="card table-wrap ticket-types-card">
+      <h2 class="first">{t('Tickets sold by type', 'Billets vendus par type')}</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>{t('Type', 'Type')}</th>
+            <th class="num">{t('Sold', 'Vendus')}</th>
+            {anyPending && <th class="num">{t('Awaiting payment', 'En attente de paiement')}</th>}
+          </tr>
+        </thead>
+        <tbody>
+          {types.map((x) => (
+            <tr>
+              <td>{ticketTypeName(x.type)}</td>
+              <td class="num">{x.tickets}</td>
+              {anyPending && <td class="num">{x.pending || ''}</td>}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 function EventCard(props: {
   event: EventSummary;
   href: string;
@@ -429,8 +469,10 @@ function EventCard(props: {
   media?: string;
   banner?: string;
   daily?: DailySales[]; // this event's sales; past events do without the recent ones
+  types?: TicketTypeSales[]; // this event's tickets by type
 }) {
   const e = props.event;
+  const types = typesInWords(props.types ?? []);
   // Nothing sold yet: no chart of empty days, so these cards stay short.
   const daily = e.tickets > 0 || e.pending > 0 ? props.daily : undefined;
   return (
@@ -456,6 +498,7 @@ function EventCard(props: {
               {(lang() === 'fr' ? e.tickets < 2 : e.tickets === 1) ? t('ticket sold', 'billet vendu') : t('tickets sold', 'billets vendus')}
               {e.pending > 0 && <span class="pending"> +{e.pending} {t('pending', 'en attente')}</span>}
             </span>
+            {types && <span class="muted ticket-types">{types}</span>}
           </span>
           <span>
             <span class="big">{formatMoney(e.commission, e.currency)}</span>
@@ -497,6 +540,7 @@ export function DashboardPage(props: {
   codes: string[];
   rows: CodeStats[];
   daily: DailySales[];
+  types: TicketTypeSales[];
   balances: Balance[];
   rewards: Rewards;
   percent: Rate | number;
@@ -568,6 +612,7 @@ export function DashboardPage(props: {
                   media={props.media.get(e.id)}
                   banner={props.banners.get(e.id)}
                   daily={props.daily.filter((d) => d.event_id === e.id)}
+                  types={props.types.filter((x) => x.event_id === e.id)}
                 />
               ))}
             </div>
@@ -591,7 +636,7 @@ export function DashboardPage(props: {
               <h2>{t('Past events', 'Événements passés')}</h2>
               <div class="event-grid">
                 {past.map((e) => (
-                  <EventCard event={e} href={eventHref(e)} media={props.media.get(e.id)} />
+                  <EventCard event={e} href={eventHref(e)} media={props.media.get(e.id)} types={props.types.filter((x) => x.event_id === e.id)} />
                 ))}
               </div>
             </>
@@ -637,6 +682,7 @@ export function EventPage(props: {
   rows: CodeStats[];
   eventId: number;
   daily: DailySales[];
+  types: TicketTypeSales[];
   rewards: Rewards;
   percent: Rate | number;
   media: string | null;
@@ -705,6 +751,7 @@ export function EventPage(props: {
           <div class="label">{t('Paid by customers after discounts', 'Payé par les clients après rabais')}</div>
         </div>
       </div>
+      <TicketTypesCard types={props.types} />
 
       {props.deal && props.deal.lines.length > 0 && (
         <div class="card deal-card" lang={props.deal.lang}>
@@ -938,7 +985,7 @@ const typeWhat = (x: { description_en?: string | null; description_fr?: string |
 
 /**
  * One reward in an event's table: what it is on the left, how many are available, and "+" on the right.
- * The fields the cart sets (how many, guest list names, this event or the bank) live here, so the form
+ * The fields the cart sets (how many, guest list names, which event for saved rewards) live here, so the form
  * works without scripts too: then "How many" is a box instead of "+". Tickets are sent to the promoter;
  * only a guest list reward asks for names.
  */
@@ -1024,7 +1071,8 @@ function ShopRow(props: {
 /**
  * Payouts & rewards: a shop, by event. Each event lists its rewards (free tickets, VIP, GA list…) with
  * how many are available and "+" to add one to the cart; the bank and merch come the same way. The cart
- * holds the rest: how many, the names for a guest list, and this event or the bank.
+ * holds the rest: how many and the names for a guest list. This event or saved for another event is chosen at
+ * checkout, where promoters coming from an event page land too.
  */
 function RewardsShop(props: { rewards: Rewards; ticketEvents: TicketEvent[]; promoter: string; ok?: string }) {
   const { tickets, merch, bank } = props.rewards;
@@ -1043,15 +1091,16 @@ function RewardsShop(props: { rewards: Rewards; ticketEvents: TicketEvent[]; pro
       <Flash ok={props.ok} />
       <p class="muted">
         {t(
-          'What your sales earned, event by event. Press + to add one to your cart, then review and send it: the team confirms each item. Rewards for an event are lost once it is over: ask for them before then, or save them for a later event.',
-          'Ce que tes ventes t’ont rapporté, événement par événement. Appuie sur + pour en ajouter une à ton panier, puis vérifie et envoie : l’équipe confirme chaque item. Les récompenses d’un événement sont perdues une fois qu’il est passé : demande-les avant, ou garde-les pour un prochain événement.',
+          'What your sales earned, event by event. Press + to add one to your cart, then review and send it: the team confirms each item. Rewards for an event are lost once it is over: ask for them before then, or save them for a later event when you review your request.',
+          'Ce que tes ventes t’ont rapporté, événement par événement. Appuie sur + pour en ajouter une à ton panier, puis vérifie et envoie : l’équipe confirme chaque item. Les récompenses d’un événement sont perdues une fois qu’il est passé : demande-les avant, ou mets-les de côté pour un prochain événement en vérifiant ta demande.',
         )}
       </p>
       <form class="shop" method="post" action="/rewards/order" data-shop data-promoter={props.promoter}>
         <div class="shop-events">
           {bank.length > 0 && (
-            <div class="card shop-event-card bank-card">
-              <h3 class="first">{t('Saved for later', 'Mis de côté')}</h3>
+            <div class="card shop-event-card bank-card bank-box">
+              <BankLabel />
+              <h3 class="first">{t('Saved for another event', 'Gardés pour un autre événement')}</h3>
               <p class="muted">{t('Kept until you use them, on any upcoming event. Their type stays.', 'Gardées jusqu’à ce que tu les utilises, pour n’importe quel événement à venir. Leur type reste le même.')}</p>
               <table class="shop-table">
                 <tbody>
@@ -1060,7 +1109,7 @@ function RewardsShop(props: { rewards: Rewards; ticketEvents: TicketEvent[]; pro
                       field={`bank.${b.type.key}`}
                       name={typeName(b.type)}
                       what={typeWhat(b.type)}
-                      where={t('saved for later', 'mis de côté')}
+                      where={t('saved for another event', 'gardé pour un autre événement')}
                       kind="bank"
                       guestList={!!b.type.guest_list}
                       available={props.ticketEvents.length > 0 ? b.balance : 0}
@@ -1113,7 +1162,6 @@ function RewardsShop(props: { rewards: Rewards; ticketEvents: TicketEvent[]; pro
                             : undefined
                       }
                     >
-                      <input type="hidden" name={`for.${r.event.id}.${r.type.key}`} value="" data-use-field />
                     </ShopRow>
                   ))}
                 </tbody>
@@ -1301,6 +1349,28 @@ export function PayoutsPage(props: {
 
 export { parseRange, RewardHistory };
 
+/** "BANK" in big letters on the outline of anything that comes from the promoter's bank. */
+const BankLabel = () => (
+  <span class="bank-label" aria-hidden="true">
+    {t('Bank', 'Banque')}
+  </span>
+);
+
+/** A checkout count: a list of 0…max, drawn by app.js as the shop's − n + pill (it works without scripts). */
+function QtyPick(props: { name: string; max: number; value: number; label: string }) {
+  return (
+    <div class="checkout-qty" data-checkout-qty>
+      <select name={props.name} aria-label={props.label}>
+        {Array.from({ length: props.max + 1 }, (_, n) => (
+          <option value={String(n)} selected={n === props.value}>
+            {n}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
 /** One line of a cart, in plain words, for checkout. */
 export type CartLine = {
   field?: string; // the cart key ("1.vip_tickets", "bank.free_tickets", "merch"): its count is qty.<field>
@@ -1308,8 +1378,10 @@ export type CartLine = {
   quantity: number;
   type?: { key: string; label_en: string; label_fr?: string; description_en?: string | null; description_fr?: string | null };
   event?: { title: string; start?: Date | null; timezone?: string | null; dates?: number };
-  toBank?: boolean;
+  saved?: number; // an event's reward: how many of it to save for later (the bank), next to quantity
   fromBank?: boolean;
+  eventId?: number; // banked tickets: the event picked, among `events`
+  events?: { id: number; title: string; start: Date | null; timezone: string | null }[];
   who?: string;
   merch?: string;
 };
@@ -1331,7 +1403,7 @@ export function CheckoutPage(props: {
   payout?: PayoutForm;
   includePayout: boolean;
   waiting?: string; // a payout already waiting for the team, like "$40.00"
-  left?: boolean; // some rewards are picked in the shop (guest list names, merch, saved rewards)
+  left?: boolean; // some rewards are picked in the shop (guest list names, merch)
 }) {
   const p = props.payout;
   const nothing = !p && props.lines.length === 0;
@@ -1433,21 +1505,23 @@ export function CheckoutPage(props: {
           {props.lines.length === 0 && <p class="muted">{t('No reward ready to ask for.', 'Aucune récompense prête à demander.')}</p>}
           <div class="checkout-lines">
             {props.lines.map((l) => (
-              <div class="card checkout-line">
-                {l.field && l.max ? (
-                  // The shop's − n + pill, drawn by app.js over this list (which works without scripts).
-                  <div class="checkout-qty" data-checkout-qty>
-                    <select
-                      name={`qty.${l.field}`}
-                      aria-label={t(`How many: ${l.merch !== undefined ? 'Merch' : l.type ? typeName(l.type) : ''}`, `Combien : ${l.merch !== undefined ? 'Merch' : l.type ? typeName(l.type) : ''}`)}
-                    >
-                      {Array.from({ length: l.max + 1 }, (_, n) => (
-                        <option value={String(n)} selected={n === l.quantity}>
-                          {n}
-                        </option>
-                      ))}
-                    </select>
+              <div class={`card checkout-line${l.fromBank ? ' bank-box' : ''}`}>
+                {l.fromBank && <BankLabel />}
+                {l.field && l.max && l.saved !== undefined ? (
+                  // An event's reward: how many for that event, and next to it how many to save for later.
+                  // Together they stay within what is available (app.js moves one over when needed).
+                  <div class="checkout-qtys" data-qty-total={String(l.max)}>
+                    <div class="qty-choice">
+                      <QtyPick name={`qty.${l.field}`} max={l.max} value={l.quantity} label={t(`How many for ${l.event?.title}: ${l.type ? typeName(l.type) : ''}`, `Combien pour ${l.event?.title} : ${l.type ? typeName(l.type) : ''}`)} />
+                      <span class="qty-caption">{t('For this event', 'Pour cet événement')}</span>
+                    </div>
+                    <div class="qty-choice bank">
+                      <QtyPick name={`save.${l.field}`} max={l.max} value={l.saved} label={t(`How many to save for another event: ${l.type ? typeName(l.type) : ''}`, `Combien garder pour un autre événement : ${l.type ? typeName(l.type) : ''}`)} />
+                      <span class="qty-caption">{t('Save for another event', 'Garder pour un autre événement')}</span>
+                    </div>
                   </div>
+                ) : l.field && l.max ? (
+                  <QtyPick name={`qty.${l.field}`} max={l.max} value={l.quantity} label={t(`How many: ${l.merch !== undefined ? 'Merch' : l.type ? typeName(l.type) : ''}`, `Combien : ${l.merch !== undefined ? 'Merch' : l.type ? typeName(l.type) : ''}`)} />
                 ) : (
                   <div class="checkout-qty">{l.quantity} ×</div>
                 )}
@@ -1460,27 +1534,47 @@ export function CheckoutPage(props: {
                         <dt>{t('What', 'Quoi')}</dt>
                         <dd>{l.merch || '—'}</dd>
                       </>
-                    ) : l.toBank ? (
+                    ) : l.fromBank ? (
+                      // From their bank: on any upcoming event, picked here.
                       <>
-                        <dt>{t('Goes to', 'Va dans')}</dt>
+                        <dt>{t('From', 'De')}</dt>
+                        <dd>{t('Your saved tickets', 'Tes billets gardés')}</dd>
+                        <dt>{t('Event', 'Événement')}</dt>
                         <dd>
-                          <strong>{t('Saved for later', 'Mis de côté')}</strong>
-                          {t(
-                            `, from ${l.event?.title}. The team confirms it; then they wait for any later event, still ${l.type?.label_en}.`,
-                            `, de ${l.event?.title}. L’équipe confirme; ensuite, ils t’attendent pour n’importe quel prochain événement, toujours en ${l.type ? typeName(l.type) : ''}.`,
+                          {l.events && l.events.length > 0 ? (
+                            <select name={`event.${l.field}`} aria-label={t('For which event', 'Pour quel événement')}>
+                              {l.events.map((e) => (
+                                <option value={String(e.id)} selected={e.id === l.eventId}>
+                                  {e.title}
+                                  {e.start ? ` · ${formatDate(e.start, e.timezone ?? null)}` : ''}
+                                </option>
+                              ))}
+                            </select>
+                          ) : (
+                            <strong>{l.event?.title}</strong>
                           )}
                         </dd>
+                        <dt>{t('For', 'Pour')}</dt>
+                        <dd class="who-strong">{l.who}</dd>
                       </>
                     ) : (
+                      // An event's reward: who gets the ones for this event; the saved ones wait for a later one.
                       <>
                         <dt>{t('Event', 'Événement')}</dt>
                         <dd>
                           <strong>{l.event?.title}</strong>
                           {l.event?.start ? ` · ${formatDate(l.event.start, l.event.timezone ?? null)}` : ''}
-                          {l.fromBank ? t(' · saved earlier', ' · mis de côté avant') : ''}
                         </dd>
-                        <dt>{t('For', 'Pour')}</dt>
-                        <dd class="who-strong">{l.who}</dd>
+                        <dt data-when-used hidden={!l.quantity}>{t('For', 'Pour')}</dt>
+                        <dd class="who-strong" data-when-used hidden={!l.quantity}>
+                          {l.who}
+                        </dd>
+                        <dd class="muted bank-note" data-when-banked hidden={!l.saved}>
+                          {t(
+                            `Saved for another event: the team confirms it; then they wait for any later event, still ${l.type ? typeName(l.type) : ''}.`,
+                            `Gardés pour un autre événement : l’équipe confirme; ensuite, ils t’attendent pour n’importe quel prochain événement, toujours en ${l.type ? typeName(l.type) : ''}.`,
+                          )}
+                        </dd>
                       </>
                     )}
                   </dl>
@@ -1490,7 +1584,7 @@ export function CheckoutPage(props: {
           </div>
           <p class="muted">
             {props.left
-              ? t('Guest list spots, merch and saved rewards are picked in the shop: ', 'Les places sur la liste d’invités, le merch et les récompenses mises de côté se choisissent dans la boutique : ')
+              ? t('Guest list spots and merch are picked in the shop: ', 'Les places sur la liste d’invités et le merch se choisissent dans la boutique : ')
               : ''}
             <a href="/payouts#rewards">{t('add rewards from the shop →', 'ajouter des récompenses dans la boutique →')}</a>
           </p>

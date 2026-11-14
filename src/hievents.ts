@@ -162,6 +162,30 @@ export async function dailyForCodes(codes: string[], eventId?: number): Promise<
   `;
 }
 
+/** Tickets sold with these codes, by event and ticket type ("GA", "VIP – Early bird"); '' when the type is unknown. */
+export type TicketTypeSales = { event_id: number; type: string; tickets: number; pending: number };
+
+export async function ticketTypesForCodes(codes: string[], eventId?: number): Promise<TicketTypeSales[]> {
+  // A role set up before this cannot read the ticket types: no breakdown then, rather than an error.
+  if (codes.length === 0 || !(await canReadTicketTypes())) return [];
+  // A ticket is an attendee, as in statsForCodes; its type is its product, and the price tier when it has a name.
+  return sql<TicketTypeSales[]>`
+    WITH ${codeOrderCtes(codes, eventId)}
+    SELECT
+      a.event_id::int AS event_id,
+      coalesce(p.title || coalesce(' – ' || nullif(pp.label, ''), ''), '') AS type,
+      count(*) FILTER (WHERE o.status = 'COMPLETED')::int AS tickets,
+      count(*) FILTER (WHERE o.status = 'AWAITING_OFFLINE_PAYMENT')::int AS pending
+    FROM code_orders o
+    JOIN attendees a ON a.order_id = o.id AND a.event_id IN (SELECT event_id FROM codes)
+      AND a.deleted_at IS NULL AND a.status <> 'CANCELLED'
+    LEFT JOIN products p ON p.id = a.product_id
+    LEFT JOIN product_prices pp ON pp.id = a.product_price_id
+    GROUP BY 1, 2
+    ORDER BY 1, 3 DESC, 2
+  `;
+}
+
 export type PromoCodeListing = {
   code: string;
   event_title: string;
@@ -216,6 +240,21 @@ async function canReadStatus(): Promise<boolean> {
   `.catch(() => [{ ok: false }]);
   statusReadable = { value: !!rows[0]?.ok, at: Date.now() };
   return statusReadable.value;
+}
+
+let typesReadable: { value: boolean; at: number } | null = null;
+
+/** Whether the read-only role can read attendees' products and their names (granted in sql/readonly-role.sql). */
+async function canReadTicketTypes(): Promise<boolean> {
+  if (typesReadable && Date.now() - typesReadable.at < 10 * 60 * 1000) return typesReadable.value;
+  const rows = await sql<{ ok: boolean }[]>`
+    SELECT has_column_privilege('public.attendees', 'product_id', 'SELECT')
+       AND has_column_privilege('public.attendees', 'product_price_id', 'SELECT')
+       AND has_column_privilege('public.products', 'title', 'SELECT')
+       AND has_column_privilege('public.product_prices', 'label', 'SELECT') AS ok
+  `.catch(() => [{ ok: false }]);
+  typesReadable = { value: !!rows[0]?.ok, at: Date.now() };
+  return typesReadable.value;
 }
 
 /** The upcoming events a promoter's public page lists: not ended, not deleted, and live when that is known. No sales figures. */

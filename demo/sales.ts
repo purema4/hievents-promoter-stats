@@ -18,6 +18,29 @@ const cents = (n: number) => Math.round(n * 100) / 100;
 const CODE_DISCOUNT = 0.1;
 const TAXES_AND_FEES = 1.15;
 
+// Each event's ticket types, made the first time it sells: GA in two price tiers, and VIP.
+type Types = { product: number; price: number }[];
+const typesOf = new Map<number, Types>();
+/** Forgets them, for a demo seeded again from empty. */
+export const forgetTicketTypes = () => typesOf.clear();
+async function ticketTypes(eventId: number): Promise<Types> {
+  const known = typesOf.get(eventId);
+  if (known) return known;
+  const [ga] = await writer<{ id: string }[]>`INSERT INTO products (event_id, title) VALUES (${eventId}, 'GA') RETURNING id`;
+  const [vip] = await writer<{ id: string }[]>`INSERT INTO products (event_id, title) VALUES (${eventId}, 'VIP') RETURNING id`;
+  const prices = await writer<{ id: string; product_id: string }[]>`
+    INSERT INTO product_prices (product_id, label) VALUES (${ga!.id}, 'Early bird'), (${ga!.id}, 'Regular'), (${vip!.id}, NULL)
+    RETURNING id, product_id`;
+  const types = prices.map((p) => ({ product: Number(p.product_id), price: Number(p.id) }));
+  typesOf.set(eventId, types);
+  return types;
+}
+/** Mostly regular GA, some early bird, about one VIP in seven. */
+const typeFor = (types: Types, order: number, n: number) => {
+  const pick = (order * 3 + n) % 7;
+  return pick === 0 ? types[2]! : pick <= 2 ? types[0]! : types[1]!;
+};
+
 /** Adds orders the way Hi.Events records them: the order, its items and one attendee per ticket. */
 export async function addOrders(orders: NewOrder[]) {
   for (let start = 0; start < orders.length; start += 400) {
@@ -42,6 +65,7 @@ export async function addOrders(orders: NewOrder[]) {
       )}
       RETURNING id`;
     const ids = rows.map((r) => Number(r.id));
+    for (const o of batch) await ticketTypes(o.eventId);
     await writer`INSERT INTO order_items ${writer(
       batch.map((o, i) => ({
         order_id: ids[i]!,
@@ -56,6 +80,8 @@ export async function addOrders(orders: NewOrder[]) {
         Array.from({ length: o.tickets }, (_, n) => ({
           order_id: ids[i]!,
           event_id: o.eventId,
+          product_id: typeFor(typesOf.get(o.eventId)!, ids[i]!, n).product,
+          product_price_id: typeFor(typesOf.get(o.eventId)!, ids[i]!, n).price,
           status: o.status === 'CANCELLED' || n < (o.refunded ?? 0) ? 'CANCELLED' : o.status === 'COMPLETED' ? 'ACTIVE' : 'AWAITING_PAYMENT',
         })),
       ),

@@ -11,7 +11,7 @@ import { sessionsFor, type DeviceSession } from './auth';
 import { hasTwoFactor } from './two-factor';
 import { describeAdjustment, type Adjustment } from './adjustments';
 import { alerts, type Prefs } from './alert-prefs';
-import type { Rewards } from './rewards';
+import type { EventTicketLedger, Rewards } from './rewards';
 import { describeTrack, LIMITS, levelColors, rewardRules, trackOn, type Level, type LevelColor, type RewardRules, type Track } from './reward-rules';
 import { config } from './config';
 import { pageLink } from './links';
@@ -362,6 +362,8 @@ a.event-card-main .event-main { min-width: 0; display: flex; gap: 12px; align-it
 .event-stats .big { font-size: 19px; white-space: nowrap; }
 .event-stats .primary { background: color-mix(in srgb, var(--accent) 12%, var(--surface)); }
 .event-stats .primary .big { color: var(--accent); font-size: 28px; line-height: 1.1; }
+.event-stats .ticket-types { font-size: 13px; }
+.ticket-types-card table { margin-top: 4px; }
 .banner { display: flex; gap: 10px; align-items: flex-start; margin: 0 0 16px; padding: 10px 12px; border: 1px solid var(--warn); border-left-width: 4px; border-radius: 8px; background: color-mix(in srgb, var(--warn) 10%, var(--surface)); font-size: 14px; }
 .banner p { margin: 0; min-width: 0; white-space: pre-line; overflow-wrap: anywhere; }
 .banner svg { flex: none; margin-top: 1px; color: var(--warn); }
@@ -662,6 +664,9 @@ ${chartCss}
 .shop-event-head .cover-thumb { width: 104px; height: 65px; border-radius: 10px; box-shadow: 0 4px 14px rgb(0 0 0 / 0.25); }
 .shop-event-card > p.muted { margin: 2px 0 10px; }
 .bank-card { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 6%, var(--surface)); }
+/* The bank: a thick outline with BANK written on it, at checkout and in the shop. */
+.bank-box { position: relative; border: 3px solid var(--accent); background: color-mix(in srgb, var(--accent) 6%, var(--surface)); margin-top: 18px; padding-top: 26px; overflow: visible; }
+.bank-label { position: absolute; top: -17px; left: 14px; padding: 2px 14px; border-radius: 999px; background: var(--accent); color: var(--accent-text); font-size: 20px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; line-height: 1.4; }
 table.shop-table { width: 100%; }
 table.shop-table td { vertical-align: middle; padding: 12px 8px; }
 table.shop-table tr:last-child td { border-bottom: 0; }
@@ -717,6 +722,8 @@ button.step { display: inline-grid; place-items: center; width: 32px; height: 32
 .checkout-facts dt { color: var(--muted); }
 .checkout-facts dd { margin: 0; }
 .who-strong { font-weight: 700; }
+.checkout-facts select { max-width: 100%; }
+.checkout-facts .bank-note { grid-column: 1 / -1; font-size: 14px; }
 .checkout-confirm { display: grid; gap: 12px; margin: 16px 0; }
 .checkout-confirm h2 { margin: 12px 0 0; }
 .checkout-qty { display: flex; align-items: center; gap: 6px; flex: none; }
@@ -724,6 +731,16 @@ button.step { display: inline-grid; place-items: center; width: 32px; height: 32
 .checkout-qty select { width: auto; height: 44px; padding: 0 14px; border: 0; border-radius: 999px; background: var(--accent); color: var(--accent-text); font: inherit; font-size: 17px; font-weight: 700; font-variant-numeric: tabular-nums; cursor: pointer; }
 .checkout-qty .stepper:not([hidden]) { display: inline-flex; }
 .checkout-line.off .checkout-body { opacity: 0.45; }
+.ticket-ledger tr.event-start td { border-top: 2px solid var(--border); }
+.ticket-ledger td { vertical-align: top; }
+.ticket-ledger .bank-form { display: flex; gap: 6px; justify-content: flex-end; align-items: center; margin-top: 6px; white-space: nowrap; }
+.ticket-ledger .bank-form select { width: auto; padding: 4px 8px; }
+/* An event's reward: the count for the event, and next to it the count saved for another event. */
+.checkout-qtys { display: flex; flex-wrap: wrap; gap: 10px; flex: none; }
+.qty-choice { display: grid; gap: 4px; justify-items: center; }
+.qty-caption { font-size: 13px; color: var(--muted); }
+.qty-choice.bank .stepper:not([hidden]), .qty-choice.bank select { background: color-mix(in srgb, var(--accent) 14%, var(--surface)); color: var(--accent); box-shadow: none; border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent); }
+.qty-choice.bank .stepper-n { border-color: color-mix(in srgb, var(--accent) 35%, transparent); }
 /* On phones the text gets the full width, under the pill. */
 @media (max-width: 560px) { .checkout-line:has([data-checkout-qty]) { flex-direction: column; gap: 10px; } }
 .checkout-payout { display: grid; gap: 12px; }
@@ -1936,6 +1953,100 @@ export function AdminPagesPage(props: {
   );
 }
 
+/**
+ * A promoter's tickets on each event, past ones too: what the rules gave and admins added, then what
+ * became of them (waiting, given, into the bank), and what is left. Their bank balance underneath.
+ */
+function TicketLedger(props: { promoter: User; ledger: EventTicketLedger[]; bank: Rewards['bank'] }) {
+  const p = props.promoter;
+  const cell = (n: number) => (n ? String(n) : <span class="muted">0</span>);
+  return (
+    <>
+      <h2 id="tickets">Tickets by event</h2>
+      {props.ledger.length === 0 ? (
+        <div class="card muted">No ticket rewards on any event yet.</div>
+      ) : (
+        <div class="card table-wrap">
+          <table class="ticket-ledger">
+            <thead>
+              <tr>
+                <th>Event</th>
+                <th>Reward</th>
+                <th class="num">Sold</th>
+                <th class="num">From rules</th>
+                <th class="num">By hand</th>
+                <th class="num">Waiting</th>
+                <th class="num">Given</th>
+                <th class="num">To the bank</th>
+                <th class="num">Left</th>
+              </tr>
+            </thead>
+            <tbody>
+              {props.ledger.map((l, i) => {
+                const first = i === 0 || props.ledger[i - 1]!.event.id !== l.event.id;
+                return (
+                  <tr class={first && i > 0 ? 'event-start' : undefined}>
+                    <td>
+                      {first && (
+                        <>
+                          <strong>{l.event.title}</strong>
+                          <div class="muted">
+                            {l.event.start ? formatDate(l.event.start, l.event.timezone ?? null) : ''}
+                            {l.over ? ' · over' : ''}
+                          </div>
+                        </>
+                      )}
+                    </td>
+                    <td>{l.type.label_en || l.type.key}</td>
+                    <td class="num">{first ? l.event.tickets : ''}</td>
+                    <td class="num">{cell(l.fromRules)}</td>
+                    <td class="num">{l.byHand > 0 ? `+${l.byHand}` : cell(l.byHand)}</td>
+                    <td class="num">{cell(l.waiting)}</td>
+                    <td class="num">{cell(l.given)}</td>
+                    <td class="num">
+                      {cell(l.banked)}
+                      {l.toBankWaiting > 0 && <div class="muted">+{l.toBankWaiting} waiting</div>}
+                    </td>
+                    <td class="num">
+                      {l.left > 0 ? l.over ? <span class="muted" title="Not asked for before the event ended">{l.left} lost</span> : <strong>{l.left}</strong> : cell(0)}
+                      {l.left > 0 && (
+                        <form class="bank-form" method="post" action={`/admin/promoters/${p.id}/bank`}>
+                          <input type="hidden" name="event_id" value={String(l.event.id)} />
+                          <input type="hidden" name="reward_type" value={l.type.key} />
+                          <input type="hidden" name="notify" value="1" />
+                          <select name="quantity" aria-label={`How many ${l.type.label_en || l.type.key} from ${l.event.title} to put in the bank`}>
+                            {Array.from({ length: l.left }, (_, n) => (
+                              <option value={String(n + 1)} selected={n + 1 === l.left}>
+                                {n + 1}
+                              </option>
+                            ))}
+                          </select>
+                          <button class="secondary small" type="submit">
+                            To the bank
+                          </button>
+                        </form>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <p class="muted">
+        {props.bank.some((b) => b.balance > 0 || b.pending > 0)
+          ? `In ${p.name}'s bank now: ${props.bank
+              .filter((b) => b.balance > 0 || b.pending > 0)
+              .map((b) => `${b.balance} ${b.type.label_en || b.type.key}${b.pending ? ` (+${b.pending} waiting for approval)` : ''}`)
+              .join(', ')}. `
+          : `Nothing in ${p.name}'s bank. `}
+        Tickets left on an event, even one that is over, can go to their bank with <strong>To the bank</strong>: kept for any later event, and they are notified. Waiting requests are under <a href="/admin/payouts">Requests</a>; add tickets on an event with <a href="#adjust">Adjust by hand</a>.
+      </p>
+    </>
+  );
+}
+
 export function PromoterPage(props: {
   user: User;
   promoter: User;
@@ -1944,6 +2055,7 @@ export function PromoterPage(props: {
   payouts: PayoutRequest[];
   rewardRequests: RewardRequest[];
   rewards: Rewards;
+  ledger: EventTicketLedger[];
   adjustments: Adjustment[];
   teamLeads: User[];
   team: User[]; // their promoters, when they are a team lead
@@ -2184,10 +2296,6 @@ export function PromoterPage(props: {
         ))}
       </div>
       <p>
-        <a href={`/admin/promoters/${p.id}/view`}>Open {p.name}'s dashboard</a>
-        <span class="muted"> · events, daily sales and commission, exactly as they see it</span>
-      </p>
-      <p>
         <a href={`/admin/rules/edit?scope=promoter&user=${p.id}`}>{p.name}'s rule</a>
         <span class="muted"> · their own commission or rewards on every event, on top of the default rule</span>
       </p>
@@ -2205,6 +2313,8 @@ export function PromoterPage(props: {
           <span class="muted">Every page they see, read-only, for up to an hour. A banner takes you back.</span>
         </form>
       )}
+
+      <TicketLedger promoter={p} ledger={props.ledger} bank={props.rewards.bank} />
 
       <h2 id="adjust">Adjust by hand</h2>
       <p class="muted">
