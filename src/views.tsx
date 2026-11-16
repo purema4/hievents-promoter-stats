@@ -30,6 +30,7 @@ import { describeRate, describeRule, formatMoney, formatPercent, type EventRule 
 import { countPendingPayouts, type Balance, type PayoutRequest } from './payouts';
 import { LinkField, PayoutHistory, RewardHistory } from './promoter-views';
 import { countPendingRewards, describeReward, type RewardRequest } from './rewards';
+import type { TicketPlan } from './reward-tickets';
 import { ANNOUNCEMENT_BODY_MAX, ANNOUNCEMENT_TITLE_MAX, unreadCount, type Announcement, type Notification } from './notifications';
 import { definitions, emailTypes, getReplyTo, getTemplate, isCustomized, languagesOf, type EmailType } from './email-templates';
 import type { EmailLogEntry } from './mail';
@@ -385,7 +386,10 @@ table.balance td { border: 0; padding: 4px 0; }
 table.balance tr.total td { border-top: 1px solid var(--border); font-weight: 650; padding-top: 8px; }
 .payout-block { margin-bottom: 16px; }
 .payout-actions { display: grid; gap: 8px; min-width: 220px; }
-.payout-actions form { display: flex; gap: 6px; }
+.payout-actions form { display: flex; flex-wrap: wrap; gap: 6px; }
+.payout-actions form > input { flex: 1; }
+.ticket-send { flex-basis: 100%; order: 1; font-size: 0.9em; }
+.ticket-send.warn { color: var(--warn); }
 .payout-actions input { padding: 6px 8px; }
 .payout-actions button { padding: 6px 12px; white-space: nowrap; }
 button.secondary { background: var(--bg); color: var(--text); border: 1px solid var(--border); }
@@ -2478,6 +2482,31 @@ export function PromoterPage(props: {
   );
 }
 
+// The Hi.Events part of giving a ticket request: what it sends, or the ticket to create first.
+function TicketSend(props: { plan?: TicketPlan; quantity: number; eventId: number | null }) {
+  const plan = props.plan;
+  if (!plan) return null;
+  if (!plan.ok && plan.reason === 'missing_product') {
+    return (
+      <div class="ticket-send warn">
+        <strong>No “{plan.product}” ticket in {plan.eventTitle}.</strong> Create it in Hi.Events (free, hidden), then reload this page to
+        send the tickets. Or mark it given if you hand them out another way.
+      </div>
+    );
+  }
+  if (!plan.ok) return <div class="ticket-send warn">Hi.Events can’t be reached to send the tickets: {plan.message}</div>;
+  return (
+    <label class="check ticket-send">
+      <input type="checkbox" name="send_tickets" value="1" checked />
+      <span>
+        Send {plan.toSend} × {plan.product} from Hi.Events to {plan.email}
+        {plan.sent > 0 && <span class="muted"> ({plan.sent} already sent)</span>}
+        {plan.lastError && <span class="ticket-send warn"> Last try: {plan.lastError}</span>}
+      </span>
+    </label>
+  );
+}
+
 function NotifyBox() {
   return (
     <label class="check">
@@ -2492,6 +2521,7 @@ export function AdminPayoutsPage(props: {
   done: PayoutRequest[];
   pendingRewards: RewardRequest[];
   doneRewards: RewardRequest[];
+  ticketPlans?: Map<number, TicketPlan>;
   error?: string;
   ok?: string;
 }) {
@@ -2528,7 +2558,8 @@ export function AdminPayoutsPage(props: {
                     <div class="payout-actions">
                       <form method="post" action={`/admin/rewards/${r.id}/fulfil`}>
                         <input name="admin_note" placeholder="Message (optional)" maxlength={200} />
-                        <button type="submit">Mark given</button>
+                        <TicketSend plan={props.ticketPlans?.get(r.id)} quantity={r.quantity} eventId={r.event_id} />
+                        <button type="submit">{props.ticketPlans?.get(r.id)?.ok ? 'Give' : 'Mark given'}</button>
                       </form>
                       <form method="post" action={`/admin/rewards/${r.id}/reject`}>
                         <input name="admin_note" placeholder="Reason" maxlength={200} required />

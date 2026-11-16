@@ -250,25 +250,34 @@ addColumn('reward_types', 'description_fr', 'TEXT');
   addColumn('reward_types', 'guest_list', 'INTEGER NOT NULL DEFAULT 0');
   if (!had) db.query("UPDATE reward_types SET guest_list = 1 WHERE key LIKE 'gl\\_%' ESCAPE '\\' OR key LIKE '%\\_list' ESCAPE '\\' OR key LIKE '%guest%'").run();
 }
+// The Hi.Events ticket a reward type is sent as. NULL: GL VIP for a type whose key says VIP, else GL GA.
+addColumn('reward_types', 'hievents_product', 'TEXT');
 // The first label of plain free tickets said nothing of what they are: given a clear one, unless changed.
 db.query(
   "UPDATE reward_types SET label_en = 'Free ticket', label_fr = 'Billet gratuit', description_en = 'A regular entry ticket to the event, free.', description_fr = 'Un billet d’entrée régulier pour l’événement, gratuit.' WHERE key = 'free_tickets' AND label_en = 'Free tickets' AND description_en IS NULL",
 ).run();
 
-export type RewardType = { key: string; label_en: string; label_fr: string; description_en?: string | null; description_fr?: string | null; guest_list?: number };
+export type RewardType = { key: string; label_en: string; label_fr: string; description_en?: string | null; description_fr?: string | null; guest_list?: number; hievents_product?: string | null };
 
 export const REWARD_KEY = /^[a-z][a-z0-9_]{1,39}$/;
 
 export function listRewardTypes(): RewardType[] {
-  return db.query<RewardType, []>('SELECT key, label_en, label_fr, description_en, description_fr, guest_list FROM reward_types ORDER BY created_at, key').all();
+  return db.query<RewardType, []>('SELECT key, label_en, label_fr, description_en, description_fr, guest_list, hievents_product FROM reward_types ORDER BY created_at, key').all();
 }
 
 export function rewardTypeOf(key: string): RewardType | null {
-  return db.query<RewardType, [string]>('SELECT key, label_en, label_fr, description_en, description_fr, guest_list FROM reward_types WHERE key = ?').get(key);
+  return db.query<RewardType, [string]>('SELECT key, label_en, label_fr, description_en, description_fr, guest_list, hievents_product FROM reward_types WHERE key = ?').get(key);
 }
 
 /** Adds or renames a reward type. Its key is what rules use and cannot be one of the fixed outputs. */
-export function saveRewardType(key: string, labelEn: string, labelFr: string, descriptionEn = '', descriptionFr = '', guestList = false): 'ok' | 'invalid' {
+/** The Hi.Events ticket name a reward type is sent as. */
+export function ticketProductFor(key: string | null): string {
+  const set = key ? rewardTypeOf(key)?.hievents_product?.trim() : '';
+  if (set) return set;
+  return key && /vip/i.test(key) ? 'GL VIP' : 'GL GA';
+}
+
+export function saveRewardType(key: string, labelEn: string, labelFr: string, descriptionEn = '', descriptionFr = '', guestList = false, hieventsProduct = ''): 'ok' | 'invalid' {
   if (!REWARD_KEY.test(key) || FIXED_OUTPUTS.some((o) => o.name === key)) return 'invalid';
   const en = labelEn.trim().slice(0, 40);
   const fr = labelFr.trim().slice(0, 40) || en;
@@ -276,8 +285,8 @@ export function saveRewardType(key: string, labelEn: string, labelFr: string, de
   const dEn = descriptionEn.trim().slice(0, 200) || null;
   const dFr = descriptionFr.trim().slice(0, 200) || dEn;
   db.query(
-    'INSERT INTO reward_types (key, label_en, label_fr, description_en, description_fr, guest_list) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (key) DO UPDATE SET label_en = excluded.label_en, label_fr = excluded.label_fr, description_en = excluded.description_en, description_fr = excluded.description_fr, guest_list = excluded.guest_list',
-  ).run(key, en, fr, dEn, dFr, guestList ? 1 : 0);
+    'INSERT INTO reward_types (key, label_en, label_fr, description_en, description_fr, guest_list, hievents_product) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT (key) DO UPDATE SET label_en = excluded.label_en, label_fr = excluded.label_fr, description_en = excluded.description_en, description_fr = excluded.description_fr, guest_list = excluded.guest_list, hievents_product = excluded.hievents_product',
+  ).run(key, en, fr, dEn, dFr, guestList ? 1 : 0, hieventsProduct.trim().slice(0, 100) || null);
   return 'ok';
 }
 

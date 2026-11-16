@@ -14,7 +14,8 @@ import { notify } from './notifications';
 import { plural, t, withLang, type Lang } from './i18n';
 import { balances, settlePayout, type PayoutRequest, withTeamRule } from './payouts';
 import { summarizeEvents } from './promoter-views';
-import { describeReward, isDeposit, rewardsFor, settleReward, type RewardRequest } from './rewards';
+import { describeReward, findRewardRequest, isDeposit, rewardsFor, settleReward, type RewardRequest } from './rewards';
+import { sendRewardTickets, sendsTickets } from './reward-tickets';
 import { hadTeam, teamCommission, type TeamCommission } from './teams';
 import { rangeBounds, type Range } from './chart';
 
@@ -191,6 +192,43 @@ export function finishPayout(c: Context, admin: User, payout: PayoutRequest, sta
 }
 
 /** Marks a reward request given or declined, and tells the promoter. False when it was already handled. */
+export type GiveResult =
+  | { ok: true; sent: number }
+  | { ok: false; error: 'already_handled' }
+  | { ok: false; error: 'busy' }
+  | { ok: false; error: 'missing_product'; product: string; eventTitle: string }
+  | { ok: false; error: 'api'; message: string };
+
+// Requests whose tickets are being sent right now: a second click waits for the first instead of sending
+// the tickets twice.
+const sending = new Set<number>();
+
+/**
+ * Gives a reward. Tickets for an event are first sent from Hi.Events when its API is set up and `send`
+ * is on; the request is marked given only once every ticket is out. A failure keeps it waiting.
+ */
+export async function giveReward(c: Context, admin: User, reward: RewardRequest, note: string, send: boolean, via?: string): Promise<GiveResult> {
+  if (reward.status !== 'pending') return { ok: false, error: 'already_handled' };
+  if (!send || !sendsTickets(reward)) return finishReward(c, admin, reward, 'fulfilled', note, via) ? { ok: true, sent: 0 } : { ok: false, error: 'already_handled' };
+  if (sending.has(reward.id)) return { ok: false, error: 'busy' };
+  sending.add(reward.id);
+  try {
+    const result = await sendRewardTickets(reward);
+    if (!result.ok) {
+      audit(c, 'reward.tickets_failed', { by: admin.id, rewardId: reward.id, ...(result.reason === 'api' ? { message: result.message } : { product: result.product }) });
+      return result.reason === 'api'
+        ? { ok: false, error: 'api', message: result.message }
+        : { ok: false, error: 'missing_product', product: result.product, eventTitle: result.eventTitle };
+    }
+    audit(c, 'reward.tickets_sent', { by: admin.id, rewardId: reward.id, product: result.product, quantity: reward.quantity, ...(via ? { via } : {}) });
+    const now = findRewardRequest(reward.id);
+    if (!now || !finishReward(c, admin, now, 'fulfilled', note, via)) return { ok: false, error: 'already_handled' };
+    return { ok: true, sent: reward.quantity };
+  } finally {
+    sending.delete(reward.id);
+  }
+}
+
 export function finishReward(c: Context, admin: User, reward: RewardRequest, status: 'fulfilled' | 'rejected', adminNote: string, via?: string): boolean {
   if (!settleReward(reward.id, admin.id, status, adminNote)) return false;
   audit(c, `reward.${status}`, { by: admin.id, rewardId: reward.id, userId: reward.user_id, ...(via ? { via } : {}) });

@@ -181,6 +181,8 @@ Verified as safe, with no change needed:
 - **API keys do not expire and skip two-step verification.** A key is as good as being signed in, until it is removed, so the page tells people to keep it like a password. They can see when each key was last used and remove it. An admin can remove all of a promoter's keys and connections.
 - **App names in OAuth come from the app itself.** Any app can register as "Claude". The approval page also shows the address it returns to (claude.ai for Claude), and only someone signed in who clicks **Connect** gives access.
 
+- **Ticket rewards are sent through the Hi.Events API** when `HIEVENTS_API_KEY` is set. The key comes only from the environment, is sent only in the `Authorization` header to `HIEVENTS_API_URL` (redirects are refused, so it cannot be carried elsewhere), and never reaches a page, an API answer or the log. It acts as the Hi.Events user who made it, with read and write access to their events: make it from an account that only manages the events, and revoke it in Hi.Events if it leaks. Only admins send tickets (the Requests page and the admin-only `settle_reward` tool); tickets go to the promoter's current email, never to an address typed in the request. A request's tickets are sent one at a time, never twice: each attendee made is recorded before the next, and a second click while sending is refused. Hi.Events' error text is kept on the server and shown on the request, not passed through a link. Tickets are made with `override_capacity`, so a sold-out GL ticket still sends: the admin decides by giving the request.
+
 ## Reporting
 
 Report security problems privately to the maintainers rather than in a public issue.

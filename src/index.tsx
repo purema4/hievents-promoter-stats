@@ -161,7 +161,8 @@ import {
 } from './teams';
 import QRCode from 'qrcode';
 import { publicAsset, publicText, serviceWorker } from './static';
-import { announcePayoutRequest, announceRewardOrder, announceRewardRequest, commissionEvents, emailLoginLink, finishPayout, finishReward, promoterData, teamTotals } from './actions';
+import { announcePayoutRequest, announceRewardOrder, announceRewardRequest, commissionEvents, emailLoginLink, finishPayout, finishReward, giveReward, promoterData, teamTotals } from './actions';
+import { planTickets, sendsTickets, type TicketPlan } from './reward-tickets';
 import { iconUrl } from './icons';
 import { isTokenPath, mountApi, purgeApiLimits, takeOAuthReturn } from './api';
 import { createKey, KEY_DAYS, MAX_KEYS, type KeyDays, purgeApiTokens, revokeAllTokens, revokeToken, tokensFor } from './api-tokens';
@@ -287,6 +288,10 @@ const messages: Record<string, string | [en: string, fr: string]> = {
   not_available: ['That reward is not available any more.', 'Cette récompense n’est plus disponible.'],
   missing_details: ['Tell us which item and size you would like.', 'Dis-nous quel article et quelle taille tu veux.'],
   reward_fulfilled: 'Marked as given. The promoter has been emailed.',
+  tickets_sent: 'Tickets sent from Hi.Events and marked as given. The promoter has been emailed.',
+  ticket_missing: 'The ticket is missing in the event on Hi.Events: create it there (see the request), then send again.',
+  tickets_busy: 'Those tickets are being sent right now.',
+  tickets_api: 'The tickets could not be sent: see the request for what Hi.Events said. Tickets already sent are kept; sending again sends the rest.',
   reward_rejected: 'Reward request declined. The promoter has been emailed and can request it again.',
   page_hidden: ['Your page is hidden.', 'Ta page est masquée.'],
   page_shown: ['Your page is back.', 'Ta page est de retour.'],
@@ -2267,7 +2272,7 @@ app.post('/admin/rules/check', async (c) => {
 app.post('/admin/rules/types', async (c) => {
   const body = await c.req.parseBody();
   const key = String(body.key ?? '').trim();
-  const result = saveRewardType(key, String(body.label_en ?? ''), String(body.label_fr ?? ''), String(body.description_en ?? ''), String(body.description_fr ?? ''), body.guest_list === '1');
+  const result = saveRewardType(key, String(body.label_en ?? ''), String(body.label_fr ?? ''), String(body.description_en ?? ''), String(body.description_fr ?? ''), body.guest_list === '1', String(body.hievents_product ?? ''));
   if (result !== 'ok') return c.redirect('/admin/rules?error=reward_type#types');
   audit(c, 'admin.reward_type_saved', { by: c.get('user').id, key });
   return c.redirect('/admin/rules?ok=reward_type_saved#types');
@@ -2873,28 +2878,40 @@ app.post('/admin/branding', async (c) => {
   return c.redirect('/admin/branding?ok=saved');
 });
 
-app.get('/admin/payouts', (c) =>
-  c.html(
+app.get('/admin/payouts', async (c) => {
+  const pendingRewards = listRewardRequests('pending');
+  // What giving each ticket request would send from Hi.Events, or why it can't.
+  const ticketPlans = new Map<number, TicketPlan>();
+  await Promise.all(pendingRewards.filter(sendsTickets).map(async (r) => ticketPlans.set(r.id, await planTickets(r))));
+  return c.html(
     <AdminPayoutsPage
       user={c.get('user')}
       pending={listPayouts('pending')}
       done={listPayouts('done')}
-      pendingRewards={listRewardRequests('pending')}
+      pendingRewards={pendingRewards}
       doneRewards={listRewardRequests('done')}
+      ticketPlans={ticketPlans}
       ok={flash(c.req.query('ok'))}
       error={flash(c.req.query('error'))}
     />,
-  ),
-);
+  );
+});
 
 app.post('/admin/rewards/:id/:action{fulfil|reject}', async (c) => {
   const reward = findRewardRequest(Number(c.req.param('id')));
   if (!reward) return c.notFound();
   const status = c.req.param('action') === 'fulfil' ? 'fulfilled' : 'rejected';
-  const adminNote = String((await c.req.parseBody()).admin_note ?? '').slice(0, 200);
-  if (status === 'rejected' && !adminNote.trim()) return c.redirect('/admin/payouts');
-  if (!finishReward(c, c.get('user'), reward, status, adminNote)) return c.redirect('/admin/payouts?error=payout_gone');
-  return c.redirect(`/admin/payouts?ok=reward_${status}`);
+  const body = await c.req.parseBody();
+  const adminNote = String(body.admin_note ?? '').slice(0, 200);
+  if (status === 'rejected') {
+    if (!adminNote.trim()) return c.redirect('/admin/payouts');
+    if (!finishReward(c, c.get('user'), reward, status, adminNote)) return c.redirect('/admin/payouts?error=payout_gone');
+    return c.redirect('/admin/payouts?ok=reward_rejected');
+  }
+  const given = await giveReward(c, c.get('user'), reward, adminNote, body.send_tickets === '1');
+  if (given.ok) return c.redirect(`/admin/payouts?ok=${given.sent ? 'tickets_sent' : 'reward_fulfilled'}`);
+  const codes = { api: 'tickets_api', missing_product: 'ticket_missing', busy: 'tickets_busy', already_handled: 'payout_gone' } as const;
+  return c.redirect(`/admin/payouts?error=${codes[given.error]}`);
 });
 
 app.post('/admin/payouts/:id/:action{paid|reject}', async (c) => {

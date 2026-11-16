@@ -43,6 +43,12 @@ export const config = {
   // Hi.Events' public site (its FRONTEND_URL), for event links. Admins can also set it on /admin/links.
   hieventsPublicUrl: (process.env.HIEVENTS_PUBLIC_URL ?? '').replace(/\/$/, ''),
   imageBaseUrl: (process.env.HIEVENTS_IMAGE_BASE_URL ?? '').replace(/\/$/, ''),
+  // Optional: the Hi.Events API and an API key (Settings → API keys, read and write). With both, giving
+  // a ticket reward sends the tickets from Hi.Events. HIEVENTS_API_URL defaults to HIEVENTS_PUBLIC_URL/api.
+  hieventsApi: {
+    url: ((process.env.HIEVENTS_API_URL ?? '').trim() || ((process.env.HIEVENTS_PUBLIC_URL ?? '').trim() ? `${(process.env.HIEVENTS_PUBLIC_URL ?? '').trim().replace(/\/+$/, '')}/api` : '')).replace(/\/+$/, ''),
+    key: (process.env.HIEVENTS_API_KEY ?? '').trim(),
+  },
   // Optional short links for promoters through a Kutt instance: its address and the API key of a Kutt
   // account kept for this app. Short links are off when either is missing.
   kutt: {

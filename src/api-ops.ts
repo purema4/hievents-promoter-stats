@@ -1,7 +1,7 @@
 import { describeCommission, setUsualRule, usualCommission } from './rules';
 import { rulesEngineUp } from './rules-engine';
 import type { Context } from 'hono';
-import { announcePayoutRequest, announceRewardRequest, commissionEvents, emailLoginLink, finishPayout, finishReward, promoterData } from './actions';
+import { announcePayoutRequest, announceRewardRequest, commissionEvents, emailLoginLink, finishPayout, finishReward, giveReward, promoterData } from './actions';
 import { audit } from './audit';
 import type { ApiToken } from './api-tokens';
 import { rangeBounds, today, type Range } from './chart';
@@ -17,6 +17,7 @@ import { findPayout, listPayouts, payoutsFor, requestPayout, type PayoutRequest,
 import { filterCodes } from './promo-code-list';
 import { summarizeEvents } from './promoter-views';
 import { findRewardRequest, isRollover, levelFor, listRewardRequests, requestReward, rewardRequestsFor, type RewardRequest, type RewardResult } from './rewards';
+import { sentTickets } from './reward-tickets';
 import { pageShortLink, prepareShortLinks, shareLink } from './short-links';
 import { isTeamLead, teamLeadOf, teamMember, teamMembers } from './teams';
 
@@ -167,6 +168,8 @@ const rewardOut = (r: RewardRequest) => ({
   team_note: r.admin_note,
   requested_at: r.created_at,
   handled_at: r.processed_at,
+  // Tickets sent from Hi.Events for it, to the promoter's email.
+  tickets_sent: r.kind === 'ticket' ? sentTickets(r.id).length : 0,
 });
 
 const payoutProblem: Record<Exclude<RequestResult, 'ok'>, string> = {
@@ -632,18 +635,38 @@ export const ops: Op[] = [
         reward_id: { type: 'integer', minimum: 1, description: 'The request, from list_reward_requests.' },
         action: { type: 'string', enum: ['given', 'decline'], description: 'Given, or declined (it can be requested again).' },
         note: { type: 'string', maxLength: 200, description: 'Given: an optional note. Declined: the reason, which the promoter sees (needed).' },
+        send_tickets: {
+          type: 'boolean',
+          default: true,
+          description:
+            'Given, for tickets to an event: send the tickets from Hi.Events (on the reward type\'s ticket, GL GA or GL VIP) to the promoter\'s email before marking it given. False: only mark it given (tickets handed out another way). Ignored when the Hi.Events API is not set up.',
+        },
       },
       required: ['reward_id', 'action'],
     },
-    run: ({ user, c }, input: { reward_id: number; action: 'given' | 'decline'; note?: string }) => {
+    run: async ({ user, c }, input: { reward_id: number; action: 'given' | 'decline'; note?: string; send_tickets?: boolean }) => {
       const reward = findRewardRequest(input.reward_id);
       if (!reward) throw new ApiError(404, 'not_found', 'No reward request with that id.');
       const note = (input.note ?? '').trim();
       if (input.action === 'decline' && !note) throw new ApiError(400, 'invalid_input', 'Give the reason in note: the promoter sees it.');
-      if (!finishReward(c, user, reward, input.action === 'given' ? 'fulfilled' : 'rejected', note, 'api')) {
-        throw new ApiError(409, 'already_handled', 'That request was already handled.');
+      if (input.action === 'decline') {
+        if (!finishReward(c, user, reward, 'rejected', note, 'api')) throw new ApiError(409, 'already_handled', 'That request was already handled.');
+        return { reward: rewardOut(findRewardRequest(reward.id)!) };
       }
-      return { reward: rewardOut(findRewardRequest(reward.id)!) };
+      const given = await giveReward(c, user, reward, note, input.send_tickets !== false, 'api');
+      if (!given.ok) {
+        if (given.error === 'already_handled') throw new ApiError(409, 'already_handled', 'That request was already handled.');
+        if (given.error === 'busy') throw new ApiError(409, 'busy', 'The tickets of that request are being sent right now.');
+        if (given.error === 'missing_product') {
+          throw new ApiError(
+            409,
+            'ticket_missing',
+            `No ticket named "${given.product}" in ${given.eventTitle} on Hi.Events. Ask an admin to create it there (free, hidden), then try again; or give it with send_tickets false.`,
+          );
+        }
+        throw new ApiError(503, 'hievents_error', `The tickets could not be sent: ${given.message}. Tickets already sent are kept; trying again sends the rest.`);
+      }
+      return { reward: rewardOut(findRewardRequest(reward.id)!), tickets_sent: given.sent };
     },
   },
   {

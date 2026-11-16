@@ -59,6 +59,14 @@ Leaving every milestone empty with "every" at 0 turns free tickets or merch off.
 
 Promoters request rewards on **Payouts & rewards** (with a guest-list name, or the merch item and size). Free tickets are earned on one event and asked for that event, or rolled over: asked for another published event that is not over, even one they have no code on. Admins see them under **Requests** (a roll over reads "rolled over from …"), then **Mark given** or **Decline** with a reason; the promoter is emailed. A declined reward can be requested again while its event is not over. Free tickets not requested by the end of their event are lost.
 
+### Tickets sent from Hi.Events
+
+With `HIEVENTS_API_KEY` set (a **read and write** key from Hi.Events → Settings → API keys), giving a ticket request sends the tickets from Hi.Events: one attendee per ticket is added to the event, free, and Hi.Events emails each ticket to the promoter's email. A guest list's tickets carry the guests' names. Each reward type is sent as a ticket of the event named like it says on **Rules → Reward types** (**Hi.Events ticket**): by default `GL VIP` for a type whose key contains `vip`, `GL GA` for the others. Create those tickets in each event (free, hidden); the matching ignores case and spaces around the name.
+
+On **Requests**, each ticket request says what it will send (“Send 2 × GL VIP from Hi.Events to …”). When the ticket is missing in the event, the request says which one to create, and stays waiting. Untick the box to only mark it given (tickets handed out another way). If Hi.Events refuses a ticket, the tickets already sent are kept, the error shows on the request, and sending again sends only the rest. Deposits into the bank never send tickets. The `settle_reward` API/MCP tool does the same, with `send_tickets: false` to only mark it given.
+
+`HIEVENTS_API_URL` defaults to `HIEVENTS_PUBLIC_URL` + `/api`. The key acts as the Hi.Events user who made it: use an account that can manage the events.
+
 ## Event links
 
 Every promoter has an **alias** (made from their name, changeable by them on Account and by admins on their page), used in their links as `aff=`. On **Event links**, admins set the Hi.Events public site address (its `FRONTEND_URL`, or `HIEVENTS_PUBLIC_URL`) and the format, by default `{event_url}?promo_code={code}&aff={alias}`, where `{event_url}` is `<site>/event/<id>/<slug>` like Hi.Events builds it. Promoters get **Copy** and **Share** buttons on event pages and upcoming event cards, and each promo code is a one-click copy button there too. The dashboard also has a **Your promo codes** card listing each code with the upcoming events it works on, for customers who type the code at checkout. For `aff=` to be tracked by Hi.Events, create an affiliate with the same code as the alias on the event.

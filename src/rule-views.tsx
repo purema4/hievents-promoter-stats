@@ -3,6 +3,7 @@ import type { PreviewRow, RuleCheck } from './rule-admin';
 import { FIXED_OUTPUTS, RULE_VARIABLES } from './rule-variables';
 import type { RuleProblem } from './rules-engine';
 import type { RewardType, RuleScope, RuleTemplate, RuleVersion } from './rules';
+import { ticketProductFor } from './rules';
 import { Flash, formatDate, Layout } from './views';
 
 /* Pay & rewards → Rules: the default rule, templates, reward types, and each event's and promoter's rule. */
@@ -449,6 +450,7 @@ export function AdminRulesPage(props: {
               <th>Name</th>
               <th>What it is (promoters see it)</th>
               <th>Guest list</th>
+              <th>Hi.Events ticket</th>
             </tr>
           </thead>
           <tbody>
@@ -466,6 +468,7 @@ export function AdminRulesPage(props: {
                   {t.description_fr && t.description_fr !== t.description_en && <div class="muted">{t.description_fr}</div>}
                 </td>
                 <td>{t.guest_list ? 'Yes: asks for names' : <span class="muted">No: tickets sent to the promoter</span>}</td>
+                <td>{ticketProductFor(t.key)}</td>
               </tr>
             ))}
           </tbody>
@@ -501,6 +504,10 @@ export function AdminRulesPage(props: {
             <strong>Guest list</strong>: names at the door instead of tickets. Promoters are asked for the names. Otherwise
             the tickets are sent to the promoter, who hands them out.
           </span>
+        </label>
+        <label>
+          Hi.Events ticket it is sent as
+          <input name="hievents_product" maxlength={100} placeholder="GL GA (GL VIP when the key says vip)" />
         </label>
         <button type="submit">Save</button>
       </form>
