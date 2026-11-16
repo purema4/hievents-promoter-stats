@@ -1,4 +1,6 @@
 # Checked by hand, not secrets: the empty KUTT_API_KEY= line of .env.example (read together with the
-# next line) and the fake key the short link tests give their fake Kutt.
+# next line), the fake key the short link tests give their fake Kutt, and the fake Hi.Events API key of
+# the ticket reward tests.
 852b4c73818c79c8fee683f425453ed88d784105:.env.example:generic-api-key:39
 852b4c73818c79c8fee683f425453ed88d784105:test/integration/short-links.test.ts:generic-api-key:9
+e3e6d995074f87fdbb960a4fc4b70ee1cf658baa:test/integration/reward-tickets.test.ts:generic-api-key:10
