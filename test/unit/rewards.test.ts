@@ -13,6 +13,8 @@ import {
   salesToNextMerch,
   settleReward,
 } from '../../src/rewards';
+import { checkMilestones } from '../../src/milestones';
+import { notificationsFor } from '../../src/notifications';
 import { event, newUser } from './helpers';
 
 describe('free tickets (REWARD_TICKET_EVERY = 5)', () => {
@@ -182,5 +184,28 @@ describe('rewardsFor and requestReward', () => {
     const rewards = rewardsFor(user.id, [event(1, 6, -10)]);
     expect(rewards.tickets).toEqual([]);
     expect(requestReward(user, rewards, { kind: 'ticket', eventId: 1, useFor: { id: 2, title: 'Later' }, quantity: 1, details: '' })).toBe('not_available');
+  });
+});
+
+describe('draft events', () => {
+  test('no ticket rewards until the event is live: none to request, and the notification waits', async () => {
+    const user = await newUser();
+    const draft = { ...event(1, 6, 10, 'Joyhauser'), draft: true };
+    const live = { ...draft, draft: false };
+    // The first look only records where they stand.
+    checkMilestones(user, rewardsFor(user.id, [event(9, 0, -30)]));
+
+    const before = rewardsFor(user.id, [draft]);
+    expect(before.tickets).toHaveLength(0);
+    expect(requestReward(user, before, { kind: 'ticket', eventId: 1, quantity: 1, details: '' })).toBe('not_available');
+    checkMilestones(user, before);
+    expect(notificationsFor(user.id).filter((n) => n.title.includes('Joyhauser'))).toHaveLength(0);
+
+    const after = rewardsFor(user.id, [live]);
+    expect(after.tickets[0]).toMatchObject({ earned: 2, available: 2 });
+    checkMilestones(user, after);
+    checkMilestones(user, after);
+    expect(notificationsFor(user.id).filter((n) => n.title.includes('Joyhauser'))).toHaveLength(1);
+    expect(requestReward(user, after, { kind: 'ticket', eventId: 1, quantity: 1, details: '' })).toBe('ok');
   });
 });

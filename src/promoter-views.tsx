@@ -1081,9 +1081,7 @@ function RewardsShop(props: { rewards: Rewards; ticketEvents: TicketEvent[]; pro
   if (tickets.length === 0 && bank.length === 0 && !showMerch) return null;
   // Events in date order, each with its rewards.
   const events = new Map<number, { event: TicketReward['event']; rows: TicketReward[] }>();
-  // An event not on sale yet only shows once it has something to ask for.
-  const shown = tickets.filter((t) => !t.event.draft || tickets.some((o) => o.event.id === t.event.id && o.available > 0));
-  for (const t of shown) events.set(t.event.id, { event: t.event, rows: [...(events.get(t.event.id)?.rows ?? []), t] });
+  for (const t of tickets) events.set(t.event.id, { event: t.event, rows: [...(events.get(t.event.id)?.rows ?? []), t] });
   const byDate = [...events.values()].sort((a, b) => (a.event.start?.getTime() ?? Infinity) - (b.event.start?.getTime() ?? Infinity));
   return (
     <section id="rewards">

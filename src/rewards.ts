@@ -253,7 +253,9 @@ export function rewardsFor(userId: number, events: EventSummary[], rate: Rate | 
   const order = [...types.keys()];
 
   const tickets: TicketReward[] = [];
-  for (const event of events.filter(isUpcoming)) {
+  // Only events on sale: a draft's rewards can't be asked for, and appear (with their notification)
+  // once it is published.
+  for (const event of events.filter((e) => isUpcoming(e) && !e.draft)) {
     const earning = typeof rate === 'number' ? null : rate.events.get(event.id);
     const counts: Record<string, number> = earning ? { ...earning.rewards } : { [FREE_TICKETS]: freeTicketsEarned(event.tickets) };
     for (const key of extraTickets.keys()) {

@@ -57,7 +57,7 @@ Admins set them on **Levels & rewards**; changes apply to everyone at once, coun
 
 Leaving every milestone empty with "every" at 0 turns free tickets or merch off. Promoters see the rules in words, a progress bar to their next level and reward, and get a notification when they reach one.
 
-Promoters request rewards on **Payouts & rewards** (with a guest-list name, or the merch item and size). Free tickets are earned on one event and asked for that event, or rolled over: asked for another published event that is not over, even one they have no code on. Admins see them under **Requests** (a roll over reads "rolled over from …"), then **Mark given** or **Decline** with a reason; the promoter is emailed. A declined reward can be requested again while its event is not over. Free tickets not requested by the end of their event are lost.
+Promoters request rewards on **Payouts & rewards** (with a guest-list name, or the merch item and size). Free tickets are earned on one event and asked for that event, or rolled over: asked for another published event that is not over, even one they have no code on. Admins see them under **Requests** (a roll over reads "rolled over from …"), then **Mark given** or **Decline** with a reason; the promoter is emailed. A declined reward can be requested again while its event is not over. Free tickets not requested by the end of their event are lost. An event still in draft in Hi.Events gives nothing to request: its ticket rewards appear, with their notification, once it is published.
 
 ### Tickets sent from Hi.Events
 

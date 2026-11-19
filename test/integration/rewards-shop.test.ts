@@ -341,4 +341,17 @@ describeIntegration('rewards shop', () => {
     expect(res.status).toBe(400);
     expect(text(await res.text())).toContain('That reward is not available any more.');
   });
+
+  test('a draft event gives no tickets to request until it is published', async () => {
+    const nova = await newPromoter(server, admin, { name: `Nova ${uid()}`, codes: 'NOVA' });
+    db.query("INSERT INTO rule_versions (scope, event_id, text) VALUES ('event', 5, 'free_tickets = 2')").run();
+    expect(await nova.client.page('/payouts')).not.toContain('Secret Afterparty');
+    expect(await nova.client.page('/rewards/checkout?event=5')).not.toContain('qty.5.free_tickets');
+    const before = requests();
+    const res = await nova.client.post('/rewards/checkout', { 'qty.5.free_tickets': '1' });
+    expect(res.status).toBe(400);
+    expect(text(await res.text())).toContain('Your cart is empty');
+    expect((await nova.client.post('/rewards/order', { 'qty.5.free_tickets': '1' })).status).toBe(400);
+    expect(requests()).toBe(before);
+  });
 });
