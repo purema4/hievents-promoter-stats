@@ -78,7 +78,8 @@ import {
   sendTestNotification,
 } from './notifications';
 import { blankPng, eventCover } from './covers';
-import { allPromoCodes, dailyForCodes, sql, ticketTypesForCodes } from './hievents';
+import { allPromoCodes, dailyForCodes, sql, ticketTypesForCodes, waitlistForCodes } from './hievents';
+import { waitlistsFor } from './waitlist';
 import { recentEmails, sendEmail, purgeEmailLog } from './mail';
 import { emailTypes, getTemplate, languagesOf, renderEmail, resetTemplate, sampleVars, saveReplyTo, saveTemplate, type EmailType } from './email-templates';
 import { formatMoney, parseAmountCents, usualCommissionOn, type EventRule } from './money';
@@ -581,7 +582,8 @@ app.get('/p/:alias', async (c) => {
   await prepareShortLinks(owner, events.map((e) => ({ event: { id: e.event_id, title: e.title }, code: e.code })), { waitMs: 1000, page: true });
   // The same for everyone (no cookies are read or set here), so it can be kept briefly.
   c.header('Cache-Control', 'public, max-age=60');
-  return c.html(<PromoterPublicPage owner={owner} events={events} shareUrl={pageShortLink(owner) ?? pageLink(owner)!} />);
+  const waitlists = await waitlistsFor(events.map((e) => e.event_id), []);
+  return c.html(<PromoterPublicPage owner={owner} events={events} shareUrl={pageShortLink(owner) ?? pageLink(owner)!} waitlists={waitlists} />);
 });
 
 app.get('/p/:alias/avatar', async (c) => {
@@ -868,6 +870,7 @@ async function renderDashboard(c: Context<Env>, promoter: User, basePath: string
   const upcoming = summarizeEvents(data.rows, data.percent).filter((e) => (!e.end || e.end.getTime() >= Date.now()) && !e.draft);
   const withPage = basePath === '' && !promoter.page_hidden_at;
   await prepareShortLinks(promoter, upcoming.map((e) => ({ event: { id: e.id, title: e.title }, code: e.codes[0]! })), { page: withPage });
+  const waitlists = await waitlistsFor(upcoming.map((e) => e.id), await waitlistForCodes(data.codes));
   return c.html(
     <DashboardPage
       viewer={c.get('user')}
@@ -884,6 +887,7 @@ async function renderDashboard(c: Context<Env>, promoter: User, basePath: string
       banners={data.banners}
       pageLink={withPage ? (pageShortLink(promoter) ?? pageLink(promoter)) : null}
       deal={await generalDealInWords(promoter.id, currentLang())}
+      waitlists={waitlists}
     />,
   );
 }
@@ -920,6 +924,7 @@ async function renderEvent(c: Context<Env>, promoter: User, basePath: string) {
       banner={data.banners.get(eventId) ?? null}
       range={parseRange(c.req.query('range'), 'all')}
       payout={basePath === '' ? payoutSummary(promoter, data) : undefined}
+      waitlist={event.draft ? null : (await waitlistsFor([eventId], await waitlistForCodes(data.codes, eventId))).get(eventId)}
     />,
   );
 }
@@ -1658,6 +1663,7 @@ app.get('/admin/promoters/:id', async (c) => {
       rewardRequests={rewardRequestsFor(promoter.id)}
       rewards={data.rewards}
       ledger={ticketLedger(promoter.id, summarizeEvents(data.rows, data.percent), data.percent)}
+      waitlists={(await waitlistForCodes(data.codes)).map((w) => ({ ...w, title: data.rows.find((r) => r.event_id === w.event_id)?.event_title ?? `#${w.event_id}` }))}
       adjustments={adjustmentsFor(promoter.id)}
       teamLeads={teamLeads().filter((l) => l.id !== promoter.id)}
       team={teamMembers(promoter.id)}

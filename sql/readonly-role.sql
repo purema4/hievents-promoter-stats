@@ -19,9 +19,11 @@ GRANT SELECT (id, order_id, event_id, status, deleted_at, product_id, product_pr
 -- Ticket types (GA, VIP, a price tier like "Early bird"), for tickets sold by type.
 GRANT SELECT (id, title) ON products TO promoter_stats;
 GRANT SELECT (id, label) ON product_prices TO promoter_stats;
+-- Waitlists: how many joined with each promoter's code (no names or emails).
+GRANT SELECT (id, event_id, status, promo_code_id, deleted_at) ON waitlist_entries TO promoter_stats;
 
 -- To remove it later:
---   REVOKE ALL ON events, event_occurrences, promo_codes, orders, order_items, attendees, images, products, product_prices FROM promoter_stats;
+--   REVOKE ALL ON events, event_occurrences, promo_codes, orders, order_items, attendees, images, products, product_prices, waitlist_entries FROM promoter_stats;
 --   REVOKE ALL ON SCHEMA public FROM promoter_stats;
 --   DO $$ BEGIN EXECUTE format('REVOKE ALL ON DATABASE %I FROM promoter_stats', current_database()); END $$;
 --   DROP ROLE promoter_stats;

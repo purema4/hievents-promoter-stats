@@ -31,6 +31,7 @@ import { countPendingPayouts, type Balance, type PayoutRequest } from './payouts
 import { LinkField, PayoutHistory, RewardHistory } from './promoter-views';
 import { countPendingRewards, describeReward, type RewardRequest } from './rewards';
 import type { TicketPlan } from './reward-tickets';
+import type { WaitlistCounts } from './hievents';
 import { ANNOUNCEMENT_BODY_MAX, ANNOUNCEMENT_TITLE_MAX, unreadCount, type Announcement, type Notification } from './notifications';
 import { definitions, emailTypes, getReplyTo, getTemplate, isCustomized, languagesOf, type EmailType } from './email-templates';
 import type { EmailLogEntry } from './mail';
@@ -435,6 +436,8 @@ h3 { font-size: 15px; margin: 0 0 12px; }
 .unlocks li.ready { color: var(--text); font-weight: 600; }
 .unlocks li.ready::before { content: '●'; color: var(--ok); }
 .chip.warn { color: var(--warn); border-color: var(--warn); margin-left: 6px; }
+.chip.waitlist { color: var(--accent); border-color: var(--accent); margin-left: 6px; }
+.waitlist-joined { display: block; font-size: 13px; }
 .chip { display: inline-block; font-size: 12px; font-weight: 600; padding: 1px 8px; margin: 2px 0; border-radius: 999px; color: var(--ok); border: 1px solid var(--ok); }
 .reward-card { display: flex; gap: 16px; align-items: center; justify-content: space-between; margin-bottom: 20px; }
 .reward-card > div { flex: 1; }
@@ -2060,6 +2063,7 @@ export function PromoterPage(props: {
   rewardRequests: RewardRequest[];
   rewards: Rewards;
   ledger: EventTicketLedger[];
+  waitlists?: (WaitlistCounts & { title: string })[];
   adjustments: Adjustment[];
   teamLeads: User[];
   team: User[]; // their promoters, when they are a team lead
@@ -2319,6 +2323,34 @@ export function PromoterPage(props: {
       )}
 
       <TicketLedger promoter={p} ledger={props.ledger} bank={props.rewards.bank} />
+      {props.waitlists && props.waitlists.length > 0 && (
+        <>
+          <h2 id="waitlist">Waitlist with their codes</h2>
+          <div class="card table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Event</th>
+                  <th class="num">Waiting</th>
+                  <th class="num">Offered a spot</th>
+                  <th class="num">Bought</th>
+                </tr>
+              </thead>
+              <tbody>
+                {props.waitlists.map((w) => (
+                  <tr>
+                    <td>{w.title}</td>
+                    <td class="num">{w.waiting}</td>
+                    <td class="num">{w.offered}</td>
+                    <td class="num">{w.bought}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p class="muted">People who joined an event's waitlist from their link. A ticket bought from the waitlist carries their code, so it is already in their sales.</p>
+        </>
+      )}
 
       <h2 id="adjust">Adjust by hand</h2>
       <p class="muted">

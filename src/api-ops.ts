@@ -7,7 +7,8 @@ import type { ApiToken } from './api-tokens';
 import { rangeBounds, today, type Range } from './chart';
 import { rateFor, setEventRule } from './commission';
 import { config } from './config';
-import { allPromoCodes, dailyForCodes, statsForCodes } from './hievents';
+import { allPromoCodes, dailyForCodes, statsForCodes, waitlistForCodes } from './hievents';
+import { waitlistsFor } from './waitlist';
 import { leaderboard, type Sort } from './leaderboard';
 import { pageLink, setAlias, suggestAlias } from './links';
 import { codeOwners, codesFor, createUser, findUser, findUserByEmail, listUsers, normalizeCodes, setCodes, type User } from './local-db';
@@ -213,7 +214,7 @@ export const ops: Op[] = [
     name: 'get_promoter_stats',
     title: 'Promoter stats',
     description:
-      'A promoter\'s sales as on their dashboard: totals, each event (tickets sold, orders, sales at full price, commission), balances (earned, paid out, available to request), level, and the free tickets and merch they can request.',
+      'A promoter\'s sales as on their dashboard: totals, each event (tickets sold, orders, sales at full price, commission), balances (earned, paid out, available to request), level, the free tickets and merch they can request, and on upcoming events whether the waitlist is open and who joined it with their codes.',
     method: 'GET',
     path: '/stats',
     input: { properties: { promoter_id: promoterId } },
@@ -222,6 +223,10 @@ export const ops: Op[] = [
       const data = await promoterData(p);
       const events = summarizeEvents(data.rows, data.percent);
       const { level, next } = levelFor(data.rewards.totalSold);
+      const waitlists = await waitlistsFor(
+        events.filter((e) => !isOver(e.end) && !e.draft).map((e) => e.id),
+        await waitlistForCodes(data.codes),
+      );
       return {
         promoter: { id: p.id, name: p.name },
         codes: data.codes,
@@ -266,6 +271,9 @@ export const ops: Op[] = [
           bonus_cents: e.bonus,
           commission_rate: ((rate) => describeRule(rate.events.get(e.id) ?? rate.usual, e.currency))(rateFor(p)),
           media_drive: data.media.get(e.id) ?? null,
+          // Upcoming events: whether the waitlist is open, and who joined it with their codes. Their event link leads to it.
+          waitlist: ((w) =>
+            w ? { open: w.open, sold_out: w.soldOut, before_sale: w.beforeSale, waiting: w.waiting, offered: w.offered, bought: w.bought } : null)(waitlists.get(e.id)),
         })),
         rewards: {
           free_tickets: data.rewards.tickets.map((t) => ({

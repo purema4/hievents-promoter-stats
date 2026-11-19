@@ -257,6 +257,43 @@ async function canReadTicketTypes(): Promise<boolean> {
   return typesReadable.value;
 }
 
+let waitlistReadable: { value: boolean; at: number } | null = null;
+
+/** Whether waitlist entries record their promo code (Hi.Events with it) and the read-only role may read them. */
+async function canReadWaitlist(): Promise<boolean> {
+  if (waitlistReadable && Date.now() - waitlistReadable.at < 10 * 60 * 1000) return waitlistReadable.value;
+  const rows = await sql<{ ok: boolean }[]>`
+    SELECT EXISTS (
+      SELECT 1 FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = 'waitlist_entries' AND column_name = 'promo_code_id'
+    ) AND has_column_privilege('public.waitlist_entries', 'promo_code_id', 'SELECT')
+      AND has_column_privilege('public.waitlist_entries', 'status', 'SELECT') AS ok
+  `.catch(() => [{ ok: false }]);
+  waitlistReadable = { value: !!rows[0]?.ok, at: Date.now() };
+  return waitlistReadable.value;
+}
+
+/** People on an event's waitlist who joined with one of these codes: waiting, offered a spot, or who bought it. */
+export type WaitlistCounts = { event_id: number; waiting: number; offered: number; bought: number };
+
+export async function waitlistForCodes(codes: string[], eventId?: number): Promise<WaitlistCounts[]> {
+  if (codes.length === 0 || !(await canReadWaitlist())) return [];
+  return sql<WaitlistCounts[]>`
+    SELECT
+      w.event_id::int AS event_id,
+      count(*) FILTER (WHERE w.status = 'WAITING')::int AS waiting,
+      count(*) FILTER (WHERE w.status = 'OFFERED')::int AS offered,
+      count(*) FILTER (WHERE w.status = 'PURCHASED')::int AS bought
+    FROM waitlist_entries w
+    JOIN promo_codes pc ON pc.id = w.promo_code_id
+    JOIN events e ON e.id = w.event_id AND e.deleted_at IS NULL
+    WHERE lower(pc.code) = ANY(${codes}) AND w.deleted_at IS NULL ${accountFilter()}
+      ${eventId === undefined ? sql`` : sql`AND w.event_id = ${eventId}`}
+    GROUP BY 1
+    HAVING count(*) FILTER (WHERE w.status IN ('WAITING', 'OFFERED', 'PURCHASED')) > 0
+  `;
+}
+
 /** The upcoming events a promoter's public page lists: not ended, not deleted, and live when that is known. No sales figures. */
 export type EventCode = { event_id: number; title: string; start: Date | null; timezone: string | null; currency: string; code: string };
 

@@ -13,6 +13,7 @@ import type { DirectoryItem, DirectorySettings } from './directory';
 import { maxUploadBytes } from './images';
 import { lang, locale, plural, t } from './i18n';
 import { Avatar, cssVersion, Flash, Layout, PagesTabs } from './views';
+import type { WaitlistState } from './waitlist';
 
 // --- The public page, /p/<alias> -----------------------------------------------------------------
 
@@ -92,7 +93,7 @@ function PageFooter() {
   );
 }
 
-function PageEventCard(props: { owner: User; event: PageEvent; first: boolean }) {
+function PageEventCard(props: { owner: User; event: PageEvent; first: boolean; waitlist?: WaitlistState }) {
   const e = props.event;
   const ref = { id: e.event_id, title: e.title };
   const link = shareLink(props.owner, ref, e.code);
@@ -116,7 +117,13 @@ function PageEventCard(props: { owner: User; event: PageEvent; first: boolean })
       <span class="lp-when">{date ? `${date.when}${more}` : t('Date to be announced', 'Date à venir')}</span>
       {link ? (
         <span class="lp-cta">
-          <span>{t('Get tickets', 'Billets')}</span>
+          <span>
+            {props.waitlist?.waitlistOnly
+              ? t('Join the waitlist', 'Liste d’attente')
+              : props.waitlist?.soldOut
+                ? t('Sold out', 'Complet')
+                : t('Get tickets', 'Billets')}
+          </span>
           <span class="lp-cta-code">
             {t(`Code ${e.code} applied`, `Code ${e.code} appliqué`)}
             <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
@@ -142,7 +149,7 @@ function PageEventCard(props: { owner: User; event: PageEvent; first: boolean })
   );
 }
 
-export function PromoterPublicPage(props: { owner: User; events: PageEvent[]; shareUrl: string }) {
+export function PromoterPublicPage(props: { owner: User; events: PageEvent[]; shareUrl: string; waitlists?: Map<number, WaitlistState> }) {
   const { owner, events } = props;
   const avatar = avatarOf(owner);
   const instagram = instagramHandle(owner);
@@ -192,7 +199,7 @@ export function PromoterPublicPage(props: { owner: User; events: PageEvent[]; sh
         {events.length ? (
           <section class="lp-events" aria-label={t('Upcoming events', 'Événements à venir')}>
             {events.map((e, i) => (
-              <PageEventCard owner={owner} event={e} first={i === 0} />
+              <PageEventCard owner={owner} event={e} first={i === 0} waitlist={props.waitlists?.get(e.event_id)} />
             ))}
           </section>
         ) : (

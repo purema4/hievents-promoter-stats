@@ -35,6 +35,12 @@ CREATE TABLE product_prices (
   id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY, product_id bigint NOT NULL REFERENCES products, label varchar(255),
   deleted_at timestamp
 );
+-- Waitlists: who joined, with the promo code of the link they came from (Hi.Events with promo code waitlists).
+CREATE TABLE waitlist_entries (
+  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY, event_id bigint NOT NULL REFERENCES events, product_price_id bigint,
+  email varchar(255) NOT NULL, first_name varchar(255) NOT NULL, status varchar(50) NOT NULL, promo_code_id bigint,
+  deleted_at timestamp
+);
 CREATE TABLE attendees (
   id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY, order_id integer NOT NULL REFERENCES orders, event_id integer NOT NULL REFERENCES events,
   status varchar(20) NOT NULL, email varchar(255) NOT NULL DEFAULT 'guest@example.com', deleted_at timestamp,
@@ -103,3 +109,10 @@ INSERT INTO images (entity_id, entity_type, type, path) VALUES
   (1, 'HiEvents\DomainObjects\EventDomainObject', 'EVENT_COVER', 'event_cover/warehouse.png'),
   (2, 'HiEvents\DomainObjects\EventDomainObject', 'EVENT_COVER', 'event_cover/winter.png'),
   (4, 'HiEvents\DomainObjects\EventDomainObject', 'EVENT_COVER', 'event_cover/rooftop.png');
+
+-- Warehouse Night's waitlist: DJMAX brought 2 still waiting, 1 offered a spot, 1 who bought it and 1 who left;
+-- LUNA brought 1, and 1 came without a code.
+INSERT INTO waitlist_entries (event_id, email, first_name, status, promo_code_id)
+SELECT 1, 'wait' || n || '@example.com', 'Wait ' || n, s, (SELECT id FROM promo_codes WHERE code = c AND event_id = 1)
+FROM (VALUES (1, 'WAITING', 'DJMAX'), (2, 'WAITING', 'DJMAX'), (3, 'OFFERED', 'DJMAX'), (4, 'PURCHASED', 'DJMAX'),
+             (5, 'CANCELLED', 'DJMAX'), (6, 'WAITING', 'LUNA'), (7, 'WAITING', NULL)) AS w(n, s, c);

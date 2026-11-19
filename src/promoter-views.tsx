@@ -12,6 +12,7 @@ import { avatarOf } from './avatars';
 import { eventLink } from './links';
 import { linkClicks, shareLink } from './short-links';
 import { lang, locale, plural, t } from './i18n';
+import { waitlistLabel, type Waitlist } from './waitlist';
 
 export type EventSummary = {
   id: number;
@@ -460,6 +461,37 @@ function TicketTypesCard(props: { types: TicketTypeSales[] }) {
   );
 }
 
+/** "2 waiting · 1 offered · 3 bought on the waitlist with your code", or '' when nobody joined with it. */
+function waitlistInWords(w: Waitlist): string {
+  const parts = [
+    w.waiting && t(`${w.waiting} waiting`, `${w.waiting} en attente`),
+    w.offered && t(`${w.offered} offered a spot`, `${w.offered} avec une place offerte`),
+    w.bought && t(`${w.bought} bought`, `${w.bought} ${w.bought > 1 ? 'ont acheté' : 'a acheté'}`),
+  ].filter(Boolean);
+  return parts.length ? t(`Waitlist with your code: ${parts.join(' · ')}`, `Liste d’attente avec ton code : ${parts.join(' · ')}`) : '';
+}
+
+function WaitlistCard(props: { waitlist: Waitlist }) {
+  const w = props.waitlist;
+  const joined = waitlistInWords(w);
+  if (!w.open && !joined) return null;
+  return (
+    <div class="card waitlist-card">
+      <h2 class="first">{t('Waitlist', 'Liste d’attente')}</h2>
+      {w.open && (
+        <p>
+          <span class="chip waitlist">{waitlistLabel(w)}</span>{' '}
+          {t(
+            'Keep sharing your link: it takes people to the waitlist with your code. When a spot opens and they buy it, the ticket counts for you, with your discount.',
+            'Continue de partager ton lien : il mène à la liste d’attente avec ton code. Quand une place se libère et qu’ils l’achètent, le billet compte pour toi, avec ton rabais.',
+          )}
+        </p>
+      )}
+      {joined ? <p class="muted">{joined}</p> : <p class="muted">{t('Nobody has joined with your code yet.', 'Personne ne s’est encore inscrit avec ton code.')}</p>}
+    </div>
+  );
+}
+
 function EventCard(props: {
   event: EventSummary;
   href: string;
@@ -470,9 +502,12 @@ function EventCard(props: {
   banner?: string;
   daily?: DailySales[]; // this event's sales; past events do without the recent ones
   types?: TicketTypeSales[]; // this event's tickets by type
+  waitlist?: Waitlist; // its waitlist, when there is something to say
 }) {
   const e = props.event;
   const types = typesInWords(props.types ?? []);
+  const waitlist = props.waitlist ? waitlistLabel(props.waitlist) : '';
+  const joined = props.waitlist ? waitlistInWords(props.waitlist) : '';
   // Nothing sold yet: no chart of empty days, so these cards stay short.
   const daily = e.tickets > 0 || e.pending > 0 ? props.daily : undefined;
   return (
@@ -488,7 +523,9 @@ function EventCard(props: {
               {!props.copyCodes && !e.draft && e.codes.map((c) => <span class="code">{c}</span>)}
               {e.draft && <span class="chip warn">{t('Not on sale yet', 'Pas encore en vente')}</span>}
               {!!props.ready && <span class="chip">{t(`${props.ready} ready`, `${props.ready} à demander`)}</span>}
+              {!!waitlist && <span class={`chip${props.waitlist?.open ? ' waitlist' : ' warn'}`}>{waitlist}</span>}
             </span>
+            {!!joined && <span class="muted waitlist-joined">{joined}</span>}
           </span>
         </span>
         <span class="event-stats">
@@ -548,6 +585,7 @@ export function DashboardPage(props: {
   banners: Map<number, string>;
   pageLink?: string | null; // the promoter's public page (short link when there is one); none when hidden
   deal?: { name: string; words: string }[]; // their usual rule in words, for the level card
+  waitlists?: Map<number, Waitlist>;
 }) {
   const events = summarizeEvents(props.rows, props.percent);
   const upcoming = events.filter((e) => !isPast(e));
@@ -613,6 +651,7 @@ export function DashboardPage(props: {
                   banner={props.banners.get(e.id)}
                   daily={props.daily.filter((d) => d.event_id === e.id)}
                   types={props.types.filter((x) => x.event_id === e.id)}
+                  waitlist={props.waitlists?.get(e.id)}
                 />
               ))}
             </div>
@@ -692,6 +731,7 @@ export function EventPage(props: {
   deal?: { lang: 'en' | 'fr'; lines: string[]; result: string };
   /** Their payout, when there is one to ask for (their own view only). */
   payout?: { amountCents: number; currency: string };
+  waitlist?: Waitlist | null;
 }) {
   const events = summarizeEvents(props.rows, props.percent);
   const index = events.findIndex((e) => e.id === props.eventId);
@@ -813,6 +853,8 @@ export function EventPage(props: {
           </>
         )}
       </div>
+
+      {props.waitlist && !isPast(e) && <WaitlistCard waitlist={props.waitlist} />}
 
       {props.media && (
         <div class="card reward-card media-card">
