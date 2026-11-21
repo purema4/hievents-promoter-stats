@@ -1317,6 +1317,7 @@ function renderCheckout(
       includePayout={options.includePayout}
       waiting={payoutWaiting(data)}
       left={options.left}
+      bank={data.rewards.bank}
       notice={checkoutNotice()}
       error={options.error}
     />,

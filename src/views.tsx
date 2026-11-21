@@ -673,6 +673,14 @@ ${chartCss}
 .bank-card { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 6%, var(--surface)); }
 /* The bank: a thick outline with BANK written on it, at checkout and in the shop. */
 .bank-box { position: relative; border: 3px solid var(--accent); background: color-mix(in srgb, var(--accent) 6%, var(--surface)); margin-top: 18px; padding-top: 26px; overflow: visible; }
+.bank-total { margin: 4px 0 10px; padding: 10px 14px; border-radius: 10px; background: color-mix(in srgb, var(--accent) 12%, var(--surface)); }
+.bank-total-head { margin: 0 0 2px; font-size: 13px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; opacity: 0.8; }
+.checkout-bank .checkout-lines { margin-top: 12px; }
+.bank-total-n { font-size: 18px; font-weight: 650; }
+.bank-total-n .big { font-size: 34px; font-weight: 800; color: var(--accent); font-variant-numeric: tabular-nums; line-height: 1; }
+.bank-total-types { font-weight: 600; margin-top: 2px; }
+.checkout-bank { margin: 28px 0 16px; }
+.checkout-bank p.muted { margin: 4px 0 0; }
 .bank-label { position: absolute; top: -17px; left: 14px; padding: 2px 14px; border-radius: 999px; background: var(--accent); color: var(--accent-text); font-size: 20px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; line-height: 1.4; }
 table.shop-table { width: 100%; }
 table.shop-table td { vertical-align: middle; padding: 12px 8px; }

@@ -4,7 +4,7 @@ import type { CodeStats, DailySales, TicketEvent, TicketTypeSales } from './hiev
 import type { User } from './local-db';
 import { eventBonus, eventCommission, formatMoney, splitCommission, toCents, totalsByCurrency, type Rate, type Totals } from './money';
 import { type Balance, type PayoutRequest } from './payouts';
-import { describeReward, levelFor, type RewardRequest, type Rewards, type TicketReward } from './rewards';
+import { describeReward, levelFor, type BankBalance, type RewardRequest, type Rewards, type TicketReward } from './rewards';
 import { describeTrack, rewardRules, trackOn } from './reward-rules';
 import { describeAdjustment, type Adjustment } from './adjustments';
 import { Avatar, Banner, Flash, formatDate, Layout, LevelBadge } from './views';
@@ -1140,8 +1140,8 @@ function RewardsShop(props: { rewards: Rewards; ticketEvents: TicketEvent[]; pro
           {bank.length > 0 && (
             <div class="card shop-event-card bank-card bank-box">
               <BankLabel />
-              <h3 class="first">{t('Saved for another event', 'Gardés pour un autre événement')}</h3>
-              <p class="muted">{t('Kept until you use them, on any upcoming event. Their type stays.', 'Gardées jusqu’à ce que tu les utilises, pour n’importe quel événement à venir. Leur type reste le même.')}</p>
+              <BankTotal bank={bank} />
+              <p class="muted">{t('Saved for another event: kept until you use them, on any upcoming event. Their type stays.', 'Gardés pour un autre événement : ils t’attendent jusqu’à ce que tu les utilises, pour n’importe quel événement à venir. Leur type reste le même.')}</p>
               <table class="shop-table">
                 <tbody>
                   {bank.map((b) => (
@@ -1396,6 +1396,30 @@ const BankLabel = () => (
   </span>
 );
 
+/**
+ * The bank's subsection with how many tickets are available in it, in big: "6 tickets available", then by type ("4 × GA · 2 × VIP")
+ * and the ones still waiting for the team to put them in.
+ */
+function BankTotal(props: { bank: BankBalance[] }) {
+  const total = props.bank.reduce((n, b) => n + b.balance, 0);
+  const pending = props.bank.reduce((n, b) => n + b.pending, 0);
+  const held = props.bank.filter((b) => b.balance > 0);
+  return (
+    <div class="bank-total" data-bank-total={String(total)}>
+      <h4 class="bank-total-head">{t('Available in your bank', 'Disponibles dans ta banque')}</h4>
+      <div class="bank-total-n">
+        <span class="big">{total}</span> {t(total === 1 ? 'ticket available' : 'tickets available', total > 1 ? 'billets disponibles' : 'billet disponible')}
+      </div>
+      {held.length > 0 && <div class="bank-total-types">{held.map((b) => `${b.balance} × ${typeName(b.type)}`).join(' · ')}</div>}
+      {pending > 0 && (
+        <div class="muted">
+          {t(`+ ${plural(pending, ['ticket', 'billet'], ['tickets', 'billets'])} waiting for the team to put them in`, `+ ${plural(pending, ['ticket', 'billet'], ['tickets', 'billets'])} en attente que l’équipe les mette en banque`)}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** A checkout count: a list of 0…max, drawn by app.js as the shop's − n + pill (it works without scripts). */
 function QtyPick(props: { name: string; max: number; value: number; label: string }) {
   return (
@@ -1444,8 +1468,91 @@ export function CheckoutPage(props: {
   includePayout: boolean;
   waiting?: string; // a payout already waiting for the team, like "$40.00"
   left?: boolean; // some rewards are picked in the shop (guest list names, merch)
+  bank?: BankBalance[]; // what is in their bank, shown above the rewards
 }) {
   const p = props.payout;
+  const bank = props.bank ?? [];
+  const bankLines = props.lines.filter((l) => l.fromBank);
+  const otherLines = props.lines.filter((l) => !l.fromBank);
+  const line = (l: CartLine) => (
+    <div class="card checkout-line">
+      {l.field && l.max && l.saved !== undefined ? (
+        // An event's reward: how many for that event, and next to it how many to save for later.
+        // Together they stay within what is available (app.js moves one over when needed).
+        <div class="checkout-qtys" data-qty-total={String(l.max)}>
+          <div class="qty-choice">
+            <QtyPick name={`qty.${l.field}`} max={l.max} value={l.quantity} label={t(`How many for ${l.event?.title}: ${l.type ? typeName(l.type) : ''}`, `Combien pour ${l.event?.title} : ${l.type ? typeName(l.type) : ''}`)} />
+            <span class="qty-caption">{t('For this event', 'Pour cet événement')}</span>
+          </div>
+          <div class="qty-choice bank">
+            <QtyPick name={`save.${l.field}`} max={l.max} value={l.saved} label={t(`How many to save for another event: ${l.type ? typeName(l.type) : ''}`, `Combien garder pour un autre événement : ${l.type ? typeName(l.type) : ''}`)} />
+            <span class="qty-caption">{t('Save for another event', 'Garder pour un autre événement')}</span>
+          </div>
+        </div>
+      ) : l.field && l.max ? (
+        <QtyPick name={`qty.${l.field}`} max={l.max} value={l.quantity} label={t(`How many: ${l.merch !== undefined ? 'Merch' : l.type ? typeName(l.type) : ''}`, `Combien : ${l.merch !== undefined ? 'Merch' : l.type ? typeName(l.type) : ''}`)} />
+      ) : (
+        <div class="checkout-qty">{l.quantity} ×</div>
+      )}
+      <div class="checkout-body">
+        <div class="checkout-type">{l.merch !== undefined ? t('Merch', 'Merch') : l.type ? typeName(l.type) : ''}</div>
+        {l.type && typeWhat(l.type) && <p class="shop-what">{typeWhat(l.type)}</p>}
+        <dl class="checkout-facts">
+          {l.merch !== undefined ? (
+            <>
+              <dt>{t('What', 'Quoi')}</dt>
+              <dd>{l.merch || '—'}</dd>
+            </>
+          ) : l.fromBank ? (
+            // From their bank: on any upcoming event, picked here.
+            <>
+              <dt>{t('From', 'De')}</dt>
+              <dd>
+                {t('Your bank', 'Ta banque')}{' '}
+                <strong>{t(`· ${l.max ?? 0} saved`, `· ${l.max ?? 0} gardé${(l.max ?? 0) > 1 ? 's' : ''}`)}</strong>
+              </dd>
+              <dt>{t('Event', 'Événement')}</dt>
+              <dd>
+                {l.events && l.events.length > 0 ? (
+                  <select name={`event.${l.field}`} aria-label={t('For which event', 'Pour quel événement')}>
+                    {l.events.map((e) => (
+                      <option value={String(e.id)} selected={e.id === l.eventId}>
+                        {e.title}
+                        {e.start ? ` · ${formatDate(e.start, e.timezone ?? null)}` : ''}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <strong>{l.event?.title}</strong>
+                )}
+              </dd>
+              <dt>{t('For', 'Pour')}</dt>
+              <dd class="who-strong">{l.who}</dd>
+            </>
+          ) : (
+            // An event's reward: who gets the ones for this event; the saved ones wait for a later one.
+            <>
+              <dt>{t('Event', 'Événement')}</dt>
+              <dd>
+                <strong>{l.event?.title}</strong>
+                {l.event?.start ? ` · ${formatDate(l.event.start, l.event.timezone ?? null)}` : ''}
+              </dd>
+              <dt data-when-used hidden={!l.quantity}>{t('For', 'Pour')}</dt>
+              <dd class="who-strong" data-when-used hidden={!l.quantity}>
+                {l.who}
+              </dd>
+              <dd class="muted bank-note" data-when-banked hidden={!l.saved}>
+                {t(
+                  `Saved for another event: the team confirms it; then they wait for any later event, still ${l.type ? typeName(l.type) : ''}.`,
+                  `Gardés pour un autre événement : l’équipe confirme; ensuite, ils t’attendent pour n’importe quel prochain événement, toujours en ${l.type ? typeName(l.type) : ''}.`,
+                )}
+              </dd>
+            </>
+          )}
+        </dl>
+      </div>
+    </div>
+  );
   const nothing = !p && props.lines.length === 0;
   return (
     <Layout title={t('Your request', 'Ta demande')} user={props.user}>
@@ -1542,86 +1649,21 @@ export function CheckoutPage(props: {
           )}
 
           <h2>{t('Rewards', 'Récompenses')}</h2>
-          {props.lines.length === 0 && <p class="muted">{t('No reward ready to ask for.', 'Aucune récompense prête à demander.')}</p>}
-          <div class="checkout-lines">
-            {props.lines.map((l) => (
-              <div class={`card checkout-line${l.fromBank ? ' bank-box' : ''}`}>
-                {l.fromBank && <BankLabel />}
-                {l.field && l.max && l.saved !== undefined ? (
-                  // An event's reward: how many for that event, and next to it how many to save for later.
-                  // Together they stay within what is available (app.js moves one over when needed).
-                  <div class="checkout-qtys" data-qty-total={String(l.max)}>
-                    <div class="qty-choice">
-                      <QtyPick name={`qty.${l.field}`} max={l.max} value={l.quantity} label={t(`How many for ${l.event?.title}: ${l.type ? typeName(l.type) : ''}`, `Combien pour ${l.event?.title} : ${l.type ? typeName(l.type) : ''}`)} />
-                      <span class="qty-caption">{t('For this event', 'Pour cet événement')}</span>
-                    </div>
-                    <div class="qty-choice bank">
-                      <QtyPick name={`save.${l.field}`} max={l.max} value={l.saved} label={t(`How many to save for another event: ${l.type ? typeName(l.type) : ''}`, `Combien garder pour un autre événement : ${l.type ? typeName(l.type) : ''}`)} />
-                      <span class="qty-caption">{t('Save for another event', 'Garder pour un autre événement')}</span>
-                    </div>
-                  </div>
-                ) : l.field && l.max ? (
-                  <QtyPick name={`qty.${l.field}`} max={l.max} value={l.quantity} label={t(`How many: ${l.merch !== undefined ? 'Merch' : l.type ? typeName(l.type) : ''}`, `Combien : ${l.merch !== undefined ? 'Merch' : l.type ? typeName(l.type) : ''}`)} />
-                ) : (
-                  <div class="checkout-qty">{l.quantity} ×</div>
-                )}
-                <div class="checkout-body">
-                  <div class="checkout-type">{l.merch !== undefined ? t('Merch', 'Merch') : l.type ? typeName(l.type) : ''}</div>
-                  {l.type && typeWhat(l.type) && <p class="shop-what">{typeWhat(l.type)}</p>}
-                  <dl class="checkout-facts">
-                    {l.merch !== undefined ? (
-                      <>
-                        <dt>{t('What', 'Quoi')}</dt>
-                        <dd>{l.merch || '—'}</dd>
-                      </>
-                    ) : l.fromBank ? (
-                      // From their bank: on any upcoming event, picked here.
-                      <>
-                        <dt>{t('From', 'De')}</dt>
-                        <dd>{t('Your saved tickets', 'Tes billets gardés')}</dd>
-                        <dt>{t('Event', 'Événement')}</dt>
-                        <dd>
-                          {l.events && l.events.length > 0 ? (
-                            <select name={`event.${l.field}`} aria-label={t('For which event', 'Pour quel événement')}>
-                              {l.events.map((e) => (
-                                <option value={String(e.id)} selected={e.id === l.eventId}>
-                                  {e.title}
-                                  {e.start ? ` · ${formatDate(e.start, e.timezone ?? null)}` : ''}
-                                </option>
-                              ))}
-                            </select>
-                          ) : (
-                            <strong>{l.event?.title}</strong>
-                          )}
-                        </dd>
-                        <dt>{t('For', 'Pour')}</dt>
-                        <dd class="who-strong">{l.who}</dd>
-                      </>
-                    ) : (
-                      // An event's reward: who gets the ones for this event; the saved ones wait for a later one.
-                      <>
-                        <dt>{t('Event', 'Événement')}</dt>
-                        <dd>
-                          <strong>{l.event?.title}</strong>
-                          {l.event?.start ? ` · ${formatDate(l.event.start, l.event.timezone ?? null)}` : ''}
-                        </dd>
-                        <dt data-when-used hidden={!l.quantity}>{t('For', 'Pour')}</dt>
-                        <dd class="who-strong" data-when-used hidden={!l.quantity}>
-                          {l.who}
-                        </dd>
-                        <dd class="muted bank-note" data-when-banked hidden={!l.saved}>
-                          {t(
-                            `Saved for another event: the team confirms it; then they wait for any later event, still ${l.type ? typeName(l.type) : ''}.`,
-                            `Gardés pour un autre événement : l’équipe confirme; ensuite, ils t’attendent pour n’importe quel prochain événement, toujours en ${l.type ? typeName(l.type) : ''}.`,
-                          )}
-                        </dd>
-                      </>
-                    )}
-                  </dl>
-                </div>
-              </div>
-            ))}
-          </div>
+          {props.lines.length === 0 && bank.length === 0 && <p class="muted">{t('No reward ready to ask for.', 'Aucune récompense prête à demander.')}</p>}
+          <div class="checkout-lines">{otherLines.map(line)}</div>
+          {(bank.length > 0 || bankLines.length > 0) && (
+            // The bank, in one box: how many tickets are available in it, then the ones to use now.
+            <div class="card bank-box checkout-bank">
+              <BankLabel />
+              <BankTotal bank={bank} />
+              <p class="muted">
+                {bankLines.length > 0
+                  ? t('Pick how many to use, and for which event. The rest stay in your bank.', 'Choisis combien en utiliser, et pour quel événement. Les autres restent dans ta banque.')
+                  : t('Kept until you use them, on any upcoming event.', 'Gardés jusqu’à ce que tu les utilises, pour n’importe quel événement à venir.')}
+              </p>
+              {bankLines.length > 0 && <div class="checkout-lines">{bankLines.map(line)}</div>}
+            </div>
+          )}
           <p class="muted">
             {props.left
               ? t('Guest list spots and merch are picked in the shop: ', 'Les places sur la liste d’invités et le merch se choisissent dans la boutique : ')

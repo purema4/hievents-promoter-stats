@@ -321,13 +321,17 @@ describeIntegration('rewards shop', () => {
     // The promoter finds it in their shop, for any upcoming event, and is told.
     const shop = await p.client.page('/payouts');
     expect(text(shop)).toContain('Saved for another event');
+    // How many are in it, in big.
+    expect(text(shop)).toContain('Available in your bank 1 ticket available');
+    expect(text(shop)).toContain('1 × Free ticket');
     expect(shop).toContain('name="qty.bank.free_tickets"');
     expect(text(await p.client.page('/notifications'))).toContain('1 free ticket saved for another event');
     // At checkout from an event page: the bank is there too, at 0, set to that event.
     const checkout = await p.client.page('/rewards/checkout?event=1');
     expect(checkout).toContain('<select name="qty.bank.free_tickets"');
     expect(checkout).toMatch(/name="event\.bank\.free_tickets"[\s\S]*?<option value="1" selected="">Warehouse Night/);
-    expect(text(checkout)).toContain('Your saved tickets');
+    expect(text(checkout)).toContain('Available in your bank 1 ticket available');
+    expect(text(checkout)).toContain('Your bank · 1 saved');
     expect(text(checkout)).not.toContain('saved rewards are picked in the shop');
     // Used on another upcoming event, picked right there.
     expect(location(await p.client.post('/rewards/order', { 'qty.bank.free_tickets': '1', 'event.bank.free_tickets': '2', ack: '1' }))).toBe('/payouts?ok=reward_ordered#rewards');
